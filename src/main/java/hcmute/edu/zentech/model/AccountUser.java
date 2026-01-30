@@ -5,23 +5,28 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "employees")
+@Table(name = "account_users")
 @NoArgsConstructor
 @AllArgsConstructor
 @Data
-public class Employee {
+public class AccountUser {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(name = "account_id")
     private UUID id;
 
-    private String fullName;
+    private String email;
 
-    private String imageUrl;
+    private String password;
 
-    @OneToOne(cascade = CascadeType.ALL)
-    @JoinColumn(name = "account_id", referencedColumnName = "account_id")
-    private AccountUser userInfo;
+    @Enumerated(EnumType.STRING)
+    private Role role;
+
+    private boolean isActive;
+
+    private Instant createdAt;
 }
