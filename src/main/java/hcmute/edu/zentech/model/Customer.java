@@ -25,11 +25,11 @@ public class Customer {
     @JoinColumn(name = "customer_id")
     private Set<Address> addressList;
 
-    @OneToOne(cascade = CascadeType.ALL)
+    @OneToOne
     @JoinColumn(name = "account_id", referencedColumnName = "account_id", nullable = false, unique = true)
     private AccountUser userInfo;
 
-    @OneToOne(cascade = CascadeType.REMOVE)
-    @JoinColumn(name = "cart_id", referencedColumnName = "cart_id", nullable = false, unique = true)
+    @OneToOne(cascade = CascadeType.REMOVE, optional = true)
+    @JoinColumn(name = "cart_id", referencedColumnName = "cart_id", nullable = true, unique = true)
     private Cart cart;
 }

@@ -57,13 +57,11 @@ public class AuthService {
                 .role(Role.CUSTOMER)
                 .isActive(true)
                 .build();
-        user = userRepository.save(user);
 
-        Cart cart = cartRepository.save(new Cart());
+        user = userRepository.save(user);
 
         Customer customer = Customer.builder()
                 .userInfo(user)
-                .cart(cart)
                 .fullName(request.getFullName() != null ? request.getFullName() : "Khách hàng mới")
                 .build();
         customerRepository.save(customer);
@@ -105,10 +103,8 @@ public class AuthService {
                     .build();
             user = userRepository.save(user);
 
-            Cart cart = cartRepository.save(new Cart());
             Customer customer = Customer.builder()
                     .userInfo(user)
-                    .cart(cart)
                     .fullName(name != null ? name : "Người dùng Google")
                     .build();
             customerRepository.save(customer);
@@ -130,7 +126,7 @@ public class AuthService {
         // 2. Lưu token vào DB, set thời gian hết hạn là 10 phút tính từ bây giờ
         PasswordResetToken tokenEntity = PasswordResetToken.builder()
                 .token(resetTokenString)
-                .user(user) // Model của bạn xài biến tên là user
+                .user(user)
                 .expiryDate(java.time.Instant.now().plus(java.time.Duration.ofMinutes(10)))
                 .build();
         resetTokenRepository.save(tokenEntity);
