@@ -65,10 +65,10 @@ public class R2StorageService {
     }
 
     /**
-     * Delete Image
+     * Delete File
      * @param fileKey : file key
      * */
-    public void deleteImage(String fileKey) {
+    public void deleteFile(String fileKey) {
         try {
             DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
                     .bucket(bucketName)
@@ -76,9 +76,9 @@ public class R2StorageService {
                     .build();
 
             s3Client.deleteObject(deleteObjectRequest);
-            log.info("Đã dọn dẹp thành công ảnh cũ trên R2: {}", fileKey);
+            log.info("Đã dọn dẹp thành công file cũ trên R2: {}", fileKey);
         } catch (Exception e) {
-            log.error("Lỗi khi xóa ảnh trên R2 với key [{}]: {}", fileKey, e.getMessage(), e);
+            log.error("Lỗi khi xóa file trên R2 với key [{}]: {}", fileKey, e.getMessage(), e);
         }
     }
 }
