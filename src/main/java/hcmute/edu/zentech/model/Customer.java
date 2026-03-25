@@ -1,18 +1,18 @@
 package hcmute.edu.zentech.model;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 
 import java.util.Set;
 import java.util.UUID;
 
 @Entity
 @Table(name = "customers")
+@Getter
+@Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Data
 public class Customer {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -25,11 +25,11 @@ public class Customer {
     @JoinColumn(name = "customer_id")
     private Set<Address> addressList;
 
-    @OneToOne(cascade = CascadeType.ALL)
+    @OneToOne
     @JoinColumn(name = "account_id", referencedColumnName = "account_id", nullable = false, unique = true)
     private AccountUser userInfo;
 
-    @OneToOne(cascade = CascadeType.REMOVE)
-    @JoinColumn(name = "cart_id", referencedColumnName = "cart_id", nullable = false, unique = true)
+    @OneToOne(cascade = CascadeType.REMOVE, optional = true)
+    @JoinColumn(name = "cart_id", referencedColumnName = "cart_id", nullable = true, unique = true)
     private Cart cart;
 }
