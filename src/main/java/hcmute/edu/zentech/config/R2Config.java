@@ -23,38 +23,34 @@ public class R2Config {
     @Value("${cloudflare.r2.endpoint}")
     private String endpoint;
 
-    @Bean
-    public S3Presigner s3Presigner() {
-        AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKey, secretKey);
+    private AwsBasicCredentials getCredentials() {
+        return AwsBasicCredentials.create(accessKey, secretKey);
+    }
 
-        // Fix lỗi 403 của Cloudflare R2
-        S3Configuration serviceConfiguration = S3Configuration.builder()
+    private S3Configuration getS3Configuration() {
+        return S3Configuration.builder()
                 .pathStyleAccessEnabled(true)
                 .chunkedEncodingEnabled(false)
                 .build();
+    }
 
+    @Bean
+    public S3Presigner s3Presigner() {
         return S3Presigner.builder()
                 .endpointOverride(URI.create(endpoint))
-                .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .credentialsProvider(StaticCredentialsProvider.create(getCredentials()))
                 .region(Region.of("auto"))
-                .serviceConfiguration(serviceConfiguration)
+                .serviceConfiguration(getS3Configuration())
                 .build();
     }
 
     @Bean
     public S3Client s3Client() {
-        AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKey, secretKey);
-
-        S3Configuration serviceConfiguration = S3Configuration.builder()
-                .pathStyleAccessEnabled(true)
-                .chunkedEncodingEnabled(false)
-                .build();
-
         return S3Client.builder()
                 .endpointOverride(URI.create(endpoint))
-                .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .credentialsProvider(StaticCredentialsProvider.create(getCredentials()))
                 .region(Region.of("auto"))
-                .serviceConfiguration(serviceConfiguration)
+                .serviceConfiguration(getS3Configuration())
                 .build();
     }
 }
