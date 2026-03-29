@@ -30,4 +30,13 @@ public class ProductCategoryService {
         }
         return productCategoryRepository.save(newCategory);
     }
+
+    // find Category by short Name
+    public ProductCategory findCategoryByShortName(String shortName) {
+        ProductCategory productCategory = productCategoryRepository.findCategoryByShortName(shortName);
+        if (productCategory == null) {
+            throw new ResourceNotFoundException("Product Category", "shortName", shortName);
+        }
+        return productCategory;
+    };
 }

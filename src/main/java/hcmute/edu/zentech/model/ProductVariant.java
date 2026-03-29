@@ -20,7 +20,7 @@ public class ProductVariant {
     private UUID id;
 
     private double originalPrice;
-    private double salePrice;
+    private Double salePrice;
 
     // Toàn bộ các field biến thể có thể null hoặc không?
     private String name; // Tên biến thể nếu có.

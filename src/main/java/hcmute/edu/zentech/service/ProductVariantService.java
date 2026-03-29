@@ -7,8 +7,6 @@ import hcmute.edu.zentech.repository.ProductVariantRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
-
 @Service
 @RequiredArgsConstructor
 public class ProductVariantService {
