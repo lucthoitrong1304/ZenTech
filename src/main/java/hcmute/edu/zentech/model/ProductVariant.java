@@ -12,6 +12,7 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class ProductVariant {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -20,6 +21,12 @@ public class ProductVariant {
 
     private double originalPrice;
     private double salePrice;
+
+    // Toàn bộ các field biến thể có thể null hoặc không?
+    private String name; // Tên biến thể nếu có.
+    private String nameColor; // Màu sắc biến thể.
+    private String urlImg; // Ảnh biến thể
+    private String colorCode; // Mã màu của biến thể.
 
     private Instant saleStartAt;
     private Instant saleEndAt;

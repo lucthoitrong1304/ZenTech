@@ -1,5 +1,6 @@
 package hcmute.edu.zentech.exception;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -10,35 +11,42 @@ import java.util.HashMap;
 import java.util.Map;
 
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
-    // 1. Hứng các lỗi logic nghiệp vụ do mình tự ném ra (RuntimeException)
+    // Hàm helper dùng chung để build định dạng JSON trả về
+    private ResponseEntity<Map<String, Object>> buildErrorResponse(HttpStatus status, String error, String message) {
+        Map<String, Object> errorResponse = new HashMap<>();
+        errorResponse.put("timestamp", LocalDateTime.now());
+        errorResponse.put("status", status.value());
+        errorResponse.put("error", error);
+        errorResponse.put("message", message);
+
+        return new ResponseEntity<>(errorResponse, status);
+    }
+
+    // Hứng các lỗi logic nghiệp vụ do mình tự ném ra (RuntimeException)
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, Object>> handleRuntimeException(RuntimeException ex) {
-        Map<String, Object> errorResponse = new HashMap<>();
-        errorResponse.put("timestamp", LocalDateTime.now());
-        errorResponse.put("status", HttpStatus.BAD_REQUEST.value()); // Mã 400
-        errorResponse.put("error", "Bad Request");
-        errorResponse.put("message", ex.getMessage()); // Lấy câu thông báo lỗi của mình
-
-        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+        log.warn("Lỗi nghiệp vụ (400): {}", ex.getMessage());
+        return buildErrorResponse(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage());
     }
 
-    // 2. Hứng các lỗi hệ thống không lường trước được (Exception chung)
+    // Xử lý lỗi khi không tìm thấy
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleResourceNotFound(ResourceNotFoundException ex) {
+        log.warn("Không tìm thấy tài nguyên (404): {}", ex.getMessage());
+        return buildErrorResponse(HttpStatus.NOT_FOUND, "Not Found", ex.getMessage());
+    }
+
+    // Hứng các lỗi hệ thống không lường trước được (Exception chung)
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGlobalException(Exception ex) {
-        Map<String, Object> errorResponse = new HashMap<>();
-        errorResponse.put("timestamp", LocalDateTime.now());
-        errorResponse.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value()); // Mã 500
-        errorResponse.put("error", "Internal Server Error");
-        errorResponse.put("message", "Đã xảy ra lỗi trên máy chủ. Vui lòng thử lại sau!");
-
-        // Console log để dev biết mà fix
-        ex.printStackTrace();
-
-        return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+        log.error("Đã xảy ra lỗi hệ thống nghiêm trọng (500): ", ex);
+        return buildErrorResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Internal Server Error",
+                "Đã xảy ra lỗi trên máy chủ. Vui lòng thử lại sau!"
+        );
     }
-
-    // Sau này khi làm Form Validation (kiểm tra email, password độ dài bao nhiêu...),
-    // tụi mình sẽ thêm hàm hứng lỗi Validation vào đây nữa là trọn bộ.
 }

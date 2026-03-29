@@ -27,4 +27,8 @@ public class ProductReview {
 
     @OneToMany(mappedBy = "productReview", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<ReviewImage> imageList;
+
+    @ManyToOne
+    @JoinColumn(name = "customer_id", nullable = false)
+    private Customer customer;
 }
