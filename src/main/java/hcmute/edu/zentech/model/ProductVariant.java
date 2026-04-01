@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -22,11 +24,19 @@ public class ProductVariant {
     private double originalPrice;
     private Double salePrice;
 
-    // Toàn bộ các field biến thể có thể null hoặc không?
-    private String name; // Tên biến thể nếu có.
-    private String nameColor; // Màu sắc biến thể.
-    private String urlImg; // Ảnh biến thể
-    private String colorCode; // Mã màu của biến thể.
+    private String name;
+    private String nameColor;
+    private String colorCode;
+
+    @Builder.Default
+    @ElementCollection
+    @CollectionTable(
+            name = "product_variant_images",
+            joinColumns = @JoinColumn(name = "product_variant_id")
+    )
+    @Column(name = "image_url", length = 1000)
+    @OrderColumn(name = "image_order")
+    private List<String> imageUrls = new ArrayList<>();
 
     private Instant saleStartAt;
     private Instant saleEndAt;
