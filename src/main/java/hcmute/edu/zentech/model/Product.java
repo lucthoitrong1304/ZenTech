@@ -2,7 +2,10 @@ package hcmute.edu.zentech.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
 
+import java.time.Instant;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
@@ -10,7 +13,8 @@ import java.util.UUID;
 @Table(name = "products")
 @NoArgsConstructor
 @AllArgsConstructor
-@Data
+@Getter
+@Setter
 @Builder
 public class Product {
     @Id
@@ -29,16 +33,28 @@ public class Product {
 
     private String supportInfo;
 
-    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
-    private Set<ImageProduct> imageList;
+    @CreationTimestamp
+    @Column(updatable = false)
+    private Instant createdAt;
 
+    @Builder.Default
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
-    private Set<ProductReview> reviewList;
+    private Set<ImageProduct> imageList = new HashSet<>();
 
+    @Builder.Default
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
-    private Set<ProductVariant> variants;
+    private Set<ProductReview> reviewList = new HashSet<>();
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "category_id", nullable = false)
-    private ProductCategory category;
+    @Builder.Default
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<ProductVariant> variants = new HashSet<>();
+
+    @Singular("category")
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "product_category_mapping",
+            joinColumns = @JoinColumn(name = "product_id"),
+            inverseJoinColumns = @JoinColumn(name = "category_id")
+    )
+    private Set<ProductCategory> categories = new HashSet<>();
 }

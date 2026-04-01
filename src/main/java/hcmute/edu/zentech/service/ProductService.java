@@ -41,7 +41,7 @@ public class ProductService {
         product.setCompatibility(compatibility);
         product.setBoxContents(boxContents);
         product.setSupportInfo(supportInfo);
-        product.setCategory(category);
+        product.setCategories(new HashSet<>(Set.of(category)));
 
         // 3. Xử lý danh sách biến thể
         if (variantDataList != null && !variantDataList.isEmpty()) {
