@@ -21,6 +21,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -56,6 +57,7 @@ public class AuthService {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(Role.CUSTOMER)
                 .isActive(true)
+                .createdAt(Instant.now())
                 .build();
 
         user = userRepository.save(user);
@@ -100,6 +102,7 @@ public class AuthService {
                     .password(passwordEncoder.encode("GOOGLE_SSO_" + UUID.randomUUID().toString()))
                     .role(Role.CUSTOMER)
                     .isActive(true)
+                    .createdAt(Instant.now())
                     .build();
             user = userRepository.save(user);
 
