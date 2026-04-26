@@ -33,6 +33,7 @@ Request
 - mapper: convert Entity ↔ DTO
 - model: contains all Entities and Enums
 - repository: database access layer
+  - repository/projection: interface-based projections for optimized queries
 - security: authentication & authorization (JWT, filter, security config)
 - service: business logic layer
 
@@ -52,10 +53,10 @@ Request
 
 - Use @Valid for request validation
 - Only:
-    - receive request
-    - validate input
-    - call service
-    - return response
+  - receive request
+  - validate input
+  - call service
+  - return response
 
 Forbidden:
 - No business logic
@@ -67,8 +68,8 @@ Forbidden:
 
 - Contains ALL business logic
 - Can:
-    - call repository
-    - call other services
+  - call repository
+  - call other services
 
 Must:
 - Return DTO (NOT Entity)
@@ -82,11 +83,21 @@ Must:
 
 ---
 
-## 8. Model Rules
+## 8. Projection Rules
+
+- Use Interface-based Projections for specific/aggregated queries
+- Location: MUST be placed inside `repository/projection`
+- Do NOT place in `dto` or `model` packages
+- Ensure JPQL/Native query aliases exactly match interface getter methods
+- Forbidden: No business logic
+
+---
+
+## 9. Model Rules
 
 - Contains:
-    - JPA Entities
-    - Enums
+  - JPA Entities
+  - Enums
 
 Must NOT:
 - contain business logic
@@ -98,11 +109,11 @@ Naming:
 
 ---
 
-## 9. Mapper Rules
+## 10. Mapper Rules
 
 - Convert:
-    - DTO → Entity
-    - Entity → DTO
+  - DTO → Entity
+  - Entity → DTO
 
 Forbidden:
 - No business logic
@@ -110,37 +121,37 @@ Forbidden:
 
 ---
 
-## 10. Validation Rules
+## 11. Validation Rules
 
 - Controller: validate request format (@Valid)
 - Service: validate business logic
 
 ---
 
-## 11. Security Rules
+## 12. Security Rules
 
 - All auth logic MUST be in security package
 - Includes:
-    - SecurityConfig
-    - JWT handling
-    - Filters
-    - UserDetailsService
+  - SecurityConfig
+  - JWT handling
+  - Filters
+  - UserDetailsService
 
 - DO NOT place security logic in config
 
 ---
 
-## 12. Config Rules
+## 13. Config Rules
 
 - Only general configuration:
-    - CORS
-    - Jackson
-    - Swagger
-    - Database
+  - CORS
+  - Jackson
+  - Swagger
+  - Database
 
 ---
 
-## 13. Error Handling
+## 14. Error Handling
 
 - Use global exception handler
 - Standard error response:
@@ -154,7 +165,7 @@ Forbidden:
 
 ---
 
-## 14. Response Rules
+## 15. Response Rules
 
 - Always return DTO
 - Never return Entity directly
@@ -169,7 +180,7 @@ Recommended format:
 
 ---
 
-## 15. Coding Rules
+## 16. Coding Rules
 
 - Use constructor injection only
 - Keep methods small (single responsibility)
@@ -178,7 +189,7 @@ Recommended format:
 
 ---
 
-## 16. AI Agent Workflow (VERY IMPORTANT)
+## 17. AI Agent Workflow (VERY IMPORTANT)
 
 Before coding:
 - Understand requirement
@@ -191,13 +202,14 @@ During coding:
 
 After coding:
 - Ensure:
-    - correct layer usage
-    - no business logic leakage
-    - consistent structure
+  - correct layer usage
+  - no business logic leakage
+  - consistent structure
+  - proper use of projections vs DTOs
 
 ---
 
-## 17. Constraints
+## 18. Constraints
 
 - DO NOT refactor unrelated code
 - DO NOT introduce new architecture
