@@ -18,6 +18,8 @@ public class CategoryDataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
+        productCategoryService.applyDefaultPriorities();
+
         // Kiểm tra nếu database đã có category thì skip luôn
         if (productCategoryService.count() > 0) {
             log.info("=== Dữ liệu Category đã tồn tại. Bỏ qua khởi tạo. ===");
@@ -27,24 +29,24 @@ public class CategoryDataInitializer implements CommandLineRunner {
         log.info("=== Bắt đầu tiến trình khởi tạo Category Data ===");
 
         // Add keyboards:
-        ProductCategory rootKeyboardsCategory = productCategoryService.addCategory("Keyboards", null, null);
-        productCategoryService.addCategory("Hall Effect Keyboard", "HE Keyboard", rootKeyboardsCategory.getId());
-        productCategoryService.addCategory("Mechanical Keyboards for Gaming", "Mechanical Keyboard", rootKeyboardsCategory.getId());
+        ProductCategory rootKeyboardsCategory = productCategoryService.addCategory("Keyboards", null, null, 1);
+        productCategoryService.addCategory("Hall Effect Keyboard", "HE Keyboard", rootKeyboardsCategory.getId(), 1);
+        productCategoryService.addCategory("Mechanical Keyboards for Gaming", "Mechanical Keyboard", rootKeyboardsCategory.getId(), 2);
 
         // Add Mice:
-        productCategoryService.addCategory("Mercury Gaming Mouse", "Mice", null);
+        productCategoryService.addCategory("Mercury Gaming Mouse", "Mice", null, 2);
 
         // Add Speakers:
-        productCategoryService.addCategory("Bluetooth Speaker", "Speakers", null);
+        productCategoryService.addCategory("Bluetooth Speaker", "Speakers", null, 3);
 
         // Add Earbuds:
-        productCategoryService.addCategory("Earbuds", "Earbuds", null);
+        productCategoryService.addCategory("Earbuds", "Earbuds", null, 4);
 
         // Add Chargers:
-        productCategoryService.addCategory("Chargers", "Chargers", null);
+        productCategoryService.addCategory("Chargers", "Chargers", null, 5);
 
         // Add Accessories:
-        productCategoryService.addCategory("Accessories", "Accessories", null);
+        productCategoryService.addCategory("Accessories", "Accessories", null, 6);
 
         log.info("=== Hoàn tất tiến trình khởi tạo Category Data ===");
     }

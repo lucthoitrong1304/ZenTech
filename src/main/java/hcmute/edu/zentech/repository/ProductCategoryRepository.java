@@ -18,6 +18,7 @@ public interface ProductCategoryRepository extends JpaRepository<ProductCategory
             select c
             from ProductCategory c
             left join fetch c.parent
+            order by c.priority asc, c.categoryName asc, c.id asc
             """)
     List<ProductCategory> findAllWithParent();
 
