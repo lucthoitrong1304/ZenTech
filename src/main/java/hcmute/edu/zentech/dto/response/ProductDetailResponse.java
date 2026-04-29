@@ -18,6 +18,7 @@ import java.util.UUID;
 public class ProductDetailResponse {
     private UUID id;
     private String productName;
+    private String description;
     private String specifications;
     private String compatibility;
     private String boxContents;
