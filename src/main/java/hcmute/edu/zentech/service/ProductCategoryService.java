@@ -280,4 +280,9 @@ public class ProductCategoryService {
             return product.getCreatedAt();
         }
     }
+
+    @Transactional(readOnly = true)
+    public long count() {
+        return productCategoryRepository.count();
+    }
 }

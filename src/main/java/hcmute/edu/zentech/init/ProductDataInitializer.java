@@ -22,6 +22,11 @@ public class ProductDataInitializer implements CommandLineRunner {
 
         for (ProductCategoryInitializer initializer : categoryInitializers) {
             try {
+                if (initializer.hasData()) {
+                    log.info("Dữ liệu cho category [{}] đã tồn tại. Bỏ qua khởi tạo.", initializer.getCategoryName());
+                    continue;
+                }
+
                 initializer.initialize();
             } catch (Exception e) {
                 log.error("Lỗi khi khởi tạo data cho category [{}]: {}", initializer.getCategoryName(), e.getMessage());

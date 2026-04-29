@@ -4,6 +4,9 @@ public interface ProductCategoryInitializer {
     // Trả về tên category để log hoặc kiểm tra
     String getCategoryName();
 
+    // Kiểm tra xem dữ liệu đã được khởi tạo chưa
+    boolean hasData();
+
     // Hàm thực thi việc tạo data
     void initialize() throws Exception;
 }

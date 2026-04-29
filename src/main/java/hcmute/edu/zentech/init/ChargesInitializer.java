@@ -19,6 +19,7 @@ import java.util.List;
 public class ChargesInitializer implements ProductCategoryInitializer {
 
     private static final String CATEGORY_NAME = "Chargers";
+    private static final String PRODUCT_NAME = "Alpha65 GaN 65W Wall Charger - War Damaged Yellow";
 
     private final ProductCategoryService productCategoryService;
     private final ProductService productService;
@@ -27,6 +28,11 @@ public class ChargesInitializer implements ProductCategoryInitializer {
     @Override
     public String getCategoryName() {
         return CATEGORY_NAME;
+    }
+
+    @Override
+    public boolean hasData() {
+        return productService.existsByProductName(PRODUCT_NAME);
     }
 
     @Override
