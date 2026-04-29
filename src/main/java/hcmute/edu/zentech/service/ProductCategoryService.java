@@ -3,6 +3,7 @@ package hcmute.edu.zentech.service;
 import hcmute.edu.zentech.dto.request.CategoryProductListQueryRequest;
 import hcmute.edu.zentech.dto.response.CategoryProductListItemResponse;
 import hcmute.edu.zentech.dto.response.PagedResponse;
+import hcmute.edu.zentech.dto.response.ProductCategorySummaryResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.ProductMapper;
 import hcmute.edu.zentech.model.CategoryProductSortOption;
@@ -17,11 +18,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -54,6 +58,31 @@ public class ProductCategoryService {
             throw new ResourceNotFoundException("Product Category", "shortName", shortName);
         }
         return productCategory;
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductCategorySummaryResponse> getAllCategories() {
+        List<ProductCategory> categories = productCategoryRepository.findAllWithParent();
+        Map<UUID, List<ProductCategory>> categoriesByParentId = categories.stream()
+                .filter(category -> category.getParent() != null)
+                .collect(Collectors.groupingBy(category -> category.getParent().getId()));
+
+        return categories.stream()
+                .filter(category -> category.getParent() == null)
+                .map(category -> buildCategoryTree(category, categoriesByParentId))
+                .toList();
+    }
+
+    private ProductCategorySummaryResponse buildCategoryTree(
+            ProductCategory category,
+            Map<UUID, List<ProductCategory>> categoriesByParentId) {
+        List<ProductCategorySummaryResponse> children = categoriesByParentId
+                .getOrDefault(category.getId(), Collections.emptyList())
+                .stream()
+                .map(child -> buildCategoryTree(child, categoriesByParentId))
+                .toList();
+
+        return productMapper.toProductCategorySummaryResponse(category, !children.isEmpty(), children);
     }
 
     @Transactional(readOnly = true)

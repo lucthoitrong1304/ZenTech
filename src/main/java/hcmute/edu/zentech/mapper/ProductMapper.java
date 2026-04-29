@@ -32,11 +32,16 @@ public class ProductMapper {
                 .build();
     }
 
-    public ProductCategorySummaryResponse toProductCategorySummaryResponse(ProductCategory category) {
+    public ProductCategorySummaryResponse toProductCategorySummaryResponse(
+            ProductCategory category,
+            boolean hasChildren,
+            List<ProductCategorySummaryResponse> children) {
         return ProductCategorySummaryResponse.builder()
                 .id(category.getId())
                 .categoryName(category.getCategoryName())
                 .shortName(category.getShortName())
+                .hasChildren(hasChildren)
+                .children(children)
                 .build();
     }
 
