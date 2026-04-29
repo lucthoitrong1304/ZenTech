@@ -4,7 +4,9 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
 
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 
@@ -18,6 +20,10 @@ public class Order {
     @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "order_id")
     private UUID id;
+
+    @CreationTimestamp
+    @Column(updatable = false)
+    private Instant createdAt;
 
     private double originalTotalPrice;
 
