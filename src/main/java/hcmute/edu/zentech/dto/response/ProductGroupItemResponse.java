@@ -13,11 +13,8 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CategoryProductListItemResponse {
+public class ProductGroupItemResponse {
     private UUID id;
     private String productName;
     private String imageUrl;
-    private Double originalPrice;
-    private Double salePrice;
-    private Double averageRating;
 }

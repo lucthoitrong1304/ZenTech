@@ -21,6 +21,8 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -30,6 +32,7 @@ public class ProductReviewService {
     private final ProductReviewRepository productReviewRepository;
     private final CustomerRepository customerRepository;
     private final ProductMapper productMapper;
+    private final R2StorageService r2StorageService;
 
     @Transactional(readOnly = true)
     public PagedResponse<ProductReviewItemResponse> getProductReviews(
@@ -69,11 +72,15 @@ public class ProductReviewService {
                 .orElseThrow(() -> new ResourceNotFoundException("Product", "ID", productId));
 
         Customer customer = getCurrentCustomer();
+
+        List<String> imageKeys = request.getImageKeys() == null ? List.of() : request.getImageKeys();
+
         ProductReview review = ProductReview.builder()
                 .product(product)
                 .customer(customer)
                 .rating(request.getRating())
                 .comment(normalizeComment(request.getComment()))
+                .imageKeys(new ArrayList<>(imageKeys))
                 .build();
 
         ProductReview savedReview = productReviewRepository.save(review);
@@ -91,6 +98,9 @@ public class ProductReviewService {
         ensureOwner(review, customer.getId());
         review.setRating(request.getRating());
         review.setComment(normalizeComment(request.getComment()));
+
+        List<String> imageKeys = request.getImageKeys() == null ? List.of() : request.getImageKeys();
+        review.setImageKeys(new ArrayList<>(imageKeys));
 
         ProductReview updatedReview = productReviewRepository.save(review);
         return toReviewItemResponse(updatedReview, customer.getUserInfo().getId());
@@ -153,6 +163,13 @@ public class ProductReviewService {
                 && currentUserId.equals(review.getCustomer().getUserInfo().getId());
 
         String customerName = review.getCustomer() != null ? review.getCustomer().getFullName() : null;
-        return productMapper.toProductReviewItemResponse(review, customerName, isOwner);
+
+        List<String> presignedUrls = review.getImageKeys() == null ? List.of() :
+                review.getImageKeys().stream()
+                        .map(r2StorageService::getPresignedGetUrl)
+                        .filter(java.util.Objects::nonNull)
+                        .toList();
+
+        return productMapper.toProductReviewItemResponse(review, customerName, isOwner, presignedUrls);
     }
 }

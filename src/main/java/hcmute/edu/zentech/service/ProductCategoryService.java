@@ -6,7 +6,6 @@ import hcmute.edu.zentech.dto.response.PagedResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.ProductMapper;
 import hcmute.edu.zentech.model.CategoryProductSortOption;
-import hcmute.edu.zentech.model.ImageProduct;
 import hcmute.edu.zentech.model.Product;
 import hcmute.edu.zentech.model.ProductCategory;
 import hcmute.edu.zentech.model.ProductReview;
@@ -29,6 +28,9 @@ import java.util.UUID;
 public class ProductCategoryService {
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductMapper productMapper;
+
+    // Tiêm thêm R2StorageService để gen link ảnh
+    private final R2StorageService r2StorageService;
 
     public ProductCategory addCategory(String categoryName, String shortName, UUID categoryParentId) {
         ProductCategory newCategory = new ProductCategory();
@@ -87,7 +89,7 @@ public class ProductCategoryService {
 
         return new ProductListingView(
                 product,
-                getImageUrls(product),
+                getRepresentativeImageUrl(product),
                 originalPrice,
                 salePrice,
                 effectivePrice,
@@ -102,22 +104,30 @@ public class ProductCategoryService {
         }
 
         return product.getVariants().stream()
-                .filter(Objects::nonNull).min(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+                .filter(Objects::nonNull)
+                .min(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())));
     }
 
-    // Lấy 2 ảnh đầu tiên.
-    private List<String> getImageUrls(Product product) {
-        if (product.getImageList() == null || product.getImageList().isEmpty()) {
-            return List.of();
+    // Ưu tiên ảnh đại diện đã chọn, fallback ảnh đầu tiên trong gallery.
+    private String getRepresentativeImageUrl(Product product) {
+        String representativeImageKey = getRepresentativeImageKey(product);
+        if (representativeImageKey == null) {
+            return null;
         }
 
-        return product.getImageList().stream()
-                .filter(Objects::nonNull)
-                .sorted(Comparator.comparing(ImageProduct::getId, Comparator.nullsLast(Comparator.naturalOrder())))
-                .map(ImageProduct::getImageUrl)
-                .filter(Objects::nonNull)
-                .limit(2)
-                .toList();
+        return r2StorageService.getPresignedGetUrl(representativeImageKey);
+    }
+
+    private String getRepresentativeImageKey(Product product) {
+        if (product.getRepresentativeImageKey() != null && !product.getRepresentativeImageKey().isBlank()) {
+            return product.getRepresentativeImageKey();
+        }
+
+        if (product.getImageKeys() == null || product.getImageKeys().isEmpty()) {
+            return null;
+        }
+
+        return product.getImageKeys().getFirst();
     }
 
     // Tính trung bình điểm đánh giá của 1 sản phẩm.
@@ -207,7 +217,7 @@ public class ProductCategoryService {
         List<CategoryProductListItemResponse> items = listingViews.subList(fromIndex, toIndex).stream()
                 .map(view -> productMapper.toCategoryProductListItemResponse(
                         view.product(),
-                        view.imageUrls(),
+                        view.imageUrl(),
                         view.originalPrice(),
                         view.salePrice(),
                         view.averageRating()
@@ -228,7 +238,7 @@ public class ProductCategoryService {
     // View Object
     private record ProductListingView(
             Product product,
-            List<String> imageUrls, // Danh sách link ảnh (max: 2)
+            String imageUrl,
             Double originalPrice,
             Double salePrice,
             Double effectivePrice,

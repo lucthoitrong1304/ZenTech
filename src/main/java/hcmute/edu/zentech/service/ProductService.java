@@ -3,10 +3,10 @@ package hcmute.edu.zentech.service;
 import hcmute.edu.zentech.dto.request.VariantRequestDTO;
 import hcmute.edu.zentech.dto.response.CategoryProductListItemResponse;
 import hcmute.edu.zentech.dto.response.ProductDetailResponse;
+import hcmute.edu.zentech.dto.response.ProductGroupItemResponse;
 import hcmute.edu.zentech.dto.response.ProductVariantDetailResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.ProductMapper;
-import hcmute.edu.zentech.model.ImageProduct;
 import hcmute.edu.zentech.model.Product;
 import hcmute.edu.zentech.model.ProductCategory;
 import hcmute.edu.zentech.model.ProductReview;
@@ -32,13 +32,13 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ProductService {
-    private static final int MAX_SIMILAR_PRODUCTS = 4; // Số lượng lấy tối đa - sản phẩm tương tự
-
+    private static final int MAX_SIMILAR_PRODUCTS = 4;
     private final ProductRepository productRepository;
     private final ProductCategoryRepository categoryRepository;
     private final ProductReviewRepository productReviewRepository;
     private final ProductVariantService productVariantService;
     private final ProductMapper productMapper;
+    private final R2StorageService r2StorageService;
 
     @Transactional
     public Product addProduct(
@@ -66,17 +66,19 @@ public class ProductService {
         // 3. Xử lý danh sách biến thể
         if (variantDataList != null && !variantDataList.isEmpty()) {
             Set<ProductVariant> managedVariants = new HashSet<>();
-
             for (VariantRequestDTO dto : variantDataList) {
                 ProductVariant newVariant = productVariantService.buildProductVariant(product, dto);
                 managedVariants.add(newVariant);
             }
-
-            // Gắn danh sách Con vào Cha
             product.setVariants(managedVariants);
         }
 
         // 4. Lưu vào Database (Nhờ CascadeType.ALL, các Variants cũng sẽ được tự động lưu)
+        return productRepository.save(product);
+    }
+
+    @Transactional
+    public Product save(Product product) {
         return productRepository.save(product);
     }
 
@@ -91,9 +93,9 @@ public class ProductService {
         // Tổng số lượt review
         long totalReviews = productReviewRepository.countByProduct_Id(productId);
 
-        // Lấy danh sách ảnh - danh sách biến thể - danh sách sản phẩm tương tự
-        List<String> productImageUrls = getSortedProductImageUrls(product);
+        List<String> productImageUrls = getProductImageUrls(product);
         List<ProductVariantDetailResponse> variants = getSortedVariants(product);
+        List<ProductGroupItemResponse> groupProducts = getGroupProducts(product);
         List<CategoryProductListItemResponse> similarProducts = getSimilarProducts(product);
 
         return productMapper.toProductDetailResponse(
@@ -102,25 +104,11 @@ public class ProductService {
                 variants,
                 averageRating,
                 totalReviews,
+                groupProducts,
                 similarProducts
         );
     }
 
-    // Danh sách ảnh sort tăng dần theo id ảnh
-    private List<String> getSortedProductImageUrls(Product product) {
-        if (product.getImageList() == null || product.getImageList().isEmpty()) {
-            return List.of();
-        }
-
-        return product.getImageList().stream()
-                .filter(Objects::nonNull)
-                .sorted(Comparator.comparing(ImageProduct::getId, Comparator.nullsLast(Comparator.naturalOrder())))
-                .map(ImageProduct::getImageUrl)
-                .filter(Objects::nonNull)
-                .toList();
-    }
-
-    // Lấy danh sách sản phẩm tương tự
     private List<CategoryProductListItemResponse> getSimilarProducts(Product product) {
         // Lấy danh sách category của product
         Set<UUID> currentCategoryIds = getCategoryIds(product);
@@ -148,7 +136,7 @@ public class ProductService {
                 .collect(Collectors.toMap(
                         Product::getId,
                         candidate -> candidate,
-                        (left, right) -> left, // Giứ cái đầu tiên bỏ cái sau nếu 2 phần tử trùng nhau về id
+                        (left, right) -> left,
                         LinkedHashMap::new
                 ))
                 .values()
@@ -161,7 +149,7 @@ public class ProductService {
                 .limit(MAX_SIMILAR_PRODUCTS)
                 .map(view -> productMapper.toCategoryProductListItemResponse(
                         view.product(),
-                        view.imageUrls(),
+                        view.imageUrl(),
                         view.originalPrice(),
                         view.salePrice(),
                         view.averageRating()
@@ -169,7 +157,6 @@ public class ProductService {
                 .toList();
     }
 
-    // Lấy danh sách biến thể của 1 sản phẩm
     private List<ProductVariantDetailResponse> getSortedVariants(Product product) {
         if (product.getVariants() == null || product.getVariants().isEmpty()) {
             return List.of();
@@ -178,22 +165,31 @@ public class ProductService {
         return product.getVariants().stream()
                 .filter(Objects::nonNull)
                 .sorted(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())))
-                .map(variant -> productMapper.toProductVariantDetailResponse(
-                        variant,
-                        variant.getImageUrls() == null ? List.of() : List.copyOf(variant.getImageUrls())
+                .map(productMapper::toProductVariantDetailResponse)
+                .toList();
+    }
+
+    private List<ProductGroupItemResponse> getGroupProducts(Product product) {
+        if (product.getProductGroup() == null || product.getProductGroup().getId() == null) {
+            return List.of();
+        }
+
+        return productRepository.findGroupProducts(product.getProductGroup().getId(), product.getId()).stream()
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing(Product::getProductName, Comparator.nullsLast(String::compareToIgnoreCase))
+                        .thenComparing(Product::getId, Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(groupProduct -> productMapper.toProductGroupItemResponse(
+                        groupProduct,
+                        getRepresentativeImageUrl(groupProduct)
                 ))
                 .toList();
     }
 
-    // Build 1 thông số của 1 sản phẩm tương tự
     private SimilarProductView buildSimilarProductView(
             Product product,
             Set<UUID> currentCategoryIds,
             Double currentEffectivePrice) {
-        // 1. Lấy sản phẩm biến thể đại diện của sản phẩm
-        // 2. Lấy giá gốc
-        // 3. Lấy giá sale
-        // 4. Lấy giá trị thực
+
         Optional<ProductVariant> representativeVariant = getRepresentativeVariant(product);
         Double originalPrice = representativeVariant.map(ProductVariant::getOriginalPrice).orElse(null);
         Double salePrice = representativeVariant.map(ProductVariant::getSalePrice).orElse(null);
@@ -202,7 +198,7 @@ public class ProductService {
 
         return new SimilarProductView(
                 product,
-                getListingImageUrls(product),
+                getRepresentativeImageUrl(product),
                 originalPrice,
                 salePrice,
                 getAverageRating(product),
@@ -212,13 +208,6 @@ public class ProductService {
         );
     }
 
-    // Hàm so sánh để build sản phẩm tương tự
-    // Độ tương đồng về danh mục sản phẩm - ưu tiên cao nhất
-    // Có thể so sánh giá: Lấy true
-    // Độ lệch giá: Lấy nhỏ hơn
-    // Độ đánh giá trung bình: Lấy nhỏ hơn
-    // Ngày tạo: Lấy gần nhất
-    // id Tăng dần
     private Comparator<SimilarProductView> buildSimilarProductComparator() {
         return Comparator
                 .comparingInt(SimilarProductView::sharedCategoryCount)
@@ -235,7 +224,6 @@ public class ProductService {
         if (product.getCategories() == null || product.getCategories().isEmpty()) {
             return Set.of();
         }
-
         return product.getCategories().stream()
                 .filter(Objects::nonNull)
                 .map(ProductCategory::getId)
@@ -248,7 +236,6 @@ public class ProductService {
         if (product.getCategories() == null || product.getCategories().isEmpty()) {
             return 0;
         }
-
         return (int) product.getCategories().stream()
                 .filter(Objects::nonNull)
                 .map(ProductCategory::getId)
@@ -262,7 +249,6 @@ public class ProductService {
         if (product.getVariants() == null || product.getVariants().isEmpty()) {
             return Optional.empty();
         }
-
         return product.getVariants().stream()
                 .filter(Objects::nonNull)
                 .min(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())));
@@ -273,10 +259,35 @@ public class ProductService {
         return variant.getSalePrice() != null ? variant.getSalePrice() : variant.getOriginalPrice();
     }
 
-    // Lấy 2 ảnh của 1 sản phẩm
-    private List<String> getListingImageUrls(Product product) {
-        return getSortedProductImageUrls(product).stream()
-                .limit(2)
+    private String getRepresentativeImageUrl(Product product) {
+        String representativeImageKey = getRepresentativeImageKey(product);
+        if (representativeImageKey == null) {
+            return null;
+        }
+
+        return r2StorageService.getPresignedGetUrl(representativeImageKey);
+    }
+
+    private String getRepresentativeImageKey(Product product) {
+        if (product.getRepresentativeImageKey() != null && !product.getRepresentativeImageKey().isBlank()) {
+            return product.getRepresentativeImageKey();
+        }
+
+        if (product.getImageKeys() == null || product.getImageKeys().isEmpty()) {
+            return null;
+        }
+
+        return product.getImageKeys().getFirst();
+    }
+
+    private List<String> getProductImageUrls(Product product) {
+        if (product.getImageKeys() == null || product.getImageKeys().isEmpty()) {
+            return List.of();
+        }
+
+        return product.getImageKeys().stream()
+                .map(r2StorageService::getPresignedGetUrl)
+                .filter(Objects::nonNull)
                 .toList();
     }
 
@@ -285,7 +296,6 @@ public class ProductService {
         if (product.getReviewList() == null || product.getReviewList().isEmpty()) {
             return null;
         }
-
         return product.getReviewList().stream()
                 .filter(Objects::nonNull)
                 .map(ProductReview::getRating)
@@ -301,7 +311,7 @@ public class ProductService {
     // Object build sản phẩm tương tự
     private record SimilarProductView(
             Product product,
-            List<String> imageUrls,
+            String imageUrl,
             Double originalPrice,
             Double salePrice,
             Double averageRating,
@@ -311,7 +321,6 @@ public class ProductService {
         private UUID productId() {
             return product.getId();
         }
-
         private Instant createdAt() {
             return product.getCreatedAt();
         }

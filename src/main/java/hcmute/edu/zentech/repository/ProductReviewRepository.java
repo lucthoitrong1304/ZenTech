@@ -14,10 +14,10 @@ import java.util.UUID;
 
 @Repository
 public interface ProductReviewRepository extends JpaRepository<ProductReview, UUID> {
-    @EntityGraph(attributePaths = "customer")
+    @EntityGraph(attributePaths = {"customer", "imageKeys"})
     Page<ProductReview> findByProduct_Id(UUID productId, Pageable pageable);
 
-    @EntityGraph(attributePaths = "customer")
+    @EntityGraph(attributePaths = {"customer", "imageKeys"})
     Optional<ProductReview> findByIdAndProduct_Id(UUID reviewId, UUID productId);
 
     long countByProduct_Id(UUID productId);

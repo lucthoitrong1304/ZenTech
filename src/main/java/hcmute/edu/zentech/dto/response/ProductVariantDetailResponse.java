@@ -7,7 +7,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -25,5 +24,4 @@ public class ProductVariantDetailResponse {
     private Instant saleStartAt;
     private Instant saleEndAt;
     private int stockQuantity;
-    private List<String> imageUrls;
 }

@@ -16,9 +16,9 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     @Query("""
             select distinct p
             from Product p
-            left join fetch p.imageList
             left join fetch p.categories
             left join fetch p.variants
+            left join fetch p.productGroup
             where p.id = :productId
             """)
     Optional<Product> findProductDetailById(@Param("productId") UUID productId);
@@ -27,10 +27,18 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
             select distinct p
             from Product p
             join fetch p.categories c
-            left join fetch p.imageList
             left join fetch p.reviewList
             left join fetch p.variants
             where c.id in :categoryIds
             """)
     List<Product> findProductsForSimilarityByCategoryIds(@Param("categoryIds") Set<UUID> categoryIds);
+
+    @Query("""
+            select distinct p
+            from Product p
+            left join fetch p.imageKeys
+            where p.productGroup.id = :groupId
+            and p.id <> :productId
+            """)
+    List<Product> findGroupProducts(@Param("groupId") UUID groupId, @Param("productId") UUID productId);
 }

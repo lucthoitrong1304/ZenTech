@@ -24,6 +24,7 @@ public class ProductDetailResponse {
     private String supportInfo;
     private Instant createdAt;
     private List<String> productImageUrls;
+    private List<ProductGroupItemResponse> groupProducts;
     private List<CategoryProductListItemResponse> similarProducts;
     private List<ProductVariantDetailResponse> variants;
     private Double averageRating;

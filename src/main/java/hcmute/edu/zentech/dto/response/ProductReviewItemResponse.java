@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -23,4 +24,5 @@ public class ProductReviewItemResponse {
     private UUID customerId;
     private String customerName;
     private Boolean isOwner;
+    private List<String> imageUrls;
 }

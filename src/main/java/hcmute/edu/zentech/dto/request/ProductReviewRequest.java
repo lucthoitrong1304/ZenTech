@@ -7,6 +7,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.List;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -17,4 +19,6 @@ public class ProductReviewRequest {
     private Integer rating;
 
     private String comment;
+
+    private List<String> imageKeys;
 }

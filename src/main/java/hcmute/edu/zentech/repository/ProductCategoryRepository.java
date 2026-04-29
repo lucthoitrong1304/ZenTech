@@ -17,7 +17,6 @@ public interface ProductCategoryRepository extends JpaRepository<ProductCategory
             select distinct c
             from ProductCategory c
             left join fetch c.productList p
-            left join fetch p.imageList
             left join fetch p.reviewList
             left join fetch p.variants
             where c.id = :categoryId

@@ -4,8 +4,6 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -27,16 +25,6 @@ public class ProductVariant {
     private String name;
     private String nameColor;
     private String colorCode;
-
-    @Builder.Default
-    @ElementCollection
-    @CollectionTable(
-            name = "product_variant_images",
-            joinColumns = @JoinColumn(name = "product_variant_id")
-    )
-    @Column(name = "image_url", length = 1000)
-    @OrderColumn(name = "image_order")
-    private List<String> imageUrls = new ArrayList<>();
 
     private Instant saleStartAt;
     private Instant saleEndAt;

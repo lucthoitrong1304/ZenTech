@@ -6,8 +6,8 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -39,8 +39,14 @@ public class ProductReview {
     private Product product;
 
     @Builder.Default
-    @OneToMany(mappedBy = "productReview", cascade = CascadeType.ALL, orphanRemoval = true)
-    private Set<ReviewImage> imageList = new HashSet<>();
+    @ElementCollection
+    @CollectionTable(
+            name = "product_review_images",
+            joinColumns = @JoinColumn(name = "review_id")
+    )
+    @Column(name = "image_key", length = 1000)
+    @OrderColumn(name = "image_order")
+    private List<String> imageKeys = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "customer_id", nullable = false)
