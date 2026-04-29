@@ -3,6 +3,7 @@ package hcmute.edu.zentech.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
@@ -10,7 +11,8 @@ import java.util.UUID;
 @Table(name = "product_categories")
 @NoArgsConstructor
 @AllArgsConstructor
-@Data
+@Getter
+@Setter
 public class ProductCategory {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -19,6 +21,7 @@ public class ProductCategory {
 
     @Column(nullable = false)
     private String categoryName;
+
     private String shortName;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -26,8 +29,8 @@ public class ProductCategory {
     private ProductCategory parent;
 
     @OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
-    private Set<ProductCategory> children;
+    private Set<ProductCategory> children = new HashSet<>();
 
-    @OneToMany(mappedBy = "category", cascade = CascadeType.ALL, orphanRemoval = true)
-    private Set<Product> productList;
+    @ManyToMany(mappedBy = "categories")
+    private Set<Product> productList = new HashSet<>();
 }
