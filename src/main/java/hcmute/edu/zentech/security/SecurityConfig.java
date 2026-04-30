@@ -61,6 +61,7 @@ public class SecurityConfig {
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/uploads/presign").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/products/*/reviews").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/products/*/reviews/*").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/products/*/reviews/*").authenticated()

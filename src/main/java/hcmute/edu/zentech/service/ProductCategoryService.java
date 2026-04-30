@@ -30,6 +30,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ProductCategoryService {
+    private static final int DEFAULT_CATEGORY_PRIORITY = 999;
+
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductMapper productMapper;
 
@@ -37,9 +39,14 @@ public class ProductCategoryService {
     private final R2StorageService r2StorageService;
 
     public ProductCategory addCategory(String categoryName, String shortName, UUID categoryParentId) {
+        return addCategory(categoryName, shortName, categoryParentId, DEFAULT_CATEGORY_PRIORITY);
+    }
+
+    public ProductCategory addCategory(String categoryName, String shortName, UUID categoryParentId, Integer priority) {
         ProductCategory newCategory = new ProductCategory();
         newCategory.setCategoryName(categoryName);
         newCategory.setShortName(shortName);
+        newCategory.setPriority(priority == null ? DEFAULT_CATEGORY_PRIORITY : priority);
 
         if (categoryParentId != null) {
             ProductCategory parent = productCategoryRepository.findById(categoryParentId)
@@ -50,6 +57,59 @@ public class ProductCategoryService {
         }
 
         return productCategoryRepository.save(newCategory);
+    }
+
+    @Transactional
+    public void applyDefaultPriorities() {
+        Map<String, Integer> rootPriorities = Map.of(
+                "Keyboards", 1,
+                "Mice", 2,
+                "Speakers", 3,
+                "Earbuds", 4,
+                "Chargers", 5,
+                "Accessories", 6
+        );
+        Map<String, Integer> keyboardChildPriorities = Map.of(
+                "HE Keyboard", 1,
+                "Mechanical Keyboard", 2
+        );
+
+        List<ProductCategory> changedCategories = productCategoryRepository.findAllWithParent().stream()
+                .filter(category -> applyDefaultPriority(category, rootPriorities, keyboardChildPriorities))
+                .toList();
+
+        if (!changedCategories.isEmpty()) {
+            productCategoryRepository.saveAll(changedCategories);
+        }
+    }
+
+    private boolean applyDefaultPriority(
+            ProductCategory category,
+            Map<String, Integer> rootPriorities,
+            Map<String, Integer> keyboardChildPriorities) {
+        Integer expectedPriority;
+        if (category.getParent() == null) {
+            expectedPriority = rootPriorities.get(resolveCategoryKey(category));
+        } else if ("Keyboards".equals(resolveCategoryKey(category.getParent()))) {
+            expectedPriority = keyboardChildPriorities.get(resolveCategoryKey(category));
+        } else {
+            expectedPriority = null;
+        }
+
+        if (expectedPriority == null || Objects.equals(category.getPriority(), expectedPriority)) {
+            return false;
+        }
+
+        category.setPriority(expectedPriority);
+        return true;
+    }
+
+    private String resolveCategoryKey(ProductCategory category) {
+        if (category.getShortName() != null && !category.getShortName().isBlank()) {
+            return category.getShortName();
+        }
+
+        return category.getCategoryName();
     }
 
     public ProductCategory findCategoryByShortName(String shortName) {
@@ -69,6 +129,7 @@ public class ProductCategoryService {
 
         return categories.stream()
                 .filter(category -> category.getParent() == null)
+                .sorted(buildCategoryComparator())
                 .map(category -> buildCategoryTree(category, categoriesByParentId))
                 .toList();
     }
@@ -79,10 +140,18 @@ public class ProductCategoryService {
         List<ProductCategorySummaryResponse> children = categoriesByParentId
                 .getOrDefault(category.getId(), Collections.emptyList())
                 .stream()
+                .sorted(buildCategoryComparator())
                 .map(child -> buildCategoryTree(child, categoriesByParentId))
                 .toList();
 
         return productMapper.toProductCategorySummaryResponse(category, !children.isEmpty(), children);
+    }
+
+    private Comparator<ProductCategory> buildCategoryComparator() {
+        return Comparator
+                .comparing(ProductCategory::getPriority, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(ProductCategory::getCategoryName, Comparator.nullsLast(String::compareToIgnoreCase))
+                .thenComparing(ProductCategory::getId, Comparator.nullsLast(Comparator.naturalOrder()));
     }
 
     @Transactional(readOnly = true)
@@ -279,5 +348,10 @@ public class ProductCategoryService {
         private Instant createdAt() {
             return product.getCreatedAt();
         }
+    }
+
+    @Transactional(readOnly = true)
+    public long count() {
+        return productCategoryRepository.count();
     }
 }

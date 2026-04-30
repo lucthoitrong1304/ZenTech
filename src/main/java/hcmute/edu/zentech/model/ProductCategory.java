@@ -24,6 +24,9 @@ public class ProductCategory {
 
     private String shortName;
 
+    @Column(nullable = false, columnDefinition = "int default 999")
+    private Integer priority = 999;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
     private ProductCategory parent;

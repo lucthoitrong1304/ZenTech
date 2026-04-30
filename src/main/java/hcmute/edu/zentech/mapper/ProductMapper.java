@@ -72,6 +72,7 @@ public class ProductMapper {
         return ProductDetailResponse.builder()
                 .id(product.getId())
                 .productName(product.getProductName())
+                .description(product.getDescription())
                 .specifications(product.getSpecifications())
                 .compatibility(product.getCompatibility())
                 .boxContents(product.getBoxContents())

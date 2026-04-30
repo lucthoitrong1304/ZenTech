@@ -325,4 +325,12 @@ public class ProductService {
             return product.getCreatedAt();
         }
     }
+
+    @Transactional(readOnly = true)
+    public boolean existsByProductName(String productName) {
+        if (productName == null || productName.isBlank()) {
+            return false;
+        }
+        return productRepository.existsByProductName(productName);
+    }
 }

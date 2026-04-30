@@ -41,4 +41,6 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
             and p.id <> :productId
             """)
     List<Product> findGroupProducts(@Param("groupId") UUID groupId, @Param("productId") UUID productId);
+
+    boolean existsByProductName(String productName);
 }
