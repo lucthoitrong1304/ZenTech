@@ -28,6 +28,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class ProductReviewService {
+    private static final int MAX_REVIEW_IMAGES = 5;
+
     private final ProductRepository productRepository;
     private final ProductReviewRepository productReviewRepository;
     private final CustomerRepository customerRepository;
@@ -73,7 +75,7 @@ public class ProductReviewService {
 
         Customer customer = getCurrentCustomer();
 
-        List<String> imageKeys = request.getImageKeys() == null ? List.of() : request.getImageKeys();
+        List<String> imageKeys = validateReviewImageKeys(request.getImageKeys(), customer.getUserInfo().getId());
 
         ProductReview review = ProductReview.builder()
                 .product(product)
@@ -99,7 +101,7 @@ public class ProductReviewService {
         review.setRating(request.getRating());
         review.setComment(normalizeComment(request.getComment()));
 
-        List<String> imageKeys = request.getImageKeys() == null ? List.of() : request.getImageKeys();
+        List<String> imageKeys = validateReviewImageKeys(request.getImageKeys(), customer.getUserInfo().getId());
         review.setImageKeys(new ArrayList<>(imageKeys));
 
         ProductReview updatedReview = productReviewRepository.save(review);
@@ -155,7 +157,20 @@ public class ProductReviewService {
         return trimmedComment.isEmpty() ? null : trimmedComment;
     }
 
-    // Hàm check xem review đó có thuộc quyền sở hữu của user cũng như build 1 item review
+    // Validate image keys before saving them to the review.
+    private List<String> validateReviewImageKeys(List<String> imageKeys, UUID currentUserId) {
+        if (imageKeys == null) {
+            return List.of();
+        }
+
+        if (imageKeys.size() > MAX_REVIEW_IMAGES) {
+            throw new IllegalArgumentException("A review can contain at most 5 images");
+        }
+
+        imageKeys.forEach(fileKey -> r2StorageService.validateUploadedReviewImage(fileKey, currentUserId));
+        return imageKeys;
+    }
+
     private ProductReviewItemResponse toReviewItemResponse(ProductReview review, UUID currentUserId) {
         boolean isOwner = currentUserId != null
                 && review.getCustomer() != null

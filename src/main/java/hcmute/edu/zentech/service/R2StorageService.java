@@ -1,7 +1,8 @@
 package hcmute.edu.zentech.service;
 
+import hcmute.edu.zentech.dto.response.UploadPresignResponse;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -18,18 +19,115 @@ import java.util.stream.Collectors;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class R2StorageService {
-    @Autowired
-    private S3Presigner s3Presigner;
+    private static final long MAX_REVIEW_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+    private static final Set<String> ALLOWED_REVIEW_IMAGE_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+    );
 
-    @Autowired
-    private S3Client s3Client;
+    private final S3Presigner s3Presigner;
+    private final S3Client s3Client;
 
     @Value("${cloudflare.r2.bucket}")
     private String bucketName;
 
     @Value("${cloudflare.r2.presigned-url-expiration}")
     private long expirationMinutes;
+
+    public UploadPresignResponse generateReviewImagePresignedUrl(
+            UUID userId,
+            String originalFilename,
+            String contentType,
+            long fileSize
+    ) {
+        validateReviewImageRequest(contentType, fileSize);
+
+        String fileKey = buildReviewImageKey(userId, originalFilename);
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest putObjectPresignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
+
+        log.info("Generated review image presigned URL for key: {}", fileKey);
+        return UploadPresignResponse.builder()
+                .presignedUrl(presignedPutObjectRequest.url().toString())
+                .fileKey(fileKey)
+                .method("PUT")
+                .expiresInMinutes(expirationMinutes)
+                .requiredHeaders(Map.of("Content-Type", contentType))
+                .build();
+    }
+
+    public void validateUploadedReviewImage(String fileKey, UUID userId) {
+        if (fileKey == null || fileKey.isBlank()) {
+            throw new IllegalArgumentException("imageKey is required");
+        }
+
+        String expectedPrefix = getReviewImagePrefix(userId);
+        if (!fileKey.startsWith(expectedPrefix)) {
+            throw new IllegalArgumentException("Invalid image key owner");
+        }
+
+        HeadObjectResponse headObjectResponse;
+        try {
+            headObjectResponse = s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileKey)
+                    .build());
+        } catch (NoSuchKeyException e) {
+            throw new IllegalArgumentException("Uploaded image does not exist");
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                throw new IllegalArgumentException("Uploaded image does not exist");
+            }
+            throw e;
+        }
+
+        validateReviewImageRequest(headObjectResponse.contentType(), headObjectResponse.contentLength());
+    }
+
+    private void validateReviewImageRequest(String contentType, long fileSize) {
+        if (!ALLOWED_REVIEW_IMAGE_CONTENT_TYPES.contains(contentType)) {
+            throw new IllegalArgumentException("Only JPEG, PNG, and WEBP images are allowed");
+        }
+
+        if (fileSize <= 0) {
+            throw new IllegalArgumentException("Image size must be greater than 0");
+        }
+
+        if (fileSize > MAX_REVIEW_IMAGE_SIZE_BYTES) {
+            throw new IllegalArgumentException("Image size must not exceed 5MB");
+        }
+    }
+
+    private String buildReviewImageKey(UUID userId, String originalFilename) {
+        return getReviewImagePrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
+    }
+
+    private String getReviewImagePrefix(UUID userId) {
+        return "uploads/reviews/" + userId + "/";
+    }
+
+    private String sanitizeFilename(String originalFilename) {
+        String filename = Optional.ofNullable(originalFilename)
+                .map(name -> name.replace("\\", "/"))
+                .map(name -> name.substring(name.lastIndexOf("/") + 1))
+                .orElse("image");
+
+        String safeFilename = filename.trim().replaceAll("[^A-Za-z0-9._-]", "-");
+        return safeFilename.isBlank() ? "image" : safeFilename;
+    }
 
     /**
      * Hàm tạo đường dẫn để đẩy ảnh lên cloudflare
