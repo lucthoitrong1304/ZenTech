@@ -168,6 +168,7 @@ public class AuthService {
         // 3. Lấy User ra và cập nhật mật khẩu
         AccountUser user = resetToken.getUser();
         user.setPassword(passwordEncoder.encode(newPassword));
+        user.setActive(true);
         userRepository.save(user);
 
         // 4. Xóa token đi để không dùng lại được nữa
