@@ -54,7 +54,7 @@ public class OwnerCustomerService {
         );
 
         List<CustomerSummaryResponse> content = customerPage.getContent().stream()
-                .filter(customer -> customer.getUserInfo().getRole()== Role.CUSTOMER)
+                .filter(customer -> customer.getUserInfo().getRole() == Role.CUSTOMER)
                 .map(customer -> ownerCustomerMapper.toCustomerSummaryResponse(customer, aggregateMap.get(customer.getId())))
                 .toList();
 
