@@ -167,6 +167,10 @@ public class OwnerCustomerService {
         String mappedField = sortableFields.getOrDefault(requestedField, sortableFields.get(defaultField));
         Sort.Direction direction = "desc".equalsIgnoreCase(directionValue) ? Sort.Direction.DESC : Sort.Direction.ASC;
 
-        return Sort.by(new Sort.Order(direction, mappedField).nullsLast());
+        //Thêm trường "id" (mặc định tăng dần) làm tiêu chí sắp xếp thứ 2
+        return Sort.by(
+                new Sort.Order(direction, mappedField).nullsLast(),
+                new Sort.Order(Sort.Direction.ASC, "id")
+        );
     }
 }
