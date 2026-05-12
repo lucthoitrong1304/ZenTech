@@ -7,14 +7,11 @@ import hcmute.edu.zentech.repository.ProductVariantRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
-
 @Service
 @RequiredArgsConstructor
 public class ProductVariantService {
     private final ProductVariantRepository productVariantRepository;
 
-    // Add Product Variant
     public ProductVariant buildProductVariant(Product parentProduct, VariantRequestDTO dto) {
         Double finalSalePrice = dto.getSalePrice();
         if (dto.getSaleStartAt() == null && dto.getSaleEndAt() == null) {
@@ -27,7 +24,6 @@ public class ProductVariantService {
                 .salePrice(finalSalePrice)
                 .name(dto.getName())
                 .nameColor(dto.getNameColor())
-                .urlImg(dto.getUrlImg())
                 .colorCode(dto.getColorCode())
                 .saleStartAt(dto.getSaleStartAt())
                 .saleEndAt(dto.getSaleEndAt())
