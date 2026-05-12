@@ -6,11 +6,7 @@ import hcmute.edu.zentech.dto.response.CustomerSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.OwnerCustomerMapper;
-import hcmute.edu.zentech.model.Customer;
-import hcmute.edu.zentech.model.Order;
-import hcmute.edu.zentech.model.OrderDetail;
-import hcmute.edu.zentech.model.OrderStatus;
-import hcmute.edu.zentech.model.PaymentStatus;
+import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.OrderDetailRepository;
 import hcmute.edu.zentech.repository.OrderRepository;
@@ -58,6 +54,7 @@ public class OwnerCustomerService {
         );
 
         List<CustomerSummaryResponse> content = customerPage.getContent().stream()
+                .filter(customer -> customer.getUserInfo().getRole()== Role.CUSTOMER)
                 .map(customer -> ownerCustomerMapper.toCustomerSummaryResponse(customer, aggregateMap.get(customer.getId())))
                 .toList();
 
@@ -170,6 +167,10 @@ public class OwnerCustomerService {
         String mappedField = sortableFields.getOrDefault(requestedField, sortableFields.get(defaultField));
         Sort.Direction direction = "desc".equalsIgnoreCase(directionValue) ? Sort.Direction.DESC : Sort.Direction.ASC;
 
-        return Sort.by(new Sort.Order(direction, mappedField).nullsLast());
+        //Thêm trường "id" (mặc định tăng dần) làm tiêu chí sắp xếp thứ 2
+        return Sort.by(
+                new Sort.Order(direction, mappedField).nullsLast(),
+                new Sort.Order(Sort.Direction.ASC, "id")
+        );
     }
 }
