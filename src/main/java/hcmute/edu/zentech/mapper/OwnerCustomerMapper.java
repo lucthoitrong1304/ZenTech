@@ -16,6 +16,8 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @Component
 public class OwnerCustomerMapper {
@@ -55,8 +57,15 @@ public class OwnerCustomerMapper {
     }
 
     public CustomerOrderHistoryResponse toCustomerOrderHistoryResponse(Order order, Collection<OrderDetail> orderDetails) {
+        return toCustomerOrderHistoryResponse(order, orderDetails, Map.of());
+    }
+
+    public CustomerOrderHistoryResponse toCustomerOrderHistoryResponse(
+            Order order,
+            Collection<OrderDetail> orderDetails,
+            Map<UUID, String> productImageUrls) {
         List<CustomerOrderItemResponse> items = orderDetails.stream()
-                .map(this::toCustomerOrderItemResponse)
+                .map(orderDetail -> toCustomerOrderItemResponse(orderDetail, productImageUrls.get(orderDetail.getId())))
                 .toList();
 
         return CustomerOrderHistoryResponse.builder()
@@ -85,7 +94,7 @@ public class OwnerCustomerMapper {
                 .build();
     }
 
-    private CustomerOrderItemResponse toCustomerOrderItemResponse(OrderDetail orderDetail) {
+    private CustomerOrderItemResponse toCustomerOrderItemResponse(OrderDetail orderDetail, String productImage) {
         String productName = orderDetail.getProductVariant() != null && orderDetail.getProductVariant().getProduct() != null
                 ? orderDetail.getProductVariant().getProduct().getProductName()
                 : null;
@@ -100,8 +109,11 @@ public class OwnerCustomerMapper {
                 .productName(productName)
                 .variantName(variantName)
                 .quantity(orderDetail.getQuantity())
+                .unitPrice(orderDetail.getPriceAtPurchase())
                 .priceAtPurchase(orderDetail.getPriceAtPurchase())
                 .lineTotal(orderDetail.getPriceAtPurchase() * orderDetail.getQuantity())
+                .subtotal(orderDetail.getPriceAtPurchase() * orderDetail.getQuantity())
+                .productImage(productImage)
                 .build();
     }
 
