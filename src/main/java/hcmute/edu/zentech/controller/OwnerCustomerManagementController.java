@@ -1,16 +1,20 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.dto.request.UpdateCustomerStatusRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.CustomerDetailResponse;
 import hcmute.edu.zentech.dto.response.CustomerOrderHistoryResponse;
 import hcmute.edu.zentech.dto.response.CustomerSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
-import hcmute.edu.zentech.service.OwnerCustomerService;
+import hcmute.edu.zentech.service.OwnerCustomerManagementService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -19,8 +23,9 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/owner/customers")
 @RequiredArgsConstructor
-public class OwnerCustomerController {
-    private final OwnerCustomerService ownerCustomerService;
+public class OwnerCustomerManagementController {
+
+    private final OwnerCustomerManagementService ownerCustomerManagementService;
 
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<CustomerSummaryResponse>>> getCustomers(
@@ -31,13 +36,23 @@ public class OwnerCustomerController {
             @RequestParam(required = false) Boolean active
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                ownerCustomerService.getCustomers(page, size, sort, keyword, active)
+                ownerCustomerManagementService.getCustomers(page, size, sort, keyword, active)
         ));
     }
 
     @GetMapping("/{customerId}")
     public ResponseEntity<ApiResponse<CustomerDetailResponse>> getCustomerDetail(@PathVariable UUID customerId) {
-        return ResponseEntity.ok(ApiResponse.success(ownerCustomerService.getCustomerDetail(customerId)));
+        return ResponseEntity.ok(ApiResponse.success(ownerCustomerManagementService.getCustomerDetail(customerId)));
+    }
+
+    @PatchMapping("/{customerId}/status")
+    public ResponseEntity<ApiResponse<CustomerDetailResponse>> updateCustomerStatus(
+            @PathVariable UUID customerId,
+            @Valid @RequestBody UpdateCustomerStatusRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(
+                ownerCustomerManagementService.updateCustomerStatus(customerId, request.getActive())
+        ));
     }
 
     @GetMapping("/{customerId}/orders")
@@ -48,7 +63,7 @@ public class OwnerCustomerController {
             @RequestParam(defaultValue = "createdAt,desc") String sort
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                ownerCustomerService.getCustomerOrders(customerId, page, size, sort)
+                ownerCustomerManagementService.getCustomerOrders(customerId, page, size, sort)
         ));
     }
 }
