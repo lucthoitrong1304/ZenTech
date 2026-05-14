@@ -13,9 +13,7 @@ import hcmute.edu.zentech.security.jwt.JwtUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.authentication.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -47,6 +45,7 @@ public class AuthService {
     @Value("${app.frontend.url:http://localhost:4200}")
     private String frontendUrl;
 
+    // --- MODULE: ĐĂNG KÝ ---
     @Transactional
     public void registerUser(RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
@@ -72,46 +71,77 @@ public class AuthService {
         log.info("Đã đăng ký tài khoản mới: {}", request.getEmail());
     }
 
+    // --- MODULE: ĐĂNG NHẬP THƯỜNG ---
     public AuthResponse authenticate(LoginRequest request) {
-        userRepository.findByEmail(request.getEmail())
-                .orElseThrow(() -> new RuntimeException("Tài khoản không tồn tại"));
+        // 1. Không nên throw "Tài khoản không tồn tại" ngay từ đầu để tránh tấn công dò tìm email (Enumeration Attack)
+        // Cứ để authenticationManager xử lý toàn bộ quá trình xác thực.
 
-        Authentication authentication;
         try {
-            authentication = authenticationManager.authenticate(
+            Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
             );
-        } catch (BadCredentialsException ex) {
-            throw new RuntimeException("Mật khẩu không đúng");
-        }
 
-        return generateAuthResponse((CustomUserDetails) authentication.getPrincipal());
+            // 2. Lấy đối tượng CustomUserDetails sau khi đã qua bộ lọc của Spring Security
+            CustomUserDetails userDetails = (CustomUserDetails) authentication.getPrincipal();
+
+            // 3. Kiểm tra trạng thái tài khoản chủ động (isActive)
+            // Dù Spring Security có check enabled, tự check giúp bạn trả về message Tiếng Việt chuẩn xác.
+            if (!userDetails.isEnabled()) {
+                throw new RuntimeException("Tài khoản của bạn đã bị khóa hoặc chưa được kích hoạt.");
+            }
+
+            log.info("Người dùng {} đăng nhập thành công", request.getEmail());
+            return generateAuthResponse(userDetails);
+
+        } catch (BadCredentialsException ex) {
+            // Trả về thông báo chung để bảo mật thông tin người dùng
+            throw new RuntimeException("Email hoặc mật khẩu không chính xác.");
+        } catch (DisabledException ex) {
+            throw new RuntimeException("Tài khoản đã bị vô hiệu hóa.");
+        } catch (LockedException ex) {
+            throw new RuntimeException("Tài khoản hiện đang bị tạm khóa.");
+        } catch (Exception ex) {
+            log.error("Lỗi đăng nhập cho email {}: {}", request.getEmail(), ex.getMessage());
+            throw new RuntimeException("Có lỗi hệ thống xảy ra trong quá trình đăng nhập.");
+        }
     }
 
     // --- MODULE: ĐĂNG NHẬP BẰNG GOOGLE ---
     @Transactional
     public AuthResponse authenticateWithGoogle(String idTokenString) {
+        // 1. Xác thực Token từ Google
         GoogleIdToken.Payload payload = googleAuthService.verifyToken(idTokenString);
         if (payload == null) {
-            throw new RuntimeException("Token Google không hợp lệ hoặc đã hết hạn!");
+            log.warn("Cảnh báo: Thử nghiệm đăng nhập Google với Token không hợp lệ.");
+            throw new RuntimeException("Xác thực Google thất bại hoặc Token đã hết hạn.");
         }
 
         String email = payload.getEmail();
         String name = (String) payload.get("name");
+        String pictureUrl = (String) payload.get("picture"); // Lấy thêm ảnh đại diện nếu cần
 
         Optional<AccountUser> userOptional = userRepository.findByEmail(email);
         AccountUser user;
 
         if (userOptional.isPresent()) {
             user = userOptional.get();
+
+            // 2. CHẶN TÀI KHOẢN BỊ KHÓA (Quan trọng nhất)
+            // Đảm bảo tính đồng nhất với luồng Login thường
+            if (!user.isActive()) {
+                log.info("Từ chối đăng nhập Google cho tài khoản bị khóa: {}", email);
+                throw new RuntimeException("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ hỗ trợ.");
+            }
+
+            // Tùy chọn: Cập nhật lại tên/ảnh nếu user có thay đổi bên phía Google
+            log.info("Người dùng Google cũ đăng nhập: {}", email);
         } else {
-            // Lần đầu đăng nhập bằng Google -> Auto đăng ký
+            // 3. Tự động đăng ký cho người dùng mới
             user = AccountUser.builder()
                     .email(email)
-                    // Mật khẩu random vì user Google không xài pass này để login thường
                     .password(passwordEncoder.encode("GOOGLE_SSO_" + UUID.randomUUID().toString()))
                     .role(Role.CUSTOMER)
-                    .isActive(true)
+                    .isActive(true) // Mặc định kích hoạt
                     .createdAt(Instant.now())
                     .build();
             user = userRepository.save(user);
@@ -122,9 +152,10 @@ public class AuthService {
                     .build();
             customerRepository.save(customer);
 
-            log.info("Tạo mới tài khoản từ Google Auth: {}", email);
+            log.info("Tạo mới tài khoản từ Google Auth thành công: {}", email);
         }
 
+        // 4. Trả về Response chuẩn qua CustomUserDetails
         return generateAuthResponse(CustomUserDetails.build(user));
     }
 
