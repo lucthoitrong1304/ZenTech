@@ -17,6 +17,9 @@ public class CustomerOrderItemResponse {
     private String productName;
     private String variantName;
     private int quantity;
+    private double unitPrice;
     private double priceAtPurchase;
     private double lineTotal;
+    private double subtotal;
+    private String productImage;
 }

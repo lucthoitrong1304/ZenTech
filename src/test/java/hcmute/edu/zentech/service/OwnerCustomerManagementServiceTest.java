@@ -40,15 +40,13 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class OwnerCustomerServiceTest {
+class OwnerCustomerManagementServiceTest {
 
     @Mock
     private CustomerRepository customerRepository;
@@ -59,14 +57,18 @@ class OwnerCustomerServiceTest {
     @Mock
     private OrderDetailRepository orderDetailRepository;
 
-    private OwnerCustomerService ownerCustomerService;
+    @Mock
+    private R2StorageService r2StorageService;
+
+    private OwnerCustomerManagementService ownerCustomerManagementService;
 
     @BeforeEach
     void setUp() {
-        ownerCustomerService = new OwnerCustomerService(
+        ownerCustomerManagementService = new OwnerCustomerManagementService(
                 customerRepository,
                 orderRepository,
                 orderDetailRepository,
+                r2StorageService,
                 new OwnerCustomerMapper()
         );
     }
@@ -77,12 +79,12 @@ class OwnerCustomerServiceTest {
         Customer secondCustomer = createCustomer("Bob Tran", "bob@example.com", false, Instant.parse("2026-04-14T10:15:30Z"));
 
         PageRequest pageRequest = PageRequest.of(0, 10);
-        when(customerRepository.searchCustomers(eq("alice"), eq(true), any(Pageable.class)))
+        when(customerRepository.searchCustomers(eq("alice"), eq(true), eq(Role.CUSTOMER), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(firstCustomer, secondCustomer), pageRequest, 2));
         when(orderRepository.findCustomerOrderAggregates(anyList(), eq(OrderStatus.CANCELLED), eq(OrderStatus.COMPLETED), eq(PaymentStatus.REFUNDED), eq(PaymentStatus.SUCCESS)))
                 .thenReturn(List.of(new AggregateProjection(firstCustomer.getId(), 3L, 1500000D, Instant.parse("2026-04-16T08:00:00Z"))));
 
-        PageResponse<CustomerSummaryResponse> response = ownerCustomerService.getCustomers(0, 10, "registeredAt,desc", "  alice  ", true);
+        PageResponse<CustomerSummaryResponse> response = ownerCustomerManagementService.getCustomers(0, 10, "registeredAt,desc", "  alice  ", true);
 
         assertThat(response.getContent()).hasSize(2);
         assertThat(response.getContent().get(0).getCustomerId()).isEqualTo(firstCustomer.getId());
@@ -92,7 +94,7 @@ class OwnerCustomerServiceTest {
         assertThat(response.getContent().get(1).getTotalSpent()).isZero();
 
         ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
-        verify(customerRepository).searchCustomers(eq("alice"), eq(true), pageableCaptor.capture());
+        verify(customerRepository).searchCustomers(eq("alice"), eq(true), eq(Role.CUSTOMER), pageableCaptor.capture());
         assertThat(pageableCaptor.getValue().getSort().getOrderFor("userInfo.createdAt")).isNotNull();
         assertThat(pageableCaptor.getValue().getSort().getOrderFor("userInfo.createdAt").isDescending()).isTrue();
     }
@@ -116,7 +118,7 @@ class OwnerCustomerServiceTest {
         when(orderRepository.findCustomerOrderAggregates(anyList(), eq(OrderStatus.CANCELLED), eq(OrderStatus.COMPLETED), eq(PaymentStatus.REFUNDED), eq(PaymentStatus.SUCCESS)))
                 .thenReturn(List.of(new AggregateProjection(customerId, 2L, 500000D, Instant.parse("2026-04-15T12:00:00Z"))));
 
-        CustomerDetailResponse response = ownerCustomerService.getCustomerDetail(customerId);
+        CustomerDetailResponse response = ownerCustomerManagementService.getCustomerDetail(customerId);
 
         assertThat(response.getCustomerId()).isEqualTo(customerId);
         assertThat(response.getEmail()).isEqualTo("alice@example.com");
@@ -130,7 +132,77 @@ class OwnerCustomerServiceTest {
         UUID customerId = UUID.randomUUID();
         when(customerRepository.findDetailById(customerId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> ownerCustomerService.getCustomerDetail(customerId))
+        assertThatThrownBy(() -> ownerCustomerManagementService.getCustomerDetail(customerId))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining(customerId.toString());
+    }
+
+    @Test
+    void updateCustomerStatusActivatesCustomerAccount() {
+        UUID customerId = UUID.randomUUID();
+        Customer customer = createCustomer("Alice Nguyen", "alice@example.com", false, Instant.parse("2026-04-15T10:15:30Z"));
+        customer.setId(customerId);
+
+        when(customerRepository.findDetailById(customerId)).thenReturn(Optional.of(customer));
+        when(orderRepository.findCustomerOrderAggregates(anyList(), eq(OrderStatus.CANCELLED), eq(OrderStatus.COMPLETED), eq(PaymentStatus.REFUNDED), eq(PaymentStatus.SUCCESS)))
+                .thenReturn(List.of());
+
+        CustomerDetailResponse response = ownerCustomerManagementService.updateCustomerStatus(customerId, true);
+
+        assertThat(customer.getUserInfo().isActive()).isTrue();
+        assertThat(response.isActive()).isTrue();
+        assertThat(response.getCustomerId()).isEqualTo(customerId);
+    }
+
+    @Test
+    void updateCustomerStatusLocksCustomerAccount() {
+        UUID customerId = UUID.randomUUID();
+        Customer customer = createCustomer("Bob Tran", "bob@example.com", true, Instant.parse("2026-04-15T10:15:30Z"));
+        customer.setId(customerId);
+
+        when(customerRepository.findDetailById(customerId)).thenReturn(Optional.of(customer));
+        when(orderRepository.findCustomerOrderAggregates(anyList(), eq(OrderStatus.CANCELLED), eq(OrderStatus.COMPLETED), eq(PaymentStatus.REFUNDED), eq(PaymentStatus.SUCCESS)))
+                .thenReturn(List.of());
+
+        CustomerDetailResponse response = ownerCustomerManagementService.updateCustomerStatus(customerId, false);
+
+        assertThat(customer.getUserInfo().isActive()).isFalse();
+        assertThat(response.isActive()).isFalse();
+        assertThat(response.getCustomerId()).isEqualTo(customerId);
+    }
+
+    @Test
+    void updateCustomerStatusThrowsWhenCustomerDoesNotExist() {
+        UUID customerId = UUID.randomUUID();
+        when(customerRepository.findDetailById(customerId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ownerCustomerManagementService.updateCustomerStatus(customerId, true))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining(customerId.toString());
+    }
+
+    @Test
+    void updateCustomerStatusThrowsWhenAccountRoleIsNotCustomer() {
+        UUID customerId = UUID.randomUUID();
+        Customer customer = createCustomer("Owner User", "owner@example.com", true, Instant.parse("2026-04-15T10:15:30Z"), Role.OWNER);
+        customer.setId(customerId);
+
+        when(customerRepository.findDetailById(customerId)).thenReturn(Optional.of(customer));
+
+        assertThatThrownBy(() -> ownerCustomerManagementService.updateCustomerStatus(customerId, false))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining(customerId.toString());
+    }
+
+    @Test
+    void updateCustomerStatusThrowsWhenAccountRoleIsAdmin() {
+        UUID customerId = UUID.randomUUID();
+        Customer customer = createCustomer("Admin User", "admin@example.com", true, Instant.parse("2026-04-15T10:15:30Z"), Role.ADMIN);
+        customer.setId(customerId);
+
+        when(customerRepository.findDetailById(customerId)).thenReturn(Optional.of(customer));
+
+        assertThatThrownBy(() -> ownerCustomerManagementService.updateCustomerStatus(customerId, false))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining(customerId.toString());
     }
@@ -143,6 +215,7 @@ class OwnerCustomerServiceTest {
 
         Product product = new Product();
         product.setProductName("Keyboard");
+        product.setRepresentativeImageKey("products/keyboard/main.png");
 
         ProductVariant productVariant = ProductVariant.builder()
                 .id(variantId)
@@ -171,15 +244,23 @@ class OwnerCustomerServiceTest {
         when(orderRepository.findByCustomerId(eq(customerId), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(order), PageRequest.of(0, 10), 1));
         when(orderDetailRepository.findByOrder_IdIn(List.of(orderId))).thenReturn(List.of(orderDetail));
+        when(r2StorageService.getPresignedGetUrl("products/keyboard/main.png"))
+                .thenReturn("https://cdn.example.com/products/keyboard/main.png");
 
-        PageResponse<CustomerOrderHistoryResponse> response = ownerCustomerService.getCustomerOrders(customerId, 0, 10, "createdAt,desc");
+        PageResponse<CustomerOrderHistoryResponse> response = ownerCustomerManagementService.getCustomerOrders(customerId, 0, 10, "createdAt,desc");
 
         assertThat(response.getContent()).hasSize(1);
         CustomerOrderHistoryResponse orderResponse = response.getContent().get(0);
         assertThat(orderResponse.getOrderId()).isEqualTo(orderId);
         assertThat(orderResponse.getItems()).hasSize(1);
         assertThat(orderResponse.getItems().get(0).getProductVariantId()).isEqualTo(variantId);
+        assertThat(orderResponse.getItems().get(0).getProductName()).isEqualTo("Keyboard");
+        assertThat(orderResponse.getItems().get(0).getVariantName()).isEqualTo("Black");
+        assertThat(orderResponse.getItems().get(0).getUnitPrice()).isEqualTo(125000D);
         assertThat(orderResponse.getItems().get(0).getLineTotal()).isEqualTo(250000D);
+        assertThat(orderResponse.getItems().get(0).getSubtotal()).isEqualTo(250000D);
+        assertThat(orderResponse.getItems().get(0).getProductImage())
+                .isEqualTo("https://cdn.example.com/products/keyboard/main.png");
 
         ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
         verify(orderRepository).findByCustomerId(eq(customerId), pageableCaptor.capture());
@@ -192,17 +273,21 @@ class OwnerCustomerServiceTest {
         UUID customerId = UUID.randomUUID();
         when(customerRepository.existsById(customerId)).thenReturn(false);
 
-        assertThatThrownBy(() -> ownerCustomerService.getCustomerOrders(customerId, 0, 10, "createdAt,desc"))
+        assertThatThrownBy(() -> ownerCustomerManagementService.getCustomerOrders(customerId, 0, 10, "createdAt,desc"))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining(customerId.toString());
     }
 
     private Customer createCustomer(String fullName, String email, boolean active, Instant registeredAt) {
+        return createCustomer(fullName, email, active, registeredAt, Role.CUSTOMER);
+    }
+
+    private Customer createCustomer(String fullName, String email, boolean active, Instant registeredAt, Role role) {
         AccountUser user = AccountUser.builder()
                 .id(UUID.randomUUID())
                 .email(email)
                 .password("secret")
-                .role(Role.CUSTOMER)
+                .role(role)
                 .isActive(active)
                 .createdAt(registeredAt)
                 .build();

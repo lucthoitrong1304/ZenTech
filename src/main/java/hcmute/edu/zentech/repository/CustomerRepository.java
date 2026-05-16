@@ -1,6 +1,7 @@
 package hcmute.edu.zentech.repository;
 
 import hcmute.edu.zentech.model.Customer;
+import hcmute.edu.zentech.model.Role;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -25,6 +26,7 @@ public interface CustomerRepository extends JpaRepository<Customer, UUID> {
                         OR LOWER(c.fullName) LIKE LOWER(CONCAT('%', :keyword, '%'))
                         OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')))
                       AND (:active IS NULL OR u.isActive = :active)
+                      AND u.role = :role
                     """,
             countQuery = """
                     SELECT COUNT(c)
@@ -34,11 +36,13 @@ public interface CustomerRepository extends JpaRepository<Customer, UUID> {
                         OR LOWER(c.fullName) LIKE LOWER(CONCAT('%', :keyword, '%'))
                         OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')))
                       AND (:active IS NULL OR u.isActive = :active)
+                      AND u.role = :role
                     """
     )
     Page<Customer> searchCustomers(
             @Param("keyword") String keyword,
             @Param("active") Boolean active,
+            @Param("role") Role role,
             Pageable pageable
     );
 

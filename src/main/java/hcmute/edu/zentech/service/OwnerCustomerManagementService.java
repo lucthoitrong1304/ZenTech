@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-public class OwnerCustomerService {
+public class OwnerCustomerManagementService {
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 100;
@@ -39,6 +39,7 @@ public class OwnerCustomerService {
     private final CustomerRepository customerRepository;
     private final OrderRepository orderRepository;
     private final OrderDetailRepository orderDetailRepository;
+    private final R2StorageService r2StorageService;
     private final OwnerCustomerMapper ownerCustomerMapper;
 
     public PageResponse<CustomerSummaryResponse> getCustomers(int page, int size, String sort, String keyword, Boolean active) {
@@ -48,13 +49,12 @@ public class OwnerCustomerService {
                 buildCustomerSort(sort)
         );
 
-        Page<Customer> customerPage = customerRepository.searchCustomers(normalizeKeyword(keyword), active, pageable);
+        Page<Customer> customerPage = customerRepository.searchCustomers(normalizeKeyword(keyword), active, Role.CUSTOMER, pageable);
         Map<UUID, CustomerOrderAggregateProjection> aggregateMap = getAggregateMap(
                 customerPage.getContent().stream().map(Customer::getId).toList()
         );
 
         List<CustomerSummaryResponse> content = customerPage.getContent().stream()
-                .filter(customer -> customer.getUserInfo().getRole() == Role.CUSTOMER)
                 .map(customer -> ownerCustomerMapper.toCustomerSummaryResponse(customer, aggregateMap.get(customer.getId())))
                 .toList();
 
@@ -65,6 +65,20 @@ public class OwnerCustomerService {
         Customer customer = customerRepository.findDetailById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer", "id", customerId));
 
+        CustomerOrderAggregateProjection aggregate = getAggregateMap(List.of(customerId)).get(customerId);
+        return ownerCustomerMapper.toCustomerDetailResponse(customer, aggregate);
+    }
+
+    @Transactional
+    public CustomerDetailResponse updateCustomerStatus(UUID customerId, Boolean active) {
+        Customer customer = customerRepository.findDetailById(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer", "id", customerId));
+
+        if (customer.getUserInfo().getRole() != Role.CUSTOMER) {
+            throw new ResourceNotFoundException("Customer", "id", customerId);
+        }
+
+        customer.getUserInfo().setActive(active);
         CustomerOrderAggregateProjection aggregate = getAggregateMap(List.of(customerId)).get(customerId);
         return ownerCustomerMapper.toCustomerDetailResponse(customer, aggregate);
     }
@@ -81,14 +95,15 @@ public class OwnerCustomerService {
         );
 
         Page<Order> orderPage = orderRepository.findByCustomerId(customerId, pageable);
-        Map<UUID, List<OrderDetail>> orderDetailsMap = getOrderDetailsMap(
-                orderPage.getContent().stream().map(Order::getId).toList()
-        );
+        List<OrderDetail> orderDetails = getOrderDetails(orderPage.getContent().stream().map(Order::getId).toList());
+        Map<UUID, List<OrderDetail>> orderDetailsMap = groupOrderDetailsByOrderId(orderDetails);
+        Map<UUID, String> productImageUrls = getProductImageUrls(orderDetails);
 
         List<CustomerOrderHistoryResponse> content = orderPage.getContent().stream()
                 .map(order -> ownerCustomerMapper.toCustomerOrderHistoryResponse(
                         order,
-                        orderDetailsMap.getOrDefault(order.getId(), List.of())
+                        orderDetailsMap.getOrDefault(order.getId(), List.of()),
+                        productImageUrls
                 ))
                 .toList();
 
@@ -110,13 +125,49 @@ public class OwnerCustomerService {
                 .collect(Collectors.toMap(CustomerOrderAggregateProjection::getCustomerId, Function.identity()));
     }
 
-    private Map<UUID, List<OrderDetail>> getOrderDetailsMap(List<UUID> orderIds) {
+    private List<OrderDetail> getOrderDetails(List<UUID> orderIds) {
         if (orderIds == null || orderIds.isEmpty()) {
+            return List.of();
+        }
+
+        return orderDetailRepository.findByOrder_IdIn(orderIds);
+    }
+
+    private Map<UUID, List<OrderDetail>> groupOrderDetailsByOrderId(List<OrderDetail> orderDetails) {
+        if (orderDetails == null || orderDetails.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        return orderDetailRepository.findByOrder_IdIn(orderIds).stream()
+        return orderDetails.stream()
                 .collect(Collectors.groupingBy(orderDetail -> orderDetail.getOrder().getId()));
+    }
+
+    private Map<UUID, String> getProductImageUrls(List<OrderDetail> orderDetails) {
+        if (orderDetails == null || orderDetails.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        return orderDetails.stream()
+                .map(orderDetail -> new OrderDetailImage(orderDetail, getProductImageUrl(orderDetail.getProductVariant())))
+                .filter(detailImage -> detailImage.orderDetail().getId() != null && detailImage.imageUrl() != null)
+                .collect(Collectors.toMap(
+                        detailImage -> detailImage.orderDetail().getId(),
+                        OrderDetailImage::imageUrl,
+                        (left, right) -> left
+                ));
+    }
+
+    private String getProductImageUrl(ProductVariant productVariant) {
+        if (productVariant == null || productVariant.getProduct() == null) {
+            return null;
+        }
+
+        String representativeImageKey = productVariant.getProduct().getRepresentativeImageKey();
+        if (representativeImageKey == null || representativeImageKey.isBlank()) {
+            return null;
+        }
+
+        return r2StorageService.getPresignedGetUrl(representativeImageKey);
     }
 
     private String normalizeKeyword(String keyword) {
@@ -167,6 +218,13 @@ public class OwnerCustomerService {
         String mappedField = sortableFields.getOrDefault(requestedField, sortableFields.get(defaultField));
         Sort.Direction direction = "desc".equalsIgnoreCase(directionValue) ? Sort.Direction.DESC : Sort.Direction.ASC;
 
-        return Sort.by(new Sort.Order(direction, mappedField).nullsLast());
+        //Thêm trường "id" (mặc định tăng dần) làm tiêu chí sắp xếp thứ 2
+        return Sort.by(
+                new Sort.Order(direction, mappedField).nullsLast(),
+                new Sort.Order(Sort.Direction.ASC, "id")
+        );
+    }
+
+    private record OrderDetailImage(OrderDetail orderDetail, String imageUrl) {
     }
 }
