@@ -31,6 +31,10 @@ public class ChatWebSocketController {
             @Valid @Payload ChatMessageRequest request,
             Principal principal
     ) {
+        if (principal == null) {
+            return;
+        }
+
         try {
             chatMessageService.sendMessage(
                     conversationId,
@@ -49,9 +53,13 @@ public class ChatWebSocketController {
             @Payload TypingEventRequest request,
             Principal principal
     ) {
+        if (principal == null) {
+            return;
+        }
+
         try {
             messagingTemplate.convertAndSend(
-                    "/topic/conversations/" + conversationId,
+                    "/topic/conversations." + conversationId,
                     TypingEventResponse.builder()
                             .conversationId(conversationId)
                             .accountId(getAccountId(principal))

@@ -80,13 +80,13 @@ public class ChatMessageService {
         conversationRepository.save(conversation);
 
         ChatMessageResponse response = toChatMessageResponse(savedMessage);
-        messagingTemplate.convertAndSend("/topic/conversations/" + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
 
         if (conversation.getStatus() == ConversationStatus.BOT_CONSULTING
                 && participant.getUserType() == ParticipantType.CUSTOMER) {
             chatBotService.handleCustomerMessage(conversationId, response)
                     .ifPresent(botResponse -> messagingTemplate.convertAndSend(
-                            "/topic/conversations/" + conversationId,
+                            "/topic/conversations." + conversationId,
                             botResponse
                     ));
         }
