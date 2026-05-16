@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -24,6 +25,7 @@ public class ChatMessageResponse {
     private UUID senderReferenceId;
     private ChatMessageType messageType;
     private String content;
+    private List<ChatAttachmentResponse> attachments;
     private Instant createdAt;
     private Instant deletedAt;
 }
