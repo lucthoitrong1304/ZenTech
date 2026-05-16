@@ -21,7 +21,7 @@ public class Employee {
 
     private String imageUrl;
 
-    @OneToOne(cascade = CascadeType.ALL)
+    @OneToOne
     @JoinColumn(name = "account_id", referencedColumnName = "account_id")
     private AccountUser userInfo;
 }
