@@ -28,4 +28,7 @@ public class AuthResponse {
 
     // Thêm cái này nếu muốn FE xử lý mượt hơn
     private Long expiresIn;
+
+    // ---> THÊM CỜ NÀY VÀO NÈ <---
+    private Boolean isPasswordSet; // Dùng Boolean (đối tượng) để lỡ có null thì nó bị ẩn đi nhờ @JsonInclude
 }

@@ -29,6 +29,9 @@ public class Customer {
     @JoinColumn(name = "account_id", referencedColumnName = "account_id", nullable = false, unique = true)
     private AccountUser userInfo;
 
+    @Column(name = "image_url", length = 500)
+    private String imageUrl;
+
     @OneToOne(cascade = CascadeType.REMOVE, optional = true)
     @JoinColumn(name = "cart_id", referencedColumnName = "cart_id", nullable = true, unique = true)
     private Cart cart;
