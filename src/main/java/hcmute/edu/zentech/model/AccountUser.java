@@ -23,6 +23,8 @@ public class AccountUser {
 
     private String password;
 
+    private boolean isPasswordSet; // true nếu đã đặt mật khẩu, false nếu là tài khoản Google mới tạo
+
     @Enumerated(EnumType.STRING)
     private Role role;
 

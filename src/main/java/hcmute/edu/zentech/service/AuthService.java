@@ -57,6 +57,7 @@ public class AuthService {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(Role.CUSTOMER)
                 .isActive(true)
+                .isPasswordSet(true) // <-- Mặc định là true
                 .createdAt(Instant.now())
                 .build();
 
@@ -118,7 +119,7 @@ public class AuthService {
 
         String email = payload.getEmail();
         String name = (String) payload.get("name");
-        String pictureUrl = (String) payload.get("picture"); // Lấy thêm ảnh đại diện nếu cần
+        String pictureUrl = (String) payload.get("picture");
 
         Optional<AccountUser> userOptional = userRepository.findByEmail(email);
         AccountUser user;
@@ -142,6 +143,7 @@ public class AuthService {
                     .password(passwordEncoder.encode("GOOGLE_SSO_" + UUID.randomUUID().toString()))
                     .role(Role.CUSTOMER)
                     .isActive(true) // Mặc định kích hoạt
+                    .isPasswordSet(false) // <-- Đặt là false vì đây là pass ngẫu nhiên hệ thống tự sinh
                     .createdAt(Instant.now())
                     .build();
             user = userRepository.save(user);
@@ -149,6 +151,7 @@ public class AuthService {
             Customer customer = Customer.builder()
                     .userInfo(user)
                     .fullName(name != null ? name : "Người dùng Google")
+                    .imageUrl(pictureUrl)
                     .build();
             customerRepository.save(customer);
 
@@ -225,12 +228,17 @@ public class AuthService {
                 .map(GrantedAuthority::getAuthority)
                 .toList();
 
+        // Query lên để lấy thuộc tính isPasswordSet từ Database
+        AccountUser user = userRepository.findByEmail(userDetails.getEmail())
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy user"));
+
         return AuthResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .accountId(userDetails.getId().toString())
                 .email(userDetails.getEmail())
                 .roles(roles)
+                .isPasswordSet(user.isPasswordSet()) // ---> THÊM DÒNG NÀY VÀO NÈ
                 .build();
     }
 }
