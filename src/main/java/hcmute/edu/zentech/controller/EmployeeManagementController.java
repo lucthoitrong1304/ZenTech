@@ -5,7 +5,7 @@ import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.EmployeeSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.model.Role;
-import hcmute.edu.zentech.service.OwnerEmployeeService;
+import hcmute.edu.zentech.service.EmployeeManagementService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -19,8 +19,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/owner/employees")
 @RequiredArgsConstructor
-public class OwnerEmployeeController {
-    private final OwnerEmployeeService ownerEmployeeService;
+public class EmployeeManagementController {
+    private final EmployeeManagementService employeeManagementService;
 
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<EmployeeSummaryResponse>>> getEmployees(
@@ -32,7 +32,7 @@ public class OwnerEmployeeController {
             @RequestParam(required = false) Role role
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                ownerEmployeeService.getEmployees(page, size, sort, keyword, active, role)
+                employeeManagementService.getEmployees(page, size, sort, keyword, active, role)
         ));
     }
 
@@ -40,6 +40,6 @@ public class OwnerEmployeeController {
     public ResponseEntity<ApiResponse<EmployeeSummaryResponse>> createEmployee(
             @Valid @RequestBody EmployeeCreateRequest request
     ) {
-        return ResponseEntity.ok(ApiResponse.success(ownerEmployeeService.createEmployee(request)));
+        return ResponseEntity.ok(ApiResponse.success(employeeManagementService.createEmployee(request)));
     }
 }

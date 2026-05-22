@@ -3,7 +3,7 @@ package hcmute.edu.zentech.service;
 import hcmute.edu.zentech.dto.request.EmployeeCreateRequest;
 import hcmute.edu.zentech.dto.response.EmployeeSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
-import hcmute.edu.zentech.mapper.OwnerEmployeeMapper;
+import hcmute.edu.zentech.mapper.EmployeeManagementMapper;
 import hcmute.edu.zentech.model.AccountUser;
 import hcmute.edu.zentech.model.Employee;
 import hcmute.edu.zentech.model.PasswordResetToken;
@@ -29,7 +29,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-public class OwnerEmployeeService {
+public class EmployeeManagementService {
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 100;
@@ -40,7 +40,7 @@ public class OwnerEmployeeService {
     private final PasswordResetTokenRepository resetTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
-    private final OwnerEmployeeMapper ownerEmployeeMapper;
+    private final EmployeeManagementMapper employeeManagementMapper;
 
     @Value("${app.frontend.url:http://localhost:4200}")
     private String frontendUrl;
@@ -59,7 +59,7 @@ public class OwnerEmployeeService {
         return PageResponse.from(
                 employeePage,
                 employeePage.getContent().stream()
-                        .map(ownerEmployeeMapper::toEmployeeSummaryResponse)
+                        .map(employeeManagementMapper::toEmployeeSummaryResponse)
                         .toList()
         );
     }
@@ -98,7 +98,7 @@ public class OwnerEmployeeService {
 
         emailService.sendResetPasswordEmail(account.getEmail(), frontendUrl + "/reset-password?token=" + resetTokenString);
 
-        return ownerEmployeeMapper.toEmployeeSummaryResponse(employee);
+        return employeeManagementMapper.toEmployeeSummaryResponse(employee);
     }
 
     private void validateEmployeeRole(Role role) {

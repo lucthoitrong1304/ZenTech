@@ -9,7 +9,7 @@ import hcmute.edu.zentech.security.SecurityConfig;
 import hcmute.edu.zentech.security.jwt.AuthEntryPointJwt;
 import hcmute.edu.zentech.security.jwt.JwtAuthenticationFilter;
 import hcmute.edu.zentech.security.jwt.JwtUtils;
-import hcmute.edu.zentech.service.OwnerEmployeeService;
+import hcmute.edu.zentech.service.EmployeeManagementService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -33,16 +33,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = OwnerEmployeeController.class)
+@WebMvcTest(controllers = EmployeeManagementController.class)
 @AutoConfigureMockMvc(addFilters = true)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, AuthEntryPointJwt.class})
-class OwnerEmployeeControllerSecurityTest {
+class EmployeeManagementControllerSecurityTest {
 
     @Autowired
     private MockMvc mockMvc;
 
     @MockBean
-    private OwnerEmployeeService ownerEmployeeService;
+    private EmployeeManagementService employeeManagementService;
 
     @MockBean
     private CustomUserDetailsService customUserDetailsService;
@@ -64,7 +64,7 @@ class OwnerEmployeeControllerSecurityTest {
 
     @Test
     void getEmployeesAllowsOwnerManagerAndAdminRoles() throws Exception {
-        given(ownerEmployeeService.getEmployees(anyInt(), anyInt(), anyString(), any(), any(), any()))
+        given(employeeManagementService.getEmployees(anyInt(), anyInt(), anyString(), any(), any(), any()))
                 .willReturn(PageResponse.<EmployeeSummaryResponse>builder()
                         .content(List.of())
                         .page(0)
@@ -104,7 +104,7 @@ class OwnerEmployeeControllerSecurityTest {
 
     @Test
     void createEmployeeAllowsManagerRole() throws Exception {
-        given(ownerEmployeeService.createEmployee(any(EmployeeCreateRequest.class)))
+        given(employeeManagementService.createEmployee(any(EmployeeCreateRequest.class)))
                 .willReturn(EmployeeSummaryResponse.builder()
                         .employeeId(UUID.randomUUID())
                         .accountId(UUID.randomUUID())
