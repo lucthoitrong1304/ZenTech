@@ -23,7 +23,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/owner/customers")
 @RequiredArgsConstructor
-public class OwnerCustomerManagementController {
+public class CustomerManagementController {
 
     private final CustomerManagementService customerManagementService;
 

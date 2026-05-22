@@ -32,10 +32,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = OwnerCustomerManagementController.class)
+@WebMvcTest(controllers = CustomerManagementController.class)
 @AutoConfigureMockMvc(addFilters = true)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, AuthEntryPointJwt.class})
-class OwnerCustomerManagementControllerSecurityTest {
+class CustomerManagementControllerSecurityTest {
 
     @Autowired
     private MockMvc mockMvc;
