@@ -8,7 +8,7 @@ import hcmute.edu.zentech.security.SecurityConfig;
 import hcmute.edu.zentech.security.jwt.AuthEntryPointJwt;
 import hcmute.edu.zentech.security.jwt.JwtAuthenticationFilter;
 import hcmute.edu.zentech.security.jwt.JwtUtils;
-import hcmute.edu.zentech.service.OwnerCustomerManagementService;
+import hcmute.edu.zentech.service.CustomerManagementService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -41,7 +41,7 @@ class OwnerCustomerManagementControllerSecurityTest {
     private MockMvc mockMvc;
 
     @MockBean
-    private OwnerCustomerManagementService ownerCustomerManagementService;
+    private CustomerManagementService customerManagementService;
 
     @MockBean
     private CustomUserDetailsService customUserDetailsService;
@@ -63,7 +63,7 @@ class OwnerCustomerManagementControllerSecurityTest {
 
     @Test
     void getCustomersAllowsOwnerRole() throws Exception {
-        given(ownerCustomerManagementService.getCustomers(anyInt(), anyInt(), anyString(), any(), any()))
+        given(customerManagementService.getCustomers(anyInt(), anyInt(), anyString(), any(), any()))
                 .willReturn(PageResponse.<CustomerSummaryResponse>builder()
                         .content(List.of())
                         .page(0)
@@ -80,7 +80,7 @@ class OwnerCustomerManagementControllerSecurityTest {
 
     @Test
     void getCustomersAllowsAdminRole() throws Exception {
-        given(ownerCustomerManagementService.getCustomers(anyInt(), anyInt(), anyString(), any(), any()))
+        given(customerManagementService.getCustomers(anyInt(), anyInt(), anyString(), any(), any()))
                 .willReturn(PageResponse.<CustomerSummaryResponse>builder()
                         .content(List.of())
                         .page(0)
@@ -115,7 +115,7 @@ class OwnerCustomerManagementControllerSecurityTest {
     @Test
     void updateCustomerStatusAllowsOwnerRole() throws Exception {
         UUID customerId = UUID.randomUUID();
-        given(ownerCustomerManagementService.updateCustomerStatus(any(UUID.class), anyBoolean()))
+        given(customerManagementService.updateCustomerStatus(any(UUID.class), anyBoolean()))
                 .willReturn(CustomerDetailResponse.builder()
                         .customerId(customerId)
                         .active(false)
@@ -133,7 +133,7 @@ class OwnerCustomerManagementControllerSecurityTest {
     @Test
     void updateCustomerStatusAllowsAdminRole() throws Exception {
         UUID customerId = UUID.randomUUID();
-        given(ownerCustomerManagementService.updateCustomerStatus(any(UUID.class), anyBoolean()))
+        given(customerManagementService.updateCustomerStatus(any(UUID.class), anyBoolean()))
                 .willReturn(CustomerDetailResponse.builder()
                         .customerId(customerId)
                         .active(true)

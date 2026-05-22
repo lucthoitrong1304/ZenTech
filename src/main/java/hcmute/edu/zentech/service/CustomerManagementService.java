@@ -5,7 +5,7 @@ import hcmute.edu.zentech.dto.response.CustomerOrderHistoryResponse;
 import hcmute.edu.zentech.dto.response.CustomerSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
-import hcmute.edu.zentech.mapper.OwnerCustomerMapper;
+import hcmute.edu.zentech.mapper.CustomerManagementMapper;
 import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.OrderDetailRepository;
@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-public class OwnerCustomerManagementService {
+public class CustomerManagementService {
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 100;
@@ -40,7 +40,7 @@ public class OwnerCustomerManagementService {
     private final OrderRepository orderRepository;
     private final OrderDetailRepository orderDetailRepository;
     private final R2StorageService r2StorageService;
-    private final OwnerCustomerMapper ownerCustomerMapper;
+    private final CustomerManagementMapper customerManagementMapper;
 
     public PageResponse<CustomerSummaryResponse> getCustomers(int page, int size, String sort, String keyword, Boolean active) {
         Pageable pageable = PageRequest.of(
@@ -55,7 +55,7 @@ public class OwnerCustomerManagementService {
         );
 
         List<CustomerSummaryResponse> content = customerPage.getContent().stream()
-                .map(customer -> ownerCustomerMapper.toCustomerSummaryResponse(customer, aggregateMap.get(customer.getId())))
+                .map(customer -> customerManagementMapper.toCustomerSummaryResponse(customer, aggregateMap.get(customer.getId())))
                 .toList();
 
         return PageResponse.from(customerPage, content);
@@ -66,7 +66,7 @@ public class OwnerCustomerManagementService {
                 .orElseThrow(() -> new ResourceNotFoundException("Customer", "id", customerId));
 
         CustomerOrderAggregateProjection aggregate = getAggregateMap(List.of(customerId)).get(customerId);
-        return ownerCustomerMapper.toCustomerDetailResponse(customer, aggregate);
+        return customerManagementMapper.toCustomerDetailResponse(customer, aggregate);
     }
 
     @Transactional
@@ -80,7 +80,7 @@ public class OwnerCustomerManagementService {
 
         customer.getUserInfo().setActive(active);
         CustomerOrderAggregateProjection aggregate = getAggregateMap(List.of(customerId)).get(customerId);
-        return ownerCustomerMapper.toCustomerDetailResponse(customer, aggregate);
+        return customerManagementMapper.toCustomerDetailResponse(customer, aggregate);
     }
 
     public PageResponse<CustomerOrderHistoryResponse> getCustomerOrders(UUID customerId, int page, int size, String sort) {
@@ -100,7 +100,7 @@ public class OwnerCustomerManagementService {
         Map<UUID, String> productImageUrls = getProductImageUrls(orderDetails);
 
         List<CustomerOrderHistoryResponse> content = orderPage.getContent().stream()
-                .map(order -> ownerCustomerMapper.toCustomerOrderHistoryResponse(
+                .map(order -> customerManagementMapper.toCustomerOrderHistoryResponse(
                         order,
                         orderDetailsMap.getOrDefault(order.getId(), List.of()),
                         productImageUrls

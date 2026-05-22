@@ -6,7 +6,7 @@ import hcmute.edu.zentech.dto.response.CustomerDetailResponse;
 import hcmute.edu.zentech.dto.response.CustomerOrderHistoryResponse;
 import hcmute.edu.zentech.dto.response.CustomerSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
-import hcmute.edu.zentech.service.OwnerCustomerManagementService;
+import hcmute.edu.zentech.service.CustomerManagementService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -25,7 +25,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class OwnerCustomerManagementController {
 
-    private final OwnerCustomerManagementService ownerCustomerManagementService;
+    private final CustomerManagementService customerManagementService;
 
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<CustomerSummaryResponse>>> getCustomers(
@@ -36,13 +36,13 @@ public class OwnerCustomerManagementController {
             @RequestParam(required = false) Boolean active
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                ownerCustomerManagementService.getCustomers(page, size, sort, keyword, active)
+                customerManagementService.getCustomers(page, size, sort, keyword, active)
         ));
     }
 
     @GetMapping("/{customerId}")
     public ResponseEntity<ApiResponse<CustomerDetailResponse>> getCustomerDetail(@PathVariable UUID customerId) {
-        return ResponseEntity.ok(ApiResponse.success(ownerCustomerManagementService.getCustomerDetail(customerId)));
+        return ResponseEntity.ok(ApiResponse.success(customerManagementService.getCustomerDetail(customerId)));
     }
 
     @PatchMapping("/{customerId}/status")
@@ -51,7 +51,7 @@ public class OwnerCustomerManagementController {
             @Valid @RequestBody UpdateCustomerStatusRequest request
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                ownerCustomerManagementService.updateCustomerStatus(customerId, request.getActive())
+                customerManagementService.updateCustomerStatus(customerId, request.getActive())
         ));
     }
 
@@ -63,7 +63,7 @@ public class OwnerCustomerManagementController {
             @RequestParam(defaultValue = "createdAt,desc") String sort
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                ownerCustomerManagementService.getCustomerOrders(customerId, page, size, sort)
+                customerManagementService.getCustomerOrders(customerId, page, size, sort)
         ));
     }
 }
