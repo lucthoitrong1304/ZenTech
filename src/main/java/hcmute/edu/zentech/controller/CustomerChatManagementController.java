@@ -26,7 +26,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/owner/chat")
 @RequiredArgsConstructor
-public class OwnerChatController {
+public class CustomerChatManagementController {
     private final ChatConversationService chatConversationService;
     private final TransferRequestService transferRequestService;
 
