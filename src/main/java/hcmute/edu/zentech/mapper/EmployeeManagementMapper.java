@@ -6,7 +6,7 @@ import hcmute.edu.zentech.model.Employee;
 import org.springframework.stereotype.Component;
 
 @Component
-public class OwnerEmployeeMapper {
+public class EmployeeManagementMapper {
 
     public EmployeeSummaryResponse toEmployeeSummaryResponse(Employee employee) {
         AccountUser account = employee.getUserInfo();

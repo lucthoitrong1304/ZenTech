@@ -3,7 +3,7 @@ package hcmute.edu.zentech.service;
 import hcmute.edu.zentech.dto.request.EmployeeCreateRequest;
 import hcmute.edu.zentech.dto.response.EmployeeSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
-import hcmute.edu.zentech.mapper.OwnerEmployeeMapper;
+import hcmute.edu.zentech.mapper.EmployeeManagementMapper;
 import hcmute.edu.zentech.model.AccountUser;
 import hcmute.edu.zentech.model.Employee;
 import hcmute.edu.zentech.model.PasswordResetToken;
@@ -37,7 +37,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class OwnerEmployeeServiceTest {
+class EmployeeManagementServiceTest {
 
     @Mock
     private EmployeeRepository employeeRepository;
@@ -54,19 +54,19 @@ class OwnerEmployeeServiceTest {
     @Mock
     private EmailService emailService;
 
-    private OwnerEmployeeService ownerEmployeeService;
+    private EmployeeManagementService employeeManagementService;
 
     @BeforeEach
     void setUp() {
-        ownerEmployeeService = new OwnerEmployeeService(
+        employeeManagementService = new EmployeeManagementService(
                 employeeRepository,
                 accountUserRepository,
                 resetTokenRepository,
                 passwordEncoder,
                 emailService,
-                new OwnerEmployeeMapper()
+                new EmployeeManagementMapper()
         );
-        ReflectionTestUtils.setField(ownerEmployeeService, "frontendUrl", "http://localhost:4200");
+        ReflectionTestUtils.setField(employeeManagementService, "frontendUrl", "http://localhost:4200");
     }
 
     @Test
@@ -86,7 +86,7 @@ class OwnerEmployeeServiceTest {
             return employee;
         });
 
-        EmployeeSummaryResponse response = ownerEmployeeService.createEmployee(request);
+        EmployeeSummaryResponse response = employeeManagementService.createEmployee(request);
 
         assertThat(response.getEmployeeId()).isNotNull();
         assertThat(response.getAccountId()).isNotNull();
@@ -119,7 +119,7 @@ class OwnerEmployeeServiceTest {
         EmployeeCreateRequest request = createRequest("employee@example.com", "Employee One", Role.EMPLOYEE);
         when(accountUserRepository.existsByEmailIgnoreCase("employee@example.com")).thenReturn(true);
 
-        assertThatThrownBy(() -> ownerEmployeeService.createEmployee(request))
+        assertThatThrownBy(() -> employeeManagementService.createEmployee(request))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Email");
 
@@ -132,7 +132,7 @@ class OwnerEmployeeServiceTest {
     void createEmployeeRejectsNonEmployeeRoles() {
         EmployeeCreateRequest request = createRequest("admin@example.com", "Admin One", Role.ADMIN);
 
-        assertThatThrownBy(() -> ownerEmployeeService.createEmployee(request))
+        assertThatThrownBy(() -> employeeManagementService.createEmployee(request))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("EMPLOYEE");
 
@@ -147,7 +147,7 @@ class OwnerEmployeeServiceTest {
         when(employeeRepository.searchEmployees(eq("alice"), eq(true), eq(Role.MANAGER), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(employee), pageRequest, 1));
 
-        PageResponse<EmployeeSummaryResponse> response = ownerEmployeeService.getEmployees(
+        PageResponse<EmployeeSummaryResponse> response = employeeManagementService.getEmployees(
                 0,
                 10,
                 "email,asc",
@@ -171,7 +171,7 @@ class OwnerEmployeeServiceTest {
         when(employeeRepository.searchEmployees(eq(null), eq(null), eq(null), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 10), 0));
 
-        ownerEmployeeService.getEmployees(-1, 0, "unknown,desc", null, null, null);
+        employeeManagementService.getEmployees(-1, 0, "unknown,desc", null, null, null);
 
         ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
         verify(employeeRepository).searchEmployees(eq(null), eq(null), eq(null), pageableCaptor.capture());
