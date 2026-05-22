@@ -5,7 +5,7 @@ import hcmute.edu.zentech.dto.response.CustomerOrderHistoryResponse;
 import hcmute.edu.zentech.dto.response.CustomerSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
-import hcmute.edu.zentech.mapper.OwnerCustomerMapper;
+import hcmute.edu.zentech.mapper.CustomerManagementMapper;
 import hcmute.edu.zentech.model.AccountUser;
 import hcmute.edu.zentech.model.Address;
 import hcmute.edu.zentech.model.Customer;
@@ -46,7 +46,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class OwnerCustomerManagementServiceTest {
+class CustomerManagementServiceTest {
 
     @Mock
     private CustomerRepository customerRepository;
@@ -60,16 +60,16 @@ class OwnerCustomerManagementServiceTest {
     @Mock
     private R2StorageService r2StorageService;
 
-    private OwnerCustomerManagementService ownerCustomerManagementService;
+    private CustomerManagementService customerManagementService;
 
     @BeforeEach
     void setUp() {
-        ownerCustomerManagementService = new OwnerCustomerManagementService(
+        customerManagementService = new CustomerManagementService(
                 customerRepository,
                 orderRepository,
                 orderDetailRepository,
                 r2StorageService,
-                new OwnerCustomerMapper()
+                new CustomerManagementMapper()
         );
     }
 
@@ -84,7 +84,7 @@ class OwnerCustomerManagementServiceTest {
         when(orderRepository.findCustomerOrderAggregates(anyList(), eq(OrderStatus.CANCELLED), eq(OrderStatus.COMPLETED), eq(PaymentStatus.REFUNDED), eq(PaymentStatus.SUCCESS)))
                 .thenReturn(List.of(new AggregateProjection(firstCustomer.getId(), 3L, 1500000D, Instant.parse("2026-04-16T08:00:00Z"))));
 
-        PageResponse<CustomerSummaryResponse> response = ownerCustomerManagementService.getCustomers(0, 10, "registeredAt,desc", "  alice  ", true);
+        PageResponse<CustomerSummaryResponse> response = customerManagementService.getCustomers(0, 10, "registeredAt,desc", "  alice  ", true);
 
         assertThat(response.getContent()).hasSize(2);
         assertThat(response.getContent().get(0).getCustomerId()).isEqualTo(firstCustomer.getId());
@@ -118,7 +118,7 @@ class OwnerCustomerManagementServiceTest {
         when(orderRepository.findCustomerOrderAggregates(anyList(), eq(OrderStatus.CANCELLED), eq(OrderStatus.COMPLETED), eq(PaymentStatus.REFUNDED), eq(PaymentStatus.SUCCESS)))
                 .thenReturn(List.of(new AggregateProjection(customerId, 2L, 500000D, Instant.parse("2026-04-15T12:00:00Z"))));
 
-        CustomerDetailResponse response = ownerCustomerManagementService.getCustomerDetail(customerId);
+        CustomerDetailResponse response = customerManagementService.getCustomerDetail(customerId);
 
         assertThat(response.getCustomerId()).isEqualTo(customerId);
         assertThat(response.getEmail()).isEqualTo("alice@example.com");
@@ -132,7 +132,7 @@ class OwnerCustomerManagementServiceTest {
         UUID customerId = UUID.randomUUID();
         when(customerRepository.findDetailById(customerId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> ownerCustomerManagementService.getCustomerDetail(customerId))
+        assertThatThrownBy(() -> customerManagementService.getCustomerDetail(customerId))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining(customerId.toString());
     }
@@ -147,7 +147,7 @@ class OwnerCustomerManagementServiceTest {
         when(orderRepository.findCustomerOrderAggregates(anyList(), eq(OrderStatus.CANCELLED), eq(OrderStatus.COMPLETED), eq(PaymentStatus.REFUNDED), eq(PaymentStatus.SUCCESS)))
                 .thenReturn(List.of());
 
-        CustomerDetailResponse response = ownerCustomerManagementService.updateCustomerStatus(customerId, true);
+        CustomerDetailResponse response = customerManagementService.updateCustomerStatus(customerId, true);
 
         assertThat(customer.getUserInfo().isActive()).isTrue();
         assertThat(response.isActive()).isTrue();
@@ -164,7 +164,7 @@ class OwnerCustomerManagementServiceTest {
         when(orderRepository.findCustomerOrderAggregates(anyList(), eq(OrderStatus.CANCELLED), eq(OrderStatus.COMPLETED), eq(PaymentStatus.REFUNDED), eq(PaymentStatus.SUCCESS)))
                 .thenReturn(List.of());
 
-        CustomerDetailResponse response = ownerCustomerManagementService.updateCustomerStatus(customerId, false);
+        CustomerDetailResponse response = customerManagementService.updateCustomerStatus(customerId, false);
 
         assertThat(customer.getUserInfo().isActive()).isFalse();
         assertThat(response.isActive()).isFalse();
@@ -176,7 +176,7 @@ class OwnerCustomerManagementServiceTest {
         UUID customerId = UUID.randomUUID();
         when(customerRepository.findDetailById(customerId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> ownerCustomerManagementService.updateCustomerStatus(customerId, true))
+        assertThatThrownBy(() -> customerManagementService.updateCustomerStatus(customerId, true))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining(customerId.toString());
     }
@@ -189,7 +189,7 @@ class OwnerCustomerManagementServiceTest {
 
         when(customerRepository.findDetailById(customerId)).thenReturn(Optional.of(customer));
 
-        assertThatThrownBy(() -> ownerCustomerManagementService.updateCustomerStatus(customerId, false))
+        assertThatThrownBy(() -> customerManagementService.updateCustomerStatus(customerId, false))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining(customerId.toString());
     }
@@ -202,7 +202,7 @@ class OwnerCustomerManagementServiceTest {
 
         when(customerRepository.findDetailById(customerId)).thenReturn(Optional.of(customer));
 
-        assertThatThrownBy(() -> ownerCustomerManagementService.updateCustomerStatus(customerId, false))
+        assertThatThrownBy(() -> customerManagementService.updateCustomerStatus(customerId, false))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining(customerId.toString());
     }
@@ -247,7 +247,7 @@ class OwnerCustomerManagementServiceTest {
         when(r2StorageService.getPresignedGetUrl("products/keyboard/main.png"))
                 .thenReturn("https://cdn.example.com/products/keyboard/main.png");
 
-        PageResponse<CustomerOrderHistoryResponse> response = ownerCustomerManagementService.getCustomerOrders(customerId, 0, 10, "createdAt,desc");
+        PageResponse<CustomerOrderHistoryResponse> response = customerManagementService.getCustomerOrders(customerId, 0, 10, "createdAt,desc");
 
         assertThat(response.getContent()).hasSize(1);
         CustomerOrderHistoryResponse orderResponse = response.getContent().get(0);
@@ -273,7 +273,7 @@ class OwnerCustomerManagementServiceTest {
         UUID customerId = UUID.randomUUID();
         when(customerRepository.existsById(customerId)).thenReturn(false);
 
-        assertThatThrownBy(() -> ownerCustomerManagementService.getCustomerOrders(customerId, 0, 10, "createdAt,desc"))
+        assertThatThrownBy(() -> customerManagementService.getCustomerOrders(customerId, 0, 10, "createdAt,desc"))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining(customerId.toString());
     }

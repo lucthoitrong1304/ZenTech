@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 
 @Component
-public class OwnerCustomerMapper {
+public class CustomerManagementMapper {
 
     public CustomerSummaryResponse toCustomerSummaryResponse(Customer customer, CustomerOrderAggregateProjection aggregate) {
         return CustomerSummaryResponse.builder()
