@@ -30,6 +30,15 @@ public class UploadService {
             );
         }
 
+        if (request.getPurpose() == UploadPurpose.PRODUCT_REVIEW_VIDEO) {
+            return r2StorageService.generateReviewVideoPresignedUrl(
+                    currentUserId,
+                    request.getOriginalFilename(),
+                    request.getContentType(),
+                    request.getFileSize()
+            );
+        }
+
         if (request.getPurpose() == UploadPurpose.CHAT_ATTACHMENT) {
             return r2StorageService.generateChatAttachmentPresignedUrl(
                     currentUserId,

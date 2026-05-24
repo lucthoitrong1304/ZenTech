@@ -48,6 +48,9 @@ public class ProductReview {
     @OrderColumn(name = "image_order")
     private List<String> imageKeys = new ArrayList<>();
 
+    @Column(name = "video_key", length = 1000)
+    private String videoKey;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "customer_id", nullable = false)
     private Customer customer;
