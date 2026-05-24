@@ -92,7 +92,8 @@ public class ProductMapper {
             ProductReview review,
             String customerName,
             boolean isOwner,
-            List<String> imageUrls) {
+            List<String> imageUrls,
+            String videoUrl) {
         return ProductReviewItemResponse.builder()
                 .reviewId(review.getId())
                 .rating(review.getRating())
@@ -103,6 +104,7 @@ public class ProductMapper {
                 .customerName(customerName)
                 .isOwner(isOwner)
                 .imageUrls(imageUrls)
+                .videoUrl(videoUrl)
                 .build();
     }
 
