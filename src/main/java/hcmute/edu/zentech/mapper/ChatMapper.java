@@ -12,12 +12,21 @@ import hcmute.edu.zentech.model.Conversation;
 import hcmute.edu.zentech.model.ConversationParticipant;
 import hcmute.edu.zentech.model.Customer;
 import hcmute.edu.zentech.model.TransferRequest;
+import hcmute.edu.zentech.model.Employee;
+import hcmute.edu.zentech.model.ParticipantType;
+import hcmute.edu.zentech.repository.CustomerRepository;
+import hcmute.edu.zentech.repository.EmployeeRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 @Component
+@RequiredArgsConstructor
 public class ChatMapper {
+    private final CustomerRepository customerRepository;
+    private final EmployeeRepository employeeRepository;
+
     public ConversationResponse toConversationResponse(
             Conversation conversation,
             List<ConversationParticipant> participants
@@ -42,6 +51,25 @@ public class ChatMapper {
     }
 
     public ParticipantResponse toParticipantResponse(ConversationParticipant participant) {
+        String displayName = "Unknown";
+        String avatarUrl = null;
+
+        if (participant.getUserType() == ParticipantType.BOT) {
+            displayName = "ZenTech AI";
+        } else if (participant.getUserType() == ParticipantType.CUSTOMER) {
+            displayName = customerRepository.findById(participant.getReferenceId())
+                    .map(Customer::getFullName)
+                    .orElse("Khách hàng");
+        } else if (participant.getUserType() == ParticipantType.EMPLOYEE || participant.getUserType() == ParticipantType.EXPERT) {
+            Employee employee = employeeRepository.findById(participant.getReferenceId()).orElse(null);
+            if (employee != null) {
+                displayName = employee.getFullName();
+                avatarUrl = employee.getImageUrl();
+            } else {
+                displayName = "Nhân viên hỗ trợ";
+            }
+        }
+
         return ParticipantResponse.builder()
                 .id(participant.getId())
                 .userType(participant.getUserType())
@@ -49,6 +77,8 @@ public class ChatMapper {
                 .status(participant.getStatus())
                 .joinedAt(participant.getJoinedAt())
                 .leftAt(participant.getLeftAt())
+                .displayName(displayName)
+                .avatarUrl(avatarUrl)
                 .build();
     }
 

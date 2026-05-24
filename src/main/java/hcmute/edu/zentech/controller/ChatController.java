@@ -32,6 +32,11 @@ public class ChatController {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.createOrGetCurrentCustomerConversation()));
     }
 
+    @PostMapping("/new")
+    public ResponseEntity<ApiResponse<ConversationResponse>> createNewConversation() {
+        return ResponseEntity.ok(ApiResponse.success(chatConversationService.createNewCustomerConversation()));
+    }
+
     // Lấy danh sách cuộc hội thoại của người dùng hiện tại
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<PageResponse<ConversationResponse>>> getMyConversations(
