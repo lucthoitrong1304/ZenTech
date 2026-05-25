@@ -1,6 +1,7 @@
 package hcmute.edu.zentech.service;
 
 import hcmute.edu.zentech.dto.response.UploadPresignResponse;
+import hcmute.edu.zentech.model.ChatAttachmentType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,11 +22,44 @@ import java.util.stream.Collectors;
 @Slf4j
 @RequiredArgsConstructor
 public class R2StorageService {
+    private static final long MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024;
+    private static final Set<String> ALLOWED_AVATAR_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+    );
+
     private static final long MAX_REVIEW_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+    private static final long MAX_REVIEW_VIDEO_SIZE_BYTES = 50 * 1024 * 1024;
+    private static final long MAX_CHAT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+    private static final long MAX_CHAT_VIDEO_SIZE_BYTES = 50 * 1024 * 1024;
+    private static final long MAX_CHAT_FILE_SIZE_BYTES = 20 * 1024 * 1024;
     private static final Set<String> ALLOWED_REVIEW_IMAGE_CONTENT_TYPES = Set.of(
             "image/jpeg",
             "image/png",
             "image/webp"
+    );
+    private static final Set<String> ALLOWED_REVIEW_VIDEO_CONTENT_TYPES = Set.of(
+            "video/mp4",
+            "video/webm"
+    );
+    private static final Set<String> ALLOWED_CHAT_IMAGE_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+    );
+    private static final Set<String> ALLOWED_CHAT_VIDEO_CONTENT_TYPES = Set.of(
+            "video/mp4",
+            "video/webm"
+    );
+    private static final Set<String> ALLOWED_CHAT_FILE_CONTENT_TYPES = Set.of(
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "text/plain",
+            "application/zip"
     );
 
     private final S3Presigner s3Presigner;
@@ -69,6 +103,102 @@ public class R2StorageService {
                 .build();
     }
 
+    public UploadPresignResponse generateReviewVideoPresignedUrl(
+            UUID userId,
+            String originalFilename,
+            String contentType,
+            long fileSize
+    ) {
+        validateReviewVideoRequest(contentType, fileSize);
+
+        String fileKey = buildReviewVideoKey(userId, originalFilename);
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest putObjectPresignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
+
+        log.info("Generated review video presigned URL for key: {}", fileKey);
+        return UploadPresignResponse.builder()
+                .presignedUrl(presignedPutObjectRequest.url().toString())
+                .fileKey(fileKey)
+                .method("PUT")
+                .expiresInMinutes(expirationMinutes)
+                .requiredHeaders(Map.of("Content-Type", contentType))
+                .build();
+    }
+
+    public UploadPresignResponse generateChatAttachmentPresignedUrl(
+            UUID accountId,
+            String originalFilename,
+            String contentType,
+            long fileSize
+    ) {
+        validateChatAttachmentRequest(contentType, fileSize);
+
+        String fileKey = buildChatAttachmentKey(accountId, originalFilename);
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest putObjectPresignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
+
+        log.info("Generated chat attachment presigned URL for key: {}", fileKey);
+        return UploadPresignResponse.builder()
+                .presignedUrl(presignedPutObjectRequest.url().toString())
+                .fileKey(fileKey)
+                .method("PUT")
+                .expiresInMinutes(expirationMinutes)
+                .requiredHeaders(Map.of("Content-Type", contentType))
+                .build();
+    }
+
+    public UploadPresignResponse generateCustomerAvatarPresignedUrl(
+            UUID userId,
+            String originalFilename,
+            String contentType,
+            long fileSize
+    ) {
+        validateCustomerAvatarRequest(contentType, fileSize);
+
+        String fileKey = buildCustomerAvatarKey(userId, originalFilename);
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest putObjectPresignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
+
+        log.info("Generated customer avatar presigned URL for key: {}", fileKey);
+        return UploadPresignResponse.builder()
+                .presignedUrl(presignedPutObjectRequest.url().toString())
+                .fileKey(fileKey)
+                .method("PUT")
+                .expiresInMinutes(expirationMinutes)
+                .requiredHeaders(Map.of("Content-Type", contentType))
+                .build();
+    }
+
     public void validateUploadedReviewImage(String fileKey, UUID userId) {
         if (fileKey == null || fileKey.isBlank()) {
             throw new IllegalArgumentException("imageKey is required");
@@ -97,6 +227,96 @@ public class R2StorageService {
         validateReviewImageRequest(headObjectResponse.contentType(), headObjectResponse.contentLength());
     }
 
+    public void validateUploadedReviewVideo(String fileKey, UUID userId) {
+        if (fileKey == null || fileKey.isBlank()) {
+            throw new IllegalArgumentException("videoKey is required");
+        }
+
+        String expectedPrefix = getReviewVideoPrefix(userId);
+        if (!fileKey.startsWith(expectedPrefix)) {
+            throw new IllegalArgumentException("Invalid video key owner");
+        }
+
+        HeadObjectResponse headObjectResponse;
+        try {
+            headObjectResponse = s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileKey)
+                    .build());
+        } catch (NoSuchKeyException e) {
+            throw new IllegalArgumentException("Uploaded video does not exist");
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                throw new IllegalArgumentException("Uploaded video does not exist");
+            }
+            throw e;
+        }
+
+        validateReviewVideoRequest(headObjectResponse.contentType(), headObjectResponse.contentLength());
+    }
+
+    public void validateUploadedChatAttachment(
+            String fileKey,
+            UUID accountId,
+            String expectedContentType,
+            long expectedFileSize,
+            ChatAttachmentType attachmentType
+    ) {
+        if (fileKey == null || fileKey.isBlank()) {
+            throw new IllegalArgumentException("fileKey is required");
+        }
+
+        String expectedPrefix = getChatAttachmentPrefix(accountId);
+        if (!fileKey.startsWith(expectedPrefix)) {
+            throw new IllegalArgumentException("Invalid chat attachment owner");
+        }
+
+        validateChatAttachmentType(expectedContentType, expectedFileSize, attachmentType);
+
+        HeadObjectResponse headObjectResponse;
+        try {
+            headObjectResponse = s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileKey)
+                    .build());
+        } catch (NoSuchKeyException e) {
+            throw new IllegalArgumentException("Uploaded chat attachment does not exist");
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                throw new IllegalArgumentException("Uploaded chat attachment does not exist");
+            }
+            throw e;
+        }
+
+        if (!Objects.equals(expectedContentType, headObjectResponse.contentType())) {
+            throw new IllegalArgumentException("Chat attachment content type does not match uploaded object");
+        }
+
+        if (expectedFileSize != headObjectResponse.contentLength()) {
+            throw new IllegalArgumentException("Chat attachment size does not match uploaded object");
+        }
+
+        validateChatAttachmentType(
+                headObjectResponse.contentType(),
+                headObjectResponse.contentLength(),
+                attachmentType
+        );
+    }
+
+    private void validateReviewVideoRequest(String contentType, long fileSize) {
+        if (!ALLOWED_REVIEW_VIDEO_CONTENT_TYPES.contains(contentType)) {
+            throw new IllegalArgumentException("Only MP4 and WEBM videos are allowed");
+        }
+
+        if (fileSize <= 0) {
+            throw new IllegalArgumentException("Video size must be greater than 0");
+        }
+
+        if (fileSize > MAX_REVIEW_VIDEO_SIZE_BYTES) {
+            throw new IllegalArgumentException("Video size must not exceed 50MB");
+        }
+    }
+
     private void validateReviewImageRequest(String contentType, long fileSize) {
         if (!ALLOWED_REVIEW_IMAGE_CONTENT_TYPES.contains(contentType)) {
             throw new IllegalArgumentException("Only JPEG, PNG, and WEBP images are allowed");
@@ -111,12 +331,102 @@ public class R2StorageService {
         }
     }
 
+    private void validateChatAttachmentRequest(String contentType, long fileSize) {
+        if (ALLOWED_CHAT_IMAGE_CONTENT_TYPES.contains(contentType)) {
+            validateChatAttachmentType(contentType, fileSize, ChatAttachmentType.IMAGE);
+            return;
+        }
+
+        if (ALLOWED_CHAT_VIDEO_CONTENT_TYPES.contains(contentType)) {
+            validateChatAttachmentType(contentType, fileSize, ChatAttachmentType.VIDEO);
+            return;
+        }
+
+        if (ALLOWED_CHAT_FILE_CONTENT_TYPES.contains(contentType)) {
+            validateChatAttachmentType(contentType, fileSize, ChatAttachmentType.FILE);
+            return;
+        }
+
+        throw new IllegalArgumentException("Unsupported chat attachment content type");
+    }
+
+    private void validateChatAttachmentType(String contentType, long fileSize, ChatAttachmentType attachmentType) {
+        if (attachmentType == null) {
+            throw new IllegalArgumentException("attachmentType is required");
+        }
+
+        if (fileSize <= 0) {
+            throw new IllegalArgumentException("Chat attachment size must be greater than 0");
+        }
+
+        switch (attachmentType) {
+            case IMAGE -> {
+                if (!ALLOWED_CHAT_IMAGE_CONTENT_TYPES.contains(contentType)) {
+                    throw new IllegalArgumentException("Only JPEG, PNG, and WEBP images are allowed");
+                }
+                if (fileSize > MAX_CHAT_IMAGE_SIZE_BYTES) {
+                    throw new IllegalArgumentException("Chat image size must not exceed 5MB");
+                }
+            }
+            case VIDEO -> {
+                if (!ALLOWED_CHAT_VIDEO_CONTENT_TYPES.contains(contentType)) {
+                    throw new IllegalArgumentException("Only MP4 and WEBM videos are allowed");
+                }
+                if (fileSize > MAX_CHAT_VIDEO_SIZE_BYTES) {
+                    throw new IllegalArgumentException("Chat video size must not exceed 50MB");
+                }
+            }
+            case FILE -> {
+                if (!ALLOWED_CHAT_FILE_CONTENT_TYPES.contains(contentType)) {
+                    throw new IllegalArgumentException("Unsupported chat file content type");
+                }
+                if (fileSize > MAX_CHAT_FILE_SIZE_BYTES) {
+                    throw new IllegalArgumentException("Chat file size must not exceed 20MB");
+                }
+            }
+        }
+    }
+
+    private String buildReviewVideoKey(UUID userId, String originalFilename) {
+        return getReviewVideoPrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
+    }
+
     private String buildReviewImageKey(UUID userId, String originalFilename) {
         return getReviewImagePrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
     }
 
+    private String buildChatAttachmentKey(UUID accountId, String originalFilename) {
+        return getChatAttachmentPrefix(accountId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
+    }
+
+    private String buildCustomerAvatarKey(UUID userId, String originalFilename) {
+        return getCustomerAvatarPrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
+    }
+
+    private String getReviewVideoPrefix(UUID userId) {
+        return "uploads/reviews/" + userId + "/videos/";
+    }
+
     private String getReviewImagePrefix(UUID userId) {
         return "uploads/reviews/" + userId + "/";
+    }
+
+    private String getChatAttachmentPrefix(UUID accountId) {
+        return "uploads/chat/" + accountId + "/";
+    }
+
+    private String getCustomerAvatarPrefix(UUID userId) {
+        return "uploads/avatars/" + userId + "/";
+    }
+
+    private void validateCustomerAvatarRequest(String contentType, long fileSize) {
+        if (!ALLOWED_AVATAR_CONTENT_TYPES.contains(contentType)) {
+            throw new IllegalArgumentException("Only JPEG, PNG, and WEBP images are allowed for avatar");
+        }
+
+        if (fileSize <= 0) {
+            throw new IllegalArgumentException("Avatar size must be greater than 0");
+        }
     }
 
     private String sanitizeFilename(String originalFilename) {

@@ -39,6 +39,7 @@ public class CustomerManagementMapper {
         List<CustomerAddressResponse> addresses = customer.getAddressList() == null
                 ? List.of()
                 : customer.getAddressList().stream()
+                .filter(address -> !address.isDeleted())
                 .map(this::toCustomerAddressResponse)
                 .sorted(Comparator.comparing(CustomerAddressResponse::isDefault).reversed())
                 .toList();

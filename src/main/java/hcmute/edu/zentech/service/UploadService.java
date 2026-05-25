@@ -21,15 +21,43 @@ public class UploadService {
             throw new AccessDeniedException("Authentication is required");
         }
 
-        if (request.getPurpose() != UploadPurpose.PRODUCT_REVIEW) {
-            throw new IllegalArgumentException("Unsupported upload purpose");
+        if (request.getPurpose() == UploadPurpose.PRODUCT_REVIEW) {
+            return r2StorageService.generateReviewImagePresignedUrl(
+                    currentUserId,
+                    request.getOriginalFilename(),
+                    request.getContentType(),
+                    request.getFileSize()
+            );
         }
 
-        return r2StorageService.generateReviewImagePresignedUrl(
-                currentUserId,
-                request.getOriginalFilename(),
-                request.getContentType(),
-                request.getFileSize()
-        );
+        if (request.getPurpose() == UploadPurpose.PRODUCT_REVIEW_VIDEO) {
+            return r2StorageService.generateReviewVideoPresignedUrl(
+                    currentUserId,
+                    request.getOriginalFilename(),
+                    request.getContentType(),
+                    request.getFileSize()
+            );
+        }
+
+        if (request.getPurpose() == UploadPurpose.CHAT_ATTACHMENT) {
+            return r2StorageService.generateChatAttachmentPresignedUrl(
+                    currentUserId,
+                    request.getOriginalFilename(),
+                    request.getContentType(),
+                    request.getFileSize()
+            );
+        }
+
+        if (request.getPurpose() == UploadPurpose.CUSTOMER_AVATAR) {
+            return r2StorageService.generateCustomerAvatarPresignedUrl(
+                    currentUserId,
+                    request.getOriginalFilename(),
+                    request.getContentType(),
+                    request.getFileSize()
+            );
+        }
+
+        throw new IllegalArgumentException("Unsupported upload purpose");
     }
 }
+

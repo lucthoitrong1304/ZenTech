@@ -56,6 +56,12 @@ public class ChatConversationService {
                 .orElseGet(() -> createConversation(customer));
     }
 
+    @Transactional
+    public ConversationResponse createNewCustomerConversation() {
+        Customer customer = chatParticipantService.getCurrentCustomer();
+        return createConversation(customer);
+    }
+
     @Transactional(readOnly = true)
     public PageResponse<ConversationResponse> getMyConversations(int page, int size) {
         Customer customer = chatParticipantService.getCurrentCustomer();
@@ -71,7 +77,7 @@ public class ChatConversationService {
 
     // Logic lấy toàn bộ cuộc hội thoại phía nhân viên
     @Transactional(readOnly = true)
-    public PageResponse<ConversationResponse> getManagementConversations(ChatConversationListQueryRequest request) {
+    public PageResponse<ConversationResponse> getOwnerConversations(ChatConversationListQueryRequest request) {
         chatParticipantService.getCurrentStaffIdentity();
 
         Pageable pageable = PageRequest.of(
@@ -79,7 +85,7 @@ public class ChatConversationService {
                 normalizeSize(request.getSize()),
                 defaultSort()
         );
-        Page<Conversation> conversationPage = conversationRepository.searchManagementConversations(
+        Page<Conversation> conversationPage = conversationRepository.searchOwnerConversations(
                 request.getStatus(),
                 normalizeKeyword(request.getKeyword()),
                 pageable
@@ -100,7 +106,7 @@ public class ChatConversationService {
         conversation.setUpdatedAt(Instant.now());
         Conversation savedConversation = conversationRepository.save(conversation);
         ConversationResponse response = toConversationResponse(savedConversation);
-        messagingTemplate.convertAndSend("/topic/management/chat/queue", response);
+        messagingTemplate.convertAndSend("/topic/owner.chat.queue", response);
         return response;
     }
 
@@ -121,7 +127,7 @@ public class ChatConversationService {
         conversation.setUpdatedAt(Instant.now());
 
         ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
-        messagingTemplate.convertAndSend("/topic/conversations/" + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
         return response;
     }
 
@@ -138,15 +144,18 @@ public class ChatConversationService {
                 ParticipantStatus.SILENT
         );
         ConversationResponse response = toConversationResponse(conversation);
-        messagingTemplate.convertAndSend("/topic/conversations/" + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
         return response;
     }
 
     @Transactional
     public ConversationResponse closeConversation(UUID conversationId) {
-        Customer customer = chatParticipantService.getCurrentCustomer();
         Conversation conversation = getConversation(conversationId);
-        chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
+        chatParticipantService.findCurrentCustomer()
+                .ifPresentOrElse(
+                        customer -> chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId()),
+                        chatParticipantService::getCurrentStaffIdentity
+                );
 
         conversation.setStatus(ConversationStatus.CLOSED);
         conversation.setClosedAt(Instant.now());
@@ -154,7 +163,7 @@ public class ChatConversationService {
         chatParticipantService.markActiveParticipantsLeft(conversation);
 
         ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
-        messagingTemplate.convertAndSend("/topic/conversations/" + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
         return response;
     }
 
@@ -215,7 +224,7 @@ public class ChatConversationService {
     }
 
     private Sort defaultSort() {
-        return Sort.by(Sort.Order.desc("updatedAt").nullsLast());
+        return Sort.by(Sort.Order.desc("updatedAt"));
     }
 
     private int normalizePage(int page) {

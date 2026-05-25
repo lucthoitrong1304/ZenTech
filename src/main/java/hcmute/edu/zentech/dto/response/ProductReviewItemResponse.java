@@ -25,4 +25,5 @@ public class ProductReviewItemResponse {
     private String customerName;
     private Boolean isOwner;
     private List<String> imageUrls;
+    private String videoUrl;
 }

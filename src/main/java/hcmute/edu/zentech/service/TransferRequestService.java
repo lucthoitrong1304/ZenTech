@@ -54,7 +54,7 @@ public class TransferRequestService {
         TransferRequestResponse response = chatMapper.toTransferRequestResponse(
                 transferRequestRepository.save(transferRequest)
         );
-        messagingTemplate.convertAndSend("/topic/management/chat/queue", response);
+        messagingTemplate.convertAndSend("/topic/owner.chat.queue", response);
         return response;
     }
 
@@ -86,7 +86,7 @@ public class TransferRequestService {
         TransferRequestResponse response = chatMapper.toTransferRequestResponse(
                 transferRequestRepository.save(transferRequest)
         );
-        messagingTemplate.convertAndSend("/topic/management/chat/queue", response);
+        messagingTemplate.convertAndSend("/topic/owner.chat.queue", response);
         return response;
     }
 

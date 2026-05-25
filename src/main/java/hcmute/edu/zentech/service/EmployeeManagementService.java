@@ -160,6 +160,6 @@ public class EmployeeManagementService {
         String mappedField = sortableFields.getOrDefault(requestedField, sortableFields.get(defaultField));
         Sort.Direction direction = "desc".equalsIgnoreCase(directionValue) ? Sort.Direction.DESC : Sort.Direction.ASC;
 
-        return Sort.by(new Sort.Order(direction, mappedField).nullsLast());
+        return Sort.by(new Sort.Order(direction, mappedField));
     }
 }

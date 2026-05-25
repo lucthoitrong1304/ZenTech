@@ -23,4 +23,6 @@ public class ParticipantResponse {
     private ParticipantStatus status;
     private Instant joinedAt;
     private Instant leftAt;
+    private String displayName;
+    private String avatarUrl;
 }

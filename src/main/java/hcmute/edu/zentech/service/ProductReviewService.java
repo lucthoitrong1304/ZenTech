@@ -76,6 +76,7 @@ public class ProductReviewService {
         Customer customer = getCurrentCustomer();
 
         List<String> imageKeys = validateReviewImageKeys(request.getImageKeys(), customer.getUserInfo().getId());
+        String videoKey = validateReviewVideoKey(request.getVideoKey(), customer.getUserInfo().getId());
 
         ProductReview review = ProductReview.builder()
                 .product(product)
@@ -83,6 +84,7 @@ public class ProductReviewService {
                 .rating(request.getRating())
                 .comment(normalizeComment(request.getComment()))
                 .imageKeys(new ArrayList<>(imageKeys))
+                .videoKey(videoKey)
                 .build();
 
         ProductReview savedReview = productReviewRepository.save(review);
@@ -103,6 +105,9 @@ public class ProductReviewService {
 
         List<String> imageKeys = validateReviewImageKeys(request.getImageKeys(), customer.getUserInfo().getId());
         review.setImageKeys(new ArrayList<>(imageKeys));
+
+        String videoKey = validateReviewVideoKey(request.getVideoKey(), customer.getUserInfo().getId());
+        review.setVideoKey(videoKey);
 
         ProductReview updatedReview = productReviewRepository.save(review);
         return toReviewItemResponse(updatedReview, customer.getUserInfo().getId());
@@ -157,6 +162,16 @@ public class ProductReviewService {
         return trimmedComment.isEmpty() ? null : trimmedComment;
     }
 
+    // Validate video key before saving to the review.
+    private String validateReviewVideoKey(String videoKey, UUID currentUserId) {
+        if (videoKey == null || videoKey.isBlank()) {
+            return null;
+        }
+
+        r2StorageService.validateUploadedReviewVideo(videoKey, currentUserId);
+        return videoKey;
+    }
+
     // Validate image keys before saving them to the review.
     private List<String> validateReviewImageKeys(List<String> imageKeys, UUID currentUserId) {
         if (imageKeys == null) {
@@ -185,6 +200,10 @@ public class ProductReviewService {
                         .filter(java.util.Objects::nonNull)
                         .toList();
 
-        return productMapper.toProductReviewItemResponse(review, customerName, isOwner, presignedUrls);
+        String videoUrl = review.getVideoKey() != null
+                ? r2StorageService.getPresignedGetUrl(review.getVideoKey())
+                : null;
+
+        return productMapper.toProductReviewItemResponse(review, customerName, isOwner, presignedUrls, videoUrl);
     }
 }

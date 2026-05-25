@@ -21,4 +21,6 @@ public class ProductReviewRequest {
     private String comment;
 
     private List<String> imageKeys;
+
+    private String videoKey;
 }
