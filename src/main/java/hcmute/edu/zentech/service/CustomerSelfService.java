@@ -429,7 +429,7 @@ public class CustomerSelfService {
         Sort.Direction direction = "desc".equalsIgnoreCase(directionValue) ? Sort.Direction.DESC : Sort.Direction.ASC;
 
         return Sort.by(
-                new Sort.Order(direction, mappedField).nullsLast(),
+                new Sort.Order(direction, mappedField),
                 new Sort.Order(Sort.Direction.ASC, "id")
         );
     }
