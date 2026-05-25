@@ -48,6 +48,16 @@ public class UploadService {
             );
         }
 
+        if (request.getPurpose() == UploadPurpose.CUSTOMER_AVATAR) {
+            return r2StorageService.generateCustomerAvatarPresignedUrl(
+                    currentUserId,
+                    request.getOriginalFilename(),
+                    request.getContentType(),
+                    request.getFileSize()
+            );
+        }
+
         throw new IllegalArgumentException("Unsupported upload purpose");
     }
 }
+

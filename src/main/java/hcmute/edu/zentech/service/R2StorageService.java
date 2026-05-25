@@ -22,6 +22,13 @@ import java.util.stream.Collectors;
 @Slf4j
 @RequiredArgsConstructor
 public class R2StorageService {
+    private static final long MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024;
+    private static final Set<String> ALLOWED_AVATAR_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+    );
+
     private static final long MAX_REVIEW_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
     private static final long MAX_REVIEW_VIDEO_SIZE_BYTES = 50 * 1024 * 1024;
     private static final long MAX_CHAT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
@@ -151,6 +158,38 @@ public class R2StorageService {
         PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
 
         log.info("Generated chat attachment presigned URL for key: {}", fileKey);
+        return UploadPresignResponse.builder()
+                .presignedUrl(presignedPutObjectRequest.url().toString())
+                .fileKey(fileKey)
+                .method("PUT")
+                .expiresInMinutes(expirationMinutes)
+                .requiredHeaders(Map.of("Content-Type", contentType))
+                .build();
+    }
+
+    public UploadPresignResponse generateCustomerAvatarPresignedUrl(
+            UUID userId,
+            String originalFilename,
+            String contentType,
+            long fileSize
+    ) {
+        validateCustomerAvatarRequest(contentType, fileSize);
+
+        String fileKey = buildCustomerAvatarKey(userId, originalFilename);
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest putObjectPresignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
+
+        log.info("Generated customer avatar presigned URL for key: {}", fileKey);
         return UploadPresignResponse.builder()
                 .presignedUrl(presignedPutObjectRequest.url().toString())
                 .fileKey(fileKey)
@@ -360,6 +399,10 @@ public class R2StorageService {
         return getChatAttachmentPrefix(accountId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
     }
 
+    private String buildCustomerAvatarKey(UUID userId, String originalFilename) {
+        return getCustomerAvatarPrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
+    }
+
     private String getReviewVideoPrefix(UUID userId) {
         return "uploads/reviews/" + userId + "/videos/";
     }
@@ -370,6 +413,20 @@ public class R2StorageService {
 
     private String getChatAttachmentPrefix(UUID accountId) {
         return "uploads/chat/" + accountId + "/";
+    }
+
+    private String getCustomerAvatarPrefix(UUID userId) {
+        return "uploads/avatars/" + userId + "/";
+    }
+
+    private void validateCustomerAvatarRequest(String contentType, long fileSize) {
+        if (!ALLOWED_AVATAR_CONTENT_TYPES.contains(contentType)) {
+            throw new IllegalArgumentException("Only JPEG, PNG, and WEBP images are allowed for avatar");
+        }
+
+        if (fileSize <= 0) {
+            throw new IllegalArgumentException("Avatar size must be greater than 0");
+        }
     }
 
     private String sanitizeFilename(String originalFilename) {

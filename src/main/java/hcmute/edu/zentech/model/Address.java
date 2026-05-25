@@ -29,7 +29,11 @@ public class Address {
 
     private boolean isDefault;
 
+    private boolean deleted;
+
     private Instant createdAt;
 
     private Instant updatedAt;
+
+    private Instant deletedAt;
 }

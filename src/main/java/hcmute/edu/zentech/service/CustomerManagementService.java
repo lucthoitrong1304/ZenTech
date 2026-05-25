@@ -220,7 +220,7 @@ public class CustomerManagementService {
 
         //Thêm trường "id" (mặc định tăng dần) làm tiêu chí sắp xếp thứ 2
         return Sort.by(
-                new Sort.Order(direction, mappedField).nullsLast(),
+                new Sort.Order(direction, mappedField),
                 new Sort.Order(Sort.Direction.ASC, "id")
         );
     }
