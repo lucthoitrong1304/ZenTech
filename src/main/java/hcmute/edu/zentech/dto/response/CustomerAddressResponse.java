@@ -1,5 +1,6 @@
 package hcmute.edu.zentech.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,6 +19,7 @@ public class CustomerAddressResponse {
     private String province;
     private String ward;
     private String street;
+    @JsonProperty("isDefault")
     private boolean isDefault;
     private Instant createdAt;
     private Instant updatedAt;
