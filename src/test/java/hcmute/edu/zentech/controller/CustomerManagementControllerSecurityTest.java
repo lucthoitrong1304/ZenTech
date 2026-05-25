@@ -51,13 +51,13 @@ class CustomerManagementControllerSecurityTest {
 
     @Test
     void getCustomersReturnsUnauthorizedWithoutAuthentication() throws Exception {
-        mockMvc.perform(get("/api/owner/customers"))
+        mockMvc.perform(get("/api/management/customers"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void getCustomersReturnsForbiddenForCustomerRole() throws Exception {
-        mockMvc.perform(get("/api/owner/customers").with(user("customer").roles("CUSTOMER")))
+        mockMvc.perform(get("/api/management/customers").with(user("customer").roles("CUSTOMER")))
                 .andExpect(status().isForbidden());
     }
 
@@ -73,7 +73,7 @@ class CustomerManagementControllerSecurityTest {
                         .last(true)
                         .build());
 
-        mockMvc.perform(get("/api/owner/customers").with(user("owner").roles("OWNER")))
+        mockMvc.perform(get("/api/management/customers").with(user("owner").roles("OWNER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
     }
@@ -90,14 +90,14 @@ class CustomerManagementControllerSecurityTest {
                         .last(true)
                         .build());
 
-        mockMvc.perform(get("/api/owner/customers").with(user("admin").roles("ADMIN")))
+        mockMvc.perform(get("/api/management/customers").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
     }
 
     @Test
     void updateCustomerStatusReturnsUnauthorizedWithoutAuthentication() throws Exception {
-        mockMvc.perform(patch("/api/owner/customers/{customerId}/status", UUID.randomUUID())
+        mockMvc.perform(patch("/api/management/customers/{customerId}/status", UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"active\":true}"))
                 .andExpect(status().isUnauthorized());
@@ -105,7 +105,7 @@ class CustomerManagementControllerSecurityTest {
 
     @Test
     void updateCustomerStatusReturnsForbiddenForCustomerRole() throws Exception {
-        mockMvc.perform(patch("/api/owner/customers/{customerId}/status", UUID.randomUUID())
+        mockMvc.perform(patch("/api/management/customers/{customerId}/status", UUID.randomUUID())
                         .with(user("customer").roles("CUSTOMER"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"active\":true}"))
@@ -121,7 +121,7 @@ class CustomerManagementControllerSecurityTest {
                         .active(false)
                         .build());
 
-        mockMvc.perform(patch("/api/owner/customers/{customerId}/status", customerId)
+        mockMvc.perform(patch("/api/management/customers/{customerId}/status", customerId)
                         .with(user("owner").roles("OWNER"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"active\":false}"))
@@ -139,7 +139,7 @@ class CustomerManagementControllerSecurityTest {
                         .active(true)
                         .build());
 
-        mockMvc.perform(patch("/api/owner/customers/{customerId}/status", customerId)
+        mockMvc.perform(patch("/api/management/customers/{customerId}/status", customerId)
                         .with(user("admin").roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"active\":true}"))
@@ -150,7 +150,7 @@ class CustomerManagementControllerSecurityTest {
 
     @Test
     void updateCustomerStatusReturnsBadRequestWhenActiveIsMissing() throws Exception {
-        mockMvc.perform(patch("/api/owner/customers/{customerId}/status", UUID.randomUUID())
+        mockMvc.perform(patch("/api/management/customers/{customerId}/status", UUID.randomUUID())
                         .with(user("owner").roles("OWNER"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))

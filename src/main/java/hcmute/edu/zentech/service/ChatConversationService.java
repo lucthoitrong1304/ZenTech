@@ -77,7 +77,7 @@ public class ChatConversationService {
 
     // Logic lấy toàn bộ cuộc hội thoại phía nhân viên
     @Transactional(readOnly = true)
-    public PageResponse<ConversationResponse> getOwnerConversations(ChatConversationListQueryRequest request) {
+    public PageResponse<ConversationResponse> getManagementConversations(ChatConversationListQueryRequest request) {
         chatParticipantService.getCurrentStaffIdentity();
 
         Pageable pageable = PageRequest.of(
@@ -85,7 +85,7 @@ public class ChatConversationService {
                 normalizeSize(request.getSize()),
                 defaultSort()
         );
-        Page<Conversation> conversationPage = conversationRepository.searchOwnerConversations(
+        Page<Conversation> conversationPage = conversationRepository.searchManagementConversations(
                 request.getStatus(),
                 normalizeKeyword(request.getKeyword()),
                 pageable
@@ -106,7 +106,7 @@ public class ChatConversationService {
         conversation.setUpdatedAt(Instant.now());
         Conversation savedConversation = conversationRepository.save(conversation);
         ConversationResponse response = toConversationResponse(savedConversation);
-        messagingTemplate.convertAndSend("/topic/owner.chat.queue", response);
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
         return response;
     }
 

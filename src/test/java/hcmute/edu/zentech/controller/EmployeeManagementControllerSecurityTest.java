@@ -52,13 +52,13 @@ class EmployeeManagementControllerSecurityTest {
 
     @Test
     void getEmployeesReturnsUnauthorizedWithoutAuthentication() throws Exception {
-        mockMvc.perform(get("/api/owner/employees"))
+        mockMvc.perform(get("/api/management/employees"))
                 .andExpect(status().isUnauthorized());
     }
 
     @Test
     void getEmployeesReturnsForbiddenForCustomerRole() throws Exception {
-        mockMvc.perform(get("/api/owner/employees").with(user("customer").roles("CUSTOMER")))
+        mockMvc.perform(get("/api/management/employees").with(user("customer").roles("CUSTOMER")))
                 .andExpect(status().isForbidden());
     }
 
@@ -74,22 +74,22 @@ class EmployeeManagementControllerSecurityTest {
                         .last(true)
                         .build());
 
-        mockMvc.perform(get("/api/owner/employees").with(user("owner").roles("OWNER")))
+        mockMvc.perform(get("/api/management/employees").with(user("owner").roles("OWNER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
-        mockMvc.perform(get("/api/owner/employees").with(user("manager").roles("MANAGER")))
+        mockMvc.perform(get("/api/management/employees").with(user("manager").roles("MANAGER")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
 
-        mockMvc.perform(get("/api/owner/employees").with(user("admin").roles("ADMIN")))
+        mockMvc.perform(get("/api/management/employees").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true));
     }
 
     @Test
     void createEmployeeReturnsForbiddenForCustomerRole() throws Exception {
-        mockMvc.perform(post("/api/owner/employees")
+        mockMvc.perform(post("/api/management/employees")
                         .with(user("customer").roles("CUSTOMER"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -115,7 +115,7 @@ class EmployeeManagementControllerSecurityTest {
                         .createdAt(Instant.parse("2026-04-30T00:00:00Z"))
                         .build());
 
-        mockMvc.perform(post("/api/owner/employees")
+        mockMvc.perform(post("/api/management/employees")
                         .with(user("manager").roles("MANAGER"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
