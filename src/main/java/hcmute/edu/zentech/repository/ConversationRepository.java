@@ -50,7 +50,7 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
                         OR LOWER(c.title) LIKE LOWER(CONCAT('%', :keyword, '%')))
                     """
     )
-    Page<Conversation> searchOwnerConversations(
+    Page<Conversation> searchManagementConversations(
             @Param("status") ConversationStatus status,
             @Param("keyword") String keyword,
             Pageable pageable

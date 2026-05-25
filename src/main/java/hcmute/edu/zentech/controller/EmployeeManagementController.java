@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/owner/employees")
+@RequestMapping("/api/management/employees")
 @RequiredArgsConstructor
 public class EmployeeManagementController {
     private final EmployeeManagementService employeeManagementService;

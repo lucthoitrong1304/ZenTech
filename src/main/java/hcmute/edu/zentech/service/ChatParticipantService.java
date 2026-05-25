@@ -60,7 +60,7 @@ public class ChatParticipantService {
 
         Role role = resolveRole(currentUser);
         if (!isStaffRole(role)) {
-            throw new AccessDeniedException("Only staff can access owner chat");
+            throw new AccessDeniedException("Only staff can access management chat");
         }
 
         UUID accountId = currentUser.getId();

@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/owner/chat")
+@RequestMapping("/api/management/chat")
 @RequiredArgsConstructor
 public class CustomerChatManagementController {
     private final ChatConversationService chatConversationService;
@@ -35,7 +35,7 @@ public class CustomerChatManagementController {
     public ResponseEntity<ApiResponse<PageResponse<ConversationResponse>>> getConversations(
             @Valid @ModelAttribute ChatConversationListQueryRequest request
     ) {
-        return ResponseEntity.ok(ApiResponse.success(chatConversationService.getOwnerConversations(request)));
+        return ResponseEntity.ok(ApiResponse.success(chatConversationService.getManagementConversations(request)));
     }
 
     // Logic tiếp nhận yêu cầu
