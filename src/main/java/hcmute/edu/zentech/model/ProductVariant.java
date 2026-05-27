@@ -31,6 +31,11 @@ public class ProductVariant {
 
     private int stockQuantity;
 
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean deleted;
+
+    private Instant deletedAt;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;

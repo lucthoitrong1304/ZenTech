@@ -256,7 +256,7 @@ public class OrderManagementService {
     }
 
     private OrderDetail buildOrderDetail(Order order, OrderCreateRequest.OrderCreateItemRequest item) {
-        ProductVariant productVariant = productVariantRepository.findById(item.getProductVariantId())
+        ProductVariant productVariant = productVariantRepository.findOrderableById(item.getProductVariantId())
                 .orElseThrow(() -> new ResourceNotFoundException("Product Variant", "id", item.getProductVariantId()));
 
         if (productVariant.getStockQuantity() < item.getQuantity()) {

@@ -184,6 +184,11 @@ public class ProductCategoryService {
         Double originalPrice = representativeVariant.map(ProductVariant::getOriginalPrice).orElse(null);
         Double salePrice = representativeVariant.map(ProductVariant::getSalePrice).orElse(null);
         Double effectivePrice = salePrice != null ? salePrice : originalPrice;
+        Integer stockQuantity = product.getVariants() != null ? product.getVariants().stream()
+                .filter(Objects::nonNull)
+                .filter(variant -> !variant.isDeleted())
+                .mapToInt(ProductVariant::getStockQuantity)
+                .sum() : 0;
 
         return new ProductListingView(
                 product,
@@ -191,7 +196,8 @@ public class ProductCategoryService {
                 originalPrice,
                 salePrice,
                 effectivePrice,
-                getAverageRating(product)
+                getAverageRating(product),
+                stockQuantity
         );
     }
 
@@ -318,7 +324,8 @@ public class ProductCategoryService {
                         view.imageUrl(),
                         view.originalPrice(),
                         view.salePrice(),
-                        view.averageRating()
+                        view.averageRating(),
+                        view.stockQuantity()
                 ))
                 .toList();
 
@@ -340,7 +347,8 @@ public class ProductCategoryService {
             Double originalPrice,
             Double salePrice,
             Double effectivePrice,
-            Double averageRating) { // Điểm đánh giá trung bình
+            Double averageRating,
+            Integer stockQuantity) { // Điểm đánh giá trung bình
         private UUID productId() {
             return product.getId();
         }
