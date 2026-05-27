@@ -70,7 +70,7 @@ public class ProductReviewService {
     // Hiện tại đang thiếu logic set ảnh
     @Transactional
     public ProductReviewItemResponse createReview(UUID productId, ProductReviewRequest request) {
-        Product product = productRepository.findById(productId)
+        Product product = productRepository.findProductDetailById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product", "ID", productId));
 
         Customer customer = getCurrentCustomer();
@@ -125,7 +125,7 @@ public class ProductReviewService {
 
     // Check xem sản phẩm có tồn tại
     private void ensureProductExists(UUID productId) {
-        if (!productRepository.existsById(productId)) {
+        if (!productRepository.existsByIdAndDeletedFalse(productId)) {
             throw new ResourceNotFoundException("Product", "ID", productId);
         }
     }

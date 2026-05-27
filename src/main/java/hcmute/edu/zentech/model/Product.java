@@ -3,6 +3,7 @@ package hcmute.edu.zentech.model;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -45,6 +46,14 @@ public class Product {
     @CreationTimestamp
     @Column(updatable = false)
     private Instant createdAt;
+
+    @UpdateTimestamp
+    private Instant updatedAt;
+
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean deleted;
+
+    private Instant deletedAt;
 
     @Column(name = "representative_image_key", length = 1000)
     private String representativeImageKey;

@@ -152,7 +152,8 @@ public class ProductService {
                         view.imageUrl(),
                         view.originalPrice(),
                         view.salePrice(),
-                        view.averageRating()
+                        view.averageRating(),
+                        view.stockQuantity()
                 ))
                 .toList();
     }
@@ -195,6 +196,11 @@ public class ProductService {
         Double salePrice = representativeVariant.map(ProductVariant::getSalePrice).orElse(null);
         Double effectivePrice = salePrice != null ? salePrice : originalPrice;
         boolean hasComparablePrice = currentEffectivePrice != null && effectivePrice != null;
+        Integer stockQuantity = product.getVariants() != null ? product.getVariants().stream()
+                .filter(Objects::nonNull)
+                .filter(variant -> !variant.isDeleted())
+                .mapToInt(ProductVariant::getStockQuantity)
+                .sum() : 0;
 
         return new SimilarProductView(
                 product,
@@ -204,7 +210,8 @@ public class ProductService {
                 getAverageRating(product),
                 countSharedCategoryIds(product, currentCategoryIds),
                 hasComparablePrice,
-                hasComparablePrice ? Math.abs(effectivePrice - currentEffectivePrice) : null
+                hasComparablePrice ? Math.abs(effectivePrice - currentEffectivePrice) : null,
+                stockQuantity
         );
     }
 
@@ -317,7 +324,8 @@ public class ProductService {
             Double averageRating,
             int sharedCategoryCount,
             boolean hasComparablePrice,
-            Double priceDifference) {
+            Double priceDifference,
+            Integer stockQuantity) {
         private UUID productId() {
             return product.getId();
         }

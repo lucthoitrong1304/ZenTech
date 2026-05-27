@@ -71,6 +71,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/customers/**").hasRole("CUSTOMER")
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers("/api/categories/**").permitAll()
+                        .requestMatchers("/api/management/products/**").hasAnyRole("OWNER", "MANAGER", "ADMIN")
+                        .requestMatchers("/api/management/product-groups/**").hasAnyRole("OWNER", "MANAGER", "ADMIN")
                         .requestMatchers("/api/management/orders/**").hasAnyRole("OWNER", "MANAGER", "ADMIN")
                         .requestMatchers("/api/management/employees/**").hasAnyRole("OWNER", "MANAGER", "ADMIN")
                         .requestMatchers("/api/management/customers/**").hasAnyRole("OWNER", "ADMIN")

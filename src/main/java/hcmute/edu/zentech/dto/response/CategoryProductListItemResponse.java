@@ -20,4 +20,5 @@ public class CategoryProductListItemResponse {
     private Double originalPrice;
     private Double salePrice;
     private Double averageRating;
+    private Integer stockQuantity;
 }
