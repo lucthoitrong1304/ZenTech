@@ -4,6 +4,7 @@ import hcmute.edu.zentech.dto.request.ChatAttachmentRequest;
 import hcmute.edu.zentech.dto.request.ChatMessageRequest;
 import hcmute.edu.zentech.dto.response.ChatAttachmentResponse;
 import hcmute.edu.zentech.dto.response.ChatMessageResponse;
+import hcmute.edu.zentech.dto.response.ConversationResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.ChatMapper;
@@ -17,6 +18,7 @@ import hcmute.edu.zentech.model.ConversationStatus;
 import hcmute.edu.zentech.model.ParticipantType;
 import hcmute.edu.zentech.repository.ChatMessageAttachmentRepository;
 import hcmute.edu.zentech.repository.ChatMessageRepository;
+import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -43,6 +45,7 @@ public class ChatMessageService {
     private final ChatMessageRepository chatMessageRepository;
     private final ChatMessageAttachmentRepository attachmentRepository;
     private final ConversationRepository conversationRepository;
+    private final ConversationParticipantRepository participantRepository;
     private final ChatParticipantService chatParticipantService;
     private final ChatBotService chatBotService;
     private final ChatMapper chatMapper;
@@ -76,11 +79,22 @@ public class ChatMessageService {
 
         ChatMessage savedMessage = chatMessageRepository.save(message);
         savedMessage.setAttachments(saveAttachments(savedMessage, request.getAttachments()));
+        
+        if (request.getMessageType() == ChatMessageType.TEXT) {
+            conversation.setTitle(savedMessage.getContent());
+        } else {
+            conversation.setTitle("Đã gửi đính kèm");
+        }
+        
         conversation.setUpdatedAt(Instant.now());
         conversationRepository.save(conversation);
 
         ChatMessageResponse response = toChatMessageResponse(savedMessage);
         messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        
+        List<ConversationParticipant> participants = participantRepository.findByConversation_Id(conversationId);
+        ConversationResponse convResponse = chatMapper.toConversationResponse(conversation, participants);
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", convResponse);
 
         if (conversation.getStatus() == ConversationStatus.BOT_CONSULTING
                 && participant.getUserType() == ParticipantType.CUSTOMER) {
