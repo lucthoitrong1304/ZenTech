@@ -128,6 +128,7 @@ public class ChatConversationService {
 
         ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
         messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
         return response;
     }
 
@@ -145,6 +146,7 @@ public class ChatConversationService {
         );
         ConversationResponse response = toConversationResponse(conversation);
         messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
         return response;
     }
 
@@ -164,6 +166,7 @@ public class ChatConversationService {
 
         ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
         messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
         return response;
     }
 
