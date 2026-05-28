@@ -7,6 +7,7 @@ import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.CartRepository;
 import hcmute.edu.zentech.repository.CustomerRepository;
+import hcmute.edu.zentech.repository.EmployeeRepository;
 import hcmute.edu.zentech.repository.PasswordResetTokenRepository;
 import hcmute.edu.zentech.security.CustomUserDetails;
 import hcmute.edu.zentech.security.jwt.JwtUtils;
@@ -32,6 +33,7 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final AccountUserRepository userRepository;
     private final CustomerRepository customerRepository;
+    private final EmployeeRepository employeeRepository;
     private final CartRepository cartRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtils;
@@ -57,10 +59,9 @@ public class AuthService {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(Role.CUSTOMER)
                 .isActive(true)
-                .isPasswordSet(true) // <-- Mặc định là true
                 .createdAt(Instant.now())
+                .isPasswordSet(true)
                 .build();
-
         user = userRepository.save(user);
 
         Customer customer = Customer.builder()
@@ -74,19 +75,13 @@ public class AuthService {
 
     // --- MODULE: ĐĂNG NHẬP THƯỜNG ---
     public AuthResponse authenticate(LoginRequest request) {
-        // 1. Không nên throw "Tài khoản không tồn tại" ngay từ đầu để tránh tấn công dò tìm email (Enumeration Attack)
-        // Cứ để authenticationManager xử lý toàn bộ quá trình xác thực.
-
         try {
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.getEmail(), request.getPassword())
             );
 
-            // 2. Lấy đối tượng CustomUserDetails sau khi đã qua bộ lọc của Spring Security
             CustomUserDetails userDetails = (CustomUserDetails) authentication.getPrincipal();
 
-            // 3. Kiểm tra trạng thái tài khoản chủ động (isActive)
-            // Dù Spring Security có check enabled, tự check giúp bạn trả về message Tiếng Việt chuẩn xác.
             if (!userDetails.isEnabled()) {
                 throw new RuntimeException("Tài khoản của bạn đã bị khóa hoặc chưa được kích hoạt.");
             }
@@ -95,7 +90,6 @@ public class AuthService {
             return generateAuthResponse(userDetails);
 
         } catch (BadCredentialsException ex) {
-            // Trả về thông báo chung để bảo mật thông tin người dùng
             throw new RuntimeException("Email hoặc mật khẩu không chính xác.");
         } catch (DisabledException ex) {
             throw new RuntimeException("Tài khoản đã bị vô hiệu hóa.");
@@ -110,7 +104,6 @@ public class AuthService {
     // --- MODULE: ĐĂNG NHẬP BẰNG GOOGLE ---
     @Transactional
     public AuthResponse authenticateWithGoogle(String idTokenString) {
-        // 1. Xác thực Token từ Google
         GoogleIdToken.Payload payload = googleAuthService.verifyToken(idTokenString);
         if (payload == null) {
             log.warn("Cảnh báo: Thử nghiệm đăng nhập Google với Token không hợp lệ.");
@@ -127,23 +120,44 @@ public class AuthService {
         if (userOptional.isPresent()) {
             user = userOptional.get();
 
-            // 2. CHẶN TÀI KHOẢN BỊ KHÓA (Quan trọng nhất)
-            // Đảm bảo tính đồng nhất với luồng Login thường
             if (!user.isActive()) {
                 log.info("Từ chối đăng nhập Google cho tài khoản bị khóa: {}", email);
                 throw new RuntimeException("Tài khoản của bạn đã bị khóa. Vui lòng liên hệ hỗ trợ.");
             }
 
-            // Tùy chọn: Cập nhật lại tên/ảnh nếu user có thay đổi bên phía Google
-            log.info("Người dùng Google cũ đăng nhập: {}", email);
+            if (user.getRole() == Role.CUSTOMER) {
+                Customer customer = customerRepository.findByUserInfo_Id(user.getId()).orElse(null);
+                if (customer != null && (customer.getImageUrl() == null || customer.getImageUrl().trim().isEmpty()) && pictureUrl != null) {
+                    customer.setImageUrl(pictureUrl);
+                    customerRepository.save(customer);
+                    log.info("Cập nhật ảnh đại diện từ Google cho khách hàng cũ: {}", email);
+                } else {
+                    log.info("Khách hàng Google cũ đăng nhập: {}", email);
+                }
+            } else {
+                Employee employee = employeeRepository.findByUserInfo_Id(user.getId()).orElse(null);
+                if (employee == null) {
+                    employee = new Employee();
+                    employee.setUserInfo(user);
+                    employee.setFullName(name != null ? name : "Nhân sự hệ thống");
+                    employee.setImageUrl(pictureUrl);
+                    employeeRepository.save(employee);
+                    log.info("Tạo mới hồ sơ nhân sự cho tài khoản có sẵn: {}", email);
+                } else if ((employee.getImageUrl() == null || employee.getImageUrl().trim().isEmpty()) && pictureUrl != null) {
+                    employee.setImageUrl(pictureUrl);
+                    employeeRepository.save(employee);
+                    log.info("Cập nhật ảnh đại diện từ Google cho nhân viên cũ: {}", email);
+                } else {
+                    log.info("Nhân viên Google cũ đăng nhập: {}", email);
+                }
+            }
         } else {
-            // 3. Tự động đăng ký cho người dùng mới
             user = AccountUser.builder()
                     .email(email)
                     .password(passwordEncoder.encode("GOOGLE_SSO_" + UUID.randomUUID().toString()))
                     .role(Role.CUSTOMER)
-                    .isActive(true) // Mặc định kích hoạt
-                    .isPasswordSet(false) // <-- Đặt là false vì đây là pass ngẫu nhiên hệ thống tự sinh
+                    .isActive(true)
+                    .isPasswordSet(false)
                     .createdAt(Instant.now())
                     .build();
             user = userRepository.save(user);
@@ -158,7 +172,6 @@ public class AuthService {
             log.info("Tạo mới tài khoản từ Google Auth thành công: {}", email);
         }
 
-        // 4. Trả về Response chuẩn qua CustomUserDetails
         return generateAuthResponse(CustomUserDetails.build(user));
     }
 
@@ -167,10 +180,8 @@ public class AuthService {
         AccountUser user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy tài khoản với email này!"));
 
-        // 1. Tạo một token reset (UUID)
         String resetTokenString = java.util.UUID.randomUUID().toString();
 
-        // 2. Lưu token vào DB, set thời gian hết hạn là 10 phút tính từ bây giờ
         PasswordResetToken tokenEntity = PasswordResetToken.builder()
                 .token(resetTokenString)
                 .user(user)
@@ -178,10 +189,8 @@ public class AuthService {
                 .build();
         resetTokenRepository.save(tokenEntity);
 
-        // 3. Tạo link trỏ về Frontend
         String resetLink = frontendUrl + "/reset-password?token=" + resetTokenString;
 
-        // 4. Bắn mail (Nhớ sửa lại giao diện Zentech trong EmailService nha)
         emailService.sendResetPasswordEmail(user.getEmail(), resetLink);
         log.info("Đã gửi email khôi phục mật khẩu tới: {}", email);
     }
@@ -189,20 +198,16 @@ public class AuthService {
     // --- MODULE: ĐẶT LẠI MẬT KHẨU MỚI ---
     @Transactional
     public void resetPassword(String token, String newPassword) {
-        // 1. Tìm token trong DB
         PasswordResetToken resetToken = resetTokenRepository.findByToken(token)
                 .orElseThrow(() -> new RuntimeException("Link khôi phục không hợp lệ hoặc không tồn tại!"));
 
-        // 2. Kiểm tra xem token đã hết hạn chưa (hơn 10 phút)
         if (resetToken.getExpiryDate().isBefore(java.time.Instant.now())) {
             resetTokenRepository.delete(resetToken);
-            throw new RuntimeException("Link khôi phục đã hết hạn. Vui lòng yêu cầu lại!");
+            throw new RuntimeException("Token đã hết hạn!");
         }
 
-        // 3. Lấy User ra và cập nhật mật khẩu
         AccountUser user = resetToken.getUser();
         user.setPassword(passwordEncoder.encode(newPassword));
-        user.setActive(true);
         userRepository.save(user);
 
         // 4. Xóa token đi để không dùng lại được nữa
@@ -232,13 +237,48 @@ public class AuthService {
         AccountUser user = userRepository.findByEmail(userDetails.getEmail())
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy user"));
 
+        String imageUrl = null;
+        if (user.getRole() == Role.CUSTOMER) {
+            Customer customer = customerRepository.findByUserInfo_Id(user.getId()).orElse(null);
+            imageUrl = customer != null ? customer.getImageUrl() : null;
+        } else {
+            Employee employee = employeeRepository.findByUserInfo_Id(user.getId()).orElse(null);
+            imageUrl = employee != null ? employee.getImageUrl() : null;
+        }
+
         return AuthResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .accountId(userDetails.getId().toString())
                 .email(userDetails.getEmail())
                 .roles(roles)
-                .isPasswordSet(user.isPasswordSet()) // ---> THÊM DÒNG NÀY VÀO NÈ
+                .imageUrl(imageUrl)
+                .isPasswordSet(user.isPasswordSet()) // ---> THÊM DÒNG NÀY VÀO NÀY
                 .build();
+    }
+
+    // --- 8. ĐỔI MẬT KHẨU / ĐẶT MẬT KHẨU LẦN ĐẦU ---
+    @Transactional
+    public void changePassword(ChangePasswordRequest request) {
+        java.util.UUID accountId = hcmute.edu.zentech.security.SecurityContextUtils.getCurrentUserId();
+        if (accountId == null) {
+            throw new RuntimeException("Không tìm thấy thông tin đăng nhập.");
+        }
+
+        AccountUser user = userRepository.findById(accountId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy tài khoản."));
+
+        if (user.isPasswordSet()) {
+            if (request.getCurrentPassword() == null || request.getCurrentPassword().isEmpty()) {
+                throw new RuntimeException("Vui lòng nhập mật khẩu hiện tại.");
+            }
+            if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+                throw new RuntimeException("Mật khẩu hiện tại không đúng.");
+            }
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        user.setPasswordSet(true);
+        userRepository.save(user);
     }
 }

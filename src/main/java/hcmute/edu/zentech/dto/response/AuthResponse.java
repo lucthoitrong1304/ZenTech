@@ -25,6 +25,7 @@ public class AuthResponse {
     private String email;
     private String fullName;
     private List<String> roles;
+    private String imageUrl;
 
     // Thêm cái này nếu muốn FE xử lý mượt hơn
     private Long expiresIn;

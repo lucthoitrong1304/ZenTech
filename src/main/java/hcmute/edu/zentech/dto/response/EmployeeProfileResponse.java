@@ -1,34 +1,26 @@
-package hcmute.edu.zentech.model;
+package hcmute.edu.zentech.dto.response;
 
-import jakarta.persistence.*;
+import hcmute.edu.zentech.model.Role;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
 import java.util.UUID;
 
-@Entity
-@Table(name = "employees")
+@Data
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Data
-public class Employee {
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+public class EmployeeProfileResponse {
     private UUID id;
-
     private String fullName;
-
+    private String email;
+    private Role role;
     private String imageUrl;
-
     private String phoneNumber;
-
     private String address;
-
     private LocalDate dateOfBirth;
-
-    @OneToOne
-    @JoinColumn(name = "account_id", referencedColumnName = "account_id")
-    private AccountUser userInfo;
+    private boolean isActive;
 }

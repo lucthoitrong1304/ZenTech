@@ -48,7 +48,7 @@ public class UploadService {
             );
         }
 
-        if (request.getPurpose() == UploadPurpose.CUSTOMER_AVATAR) {
+        if (request.getPurpose() == UploadPurpose.CUSTOMER_AVATAR || request.getPurpose() == UploadPurpose.EMPLOYEE_AVATAR) {
             return r2StorageService.generateCustomerAvatarPresignedUrl(
                     currentUserId,
                     request.getOriginalFilename(),

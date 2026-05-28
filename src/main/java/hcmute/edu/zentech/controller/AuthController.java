@@ -58,8 +58,14 @@ public class AuthController {
     // --- 7. ĐẶT LẠI MẬT KHẨU MỚI ---
     @PostMapping("/reset-password")
     public ResponseEntity<String> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        // Đã sửa thành resetPassword cho khớp AuthService
         authService.resetPassword(request.getToken(), request.getNewPassword());
         return ResponseEntity.ok("Đổi mật khẩu thành công! Bạn có thể đăng nhập ngay bây giờ.");
+    }
+
+    // --- 8. ĐỔI MẬT KHẨU HOẶC ĐẶT MẬT KHẨU LẦN ĐẦU ---
+    @PutMapping("/password")
+    public ResponseEntity<String> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(request);
+        return ResponseEntity.ok("Cập nhật mật khẩu thành công.");
     }
 }
