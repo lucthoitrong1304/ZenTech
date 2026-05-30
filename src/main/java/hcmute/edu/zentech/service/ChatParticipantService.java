@@ -141,6 +141,15 @@ public class ChatParticipantService {
                 .orElse(accountId);
     }
 
+    public Optional<UUID> resolveAccountId(ParticipantType userType, UUID referenceId) {
+        if (userType == ParticipantType.CUSTOMER) {
+            return customerRepository.findById(referenceId).map(c -> c.getUserInfo().getId());
+        } else if (userType == ParticipantType.EMPLOYEE || userType == ParticipantType.EXPERT) {
+            return employeeRepository.findById(referenceId).map(e -> e.getUserInfo().getId());
+        }
+        return Optional.empty(); // System, Bot, etc.
+    }
+
     private Role resolveRole(CustomUserDetails currentUser) {
         return currentUser.getAuthorities().stream()
                 .findFirst()
