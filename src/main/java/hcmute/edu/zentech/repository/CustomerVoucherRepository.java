@@ -73,4 +73,48 @@ public interface CustomerVoucherRepository extends JpaRepository<CustomerVoucher
             @Param("now") Instant now,
             Pageable pageable
     );
+
+    @EntityGraph(attributePaths = {"coupon", "customer", "customer.userInfo"})
+    @Query(
+            value = """
+                    SELECT cv
+                    FROM CustomerVoucher cv
+                    JOIN cv.customer cust
+                    JOIN cv.coupon coup
+                    WHERE (:keyword IS NULL OR LOWER(cust.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR LOWER(cust.userInfo.email) LIKE LOWER(CONCAT('%', :keyword, '%')))
+                      AND (:couponCode IS NULL OR LOWER(coup.code) LIKE LOWER(CONCAT('%', :couponCode, '%')))
+                      AND (:status IS NULL 
+                           OR (:status = 'USED' AND cv.usedAt IS NOT NULL)
+                           OR (:status = 'EXPIRED' AND cv.usedAt IS NULL AND coup.endAt IS NOT NULL AND coup.endAt < :now)
+                           OR (:status = 'AVAILABLE' AND cv.usedAt IS NULL AND (coup.endAt IS NULL OR coup.endAt >= :now))
+                          )
+                    """,
+            countQuery = """
+                    SELECT COUNT(cv)
+                    FROM CustomerVoucher cv
+                    JOIN cv.customer cust
+                    JOIN cv.coupon coup
+                    WHERE (:keyword IS NULL OR LOWER(cust.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR LOWER(cust.userInfo.email) LIKE LOWER(CONCAT('%', :keyword, '%')))
+                      AND (:couponCode IS NULL OR LOWER(coup.code) LIKE LOWER(CONCAT('%', :couponCode, '%')))
+                      AND (:status IS NULL 
+                           OR (:status = 'USED' AND cv.usedAt IS NOT NULL)
+                           OR (:status = 'EXPIRED' AND cv.usedAt IS NULL AND coup.endAt IS NOT NULL AND coup.endAt < :now)
+                           OR (:status = 'AVAILABLE' AND cv.usedAt IS NULL AND (coup.endAt IS NULL OR coup.endAt >= :now))
+                          )
+                    """
+    )
+    Page<CustomerVoucher> searchCustomerVouchers(
+            @Param("keyword") String keyword,
+            @Param("couponCode") String couponCode,
+            @Param("status") String status,
+            @Param("now") Instant now,
+            Pageable pageable
+    );
+
+    @Query("SELECT COUNT(cv) > 0 FROM CustomerVoucher cv WHERE cv.coupon.id = :couponId AND cv.usedAt IS NOT NULL")
+    boolean existsUsedVoucherByCouponId(@Param("couponId") UUID couponId);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @Query("DELETE FROM CustomerVoucher cv WHERE cv.coupon.id = :couponId")
+    void deleteVouchersByCouponId(@Param("couponId") UUID couponId);
 }
