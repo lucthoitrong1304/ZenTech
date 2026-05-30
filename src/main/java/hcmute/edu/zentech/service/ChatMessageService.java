@@ -51,6 +51,7 @@ public class ChatMessageService {
     private final ChatMapper chatMapper;
     private final R2StorageService r2StorageService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final NotificationService notificationService;
 
     @Transactional(readOnly = true)
     public PageResponse<ChatMessageResponse> getMessagesForCurrentUser(UUID conversationId, int page, int size) {
@@ -105,7 +106,32 @@ public class ChatMessageService {
                     ));
         }
 
+        // Send Notification to other participants
+        sendNotificationsToOtherParticipants(conversationId, participant.getId(), savedMessage);
+
         return response;
+    }
+
+    private void sendNotificationsToOtherParticipants(UUID conversationId, UUID senderParticipantId, ChatMessage message) {
+        List<ConversationParticipant> otherParticipants = participantRepository.findByConversation_Id(conversationId).stream()
+                .filter(p -> !p.getId().equals(senderParticipantId))
+                .toList();
+
+        for (ConversationParticipant p : otherParticipants) {
+            chatParticipantService.resolveAccountId(p.getUserType(), p.getReferenceId())
+                    .ifPresent(accountId -> {
+                        String title = "Tin nhắn mới từ " + (message.getParticipant().getUserType() == ParticipantType.CUSTOMER ? "Khách hàng" : "Nhân viên");
+                        String content = message.getMessageType() == hcmute.edu.zentech.model.ChatMessageType.TEXT ? 
+                                         message.getContent() : "Đã gửi một tệp đính kèm";
+                        notificationService.createNotification(
+                                accountId,
+                                title,
+                                content,
+                                hcmute.edu.zentech.model.NotificationType.CHAT_MESSAGE,
+                                conversationId
+                        );
+                    });
+        }
     }
 
     private PageResponse<ChatMessageResponse> getMessages(UUID conversationId, int page, int size) {
@@ -144,7 +170,7 @@ public class ChatMessageService {
             throw new IllegalArgumentException("Text messages cannot include attachments");
         }
 
-        if (request.getMessageType() != ChatMessageType.TEXT && !hasAttachments) {
+        if (request.getMessageType() != ChatMessageType.TEXT && request.getMessageType() != ChatMessageType.CALL && !hasAttachments) {
             throw new IllegalArgumentException("Media messages require at least one attachment");
         }
 
