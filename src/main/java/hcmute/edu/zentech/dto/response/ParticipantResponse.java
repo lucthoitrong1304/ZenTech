@@ -20,6 +20,7 @@ public class ParticipantResponse {
     private UUID id;
     private ParticipantType userType;
     private UUID referenceId;
+    private String email;
     private ParticipantStatus status;
     private Instant joinedAt;
     private Instant leftAt;

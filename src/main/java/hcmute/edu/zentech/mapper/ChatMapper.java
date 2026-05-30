@@ -14,6 +14,7 @@ import hcmute.edu.zentech.model.Customer;
 import hcmute.edu.zentech.model.TransferRequest;
 import hcmute.edu.zentech.model.Employee;
 import hcmute.edu.zentech.model.ParticipantType;
+import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.EmployeeRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,7 @@ import java.util.List;
 public class ChatMapper {
     private final CustomerRepository customerRepository;
     private final EmployeeRepository employeeRepository;
+    private final AccountUserRepository accountUserRepository;
 
     public ConversationResponse toConversationResponse(
             Conversation conversation,
@@ -53,6 +55,7 @@ public class ChatMapper {
     public ParticipantResponse toParticipantResponse(ConversationParticipant participant) {
         String displayName = "Unknown";
         String avatarUrl = null;
+        String email = null;
 
         if (participant.getUserType() == ParticipantType.BOT) {
             displayName = "ZenTech AI";
@@ -65,7 +68,12 @@ public class ChatMapper {
             if (employee != null) {
                 displayName = employee.getFullName();
                 avatarUrl = employee.getImageUrl();
+                AccountUser account = employee.getUserInfo();
+                email = account != null ? account.getEmail() : null;
             } else {
+                email = accountUserRepository.findById(participant.getReferenceId())
+                        .map(AccountUser::getEmail)
+                        .orElse(null);
                 displayName = "Nhân viên hỗ trợ";
             }
         }
@@ -74,6 +82,7 @@ public class ChatMapper {
                 .id(participant.getId())
                 .userType(participant.getUserType())
                 .referenceId(participant.getReferenceId())
+                .email(email)
                 .status(participant.getStatus())
                 .joinedAt(participant.getJoinedAt())
                 .leftAt(participant.getLeftAt())
