@@ -32,6 +32,7 @@ public class CustomerManagementMapper {
                 .totalOrders(getTotalOrders(aggregate))
                 .totalSpent(getTotalSpent(aggregate))
                 .lastOrderAt(getLastOrderAt(aggregate))
+                .imageUrl(customer.getImageUrl())
                 .build();
     }
 
@@ -54,6 +55,7 @@ public class CustomerManagementMapper {
                 .totalOrders(getTotalOrders(aggregate))
                 .totalSpent(getTotalSpent(aggregate))
                 .lastOrderAt(getLastOrderAt(aggregate))
+                .imageUrl(customer.getImageUrl())
                 .build();
     }
 

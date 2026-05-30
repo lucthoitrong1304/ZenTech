@@ -23,4 +23,5 @@ public class CustomerDetailResponse {
     private long totalOrders;
     private double totalSpent;
     private Instant lastOrderAt;
+    private String imageUrl;
 }
