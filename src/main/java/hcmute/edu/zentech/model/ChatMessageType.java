@@ -6,5 +6,6 @@ public enum ChatMessageType {
     VIDEO,
     FILE,
     MEDIA,
-    SYSTEM
+    SYSTEM,
+    CALL
 }

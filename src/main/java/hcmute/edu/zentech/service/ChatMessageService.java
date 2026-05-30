@@ -144,7 +144,7 @@ public class ChatMessageService {
             throw new IllegalArgumentException("Text messages cannot include attachments");
         }
 
-        if (request.getMessageType() != ChatMessageType.TEXT && !hasAttachments) {
+        if (request.getMessageType() != ChatMessageType.TEXT && request.getMessageType() != ChatMessageType.CALL && !hasAttachments) {
             throw new IllegalArgumentException("Media messages require at least one attachment");
         }
 
