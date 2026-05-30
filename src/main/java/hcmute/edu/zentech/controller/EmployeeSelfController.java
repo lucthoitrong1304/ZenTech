@@ -1,6 +1,7 @@
 package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.request.EmployeeProfileUpdateRequest;
+import hcmute.edu.zentech.dto.request.FaceRegistrationRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.EmployeeProfileResponse;
 import hcmute.edu.zentech.service.EmployeeSelfService;
@@ -25,5 +26,16 @@ public class EmployeeSelfController {
             @Valid @RequestBody EmployeeProfileUpdateRequest request
     ) {
         return ResponseEntity.ok(ApiResponse.success(employeeSelfService.updateMyProfile(request)));
+    }
+
+    @PostMapping("/face")
+    public ResponseEntity<ApiResponse<Void>> registerFace(
+            @Valid @RequestBody FaceRegistrationRequest request
+    ) {
+        employeeSelfService.registerFace(request);
+        return ResponseEntity.ok(ApiResponse.<Void>builder()
+                .success(true)
+                .message("Đăng ký khuôn mặt thành công.")
+                .build());
     }
 }

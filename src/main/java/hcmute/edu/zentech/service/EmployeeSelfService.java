@@ -1,5 +1,8 @@
 package hcmute.edu.zentech.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import hcmute.edu.zentech.dto.request.FaceRegistrationRequest;
 import hcmute.edu.zentech.dto.request.EmployeeProfileUpdateRequest;
 import hcmute.edu.zentech.dto.response.EmployeeProfileResponse;
 import hcmute.edu.zentech.model.AccountUser;
@@ -19,6 +22,7 @@ public class EmployeeSelfService {
     private final EmployeeRepository employeeRepository;
     private final AccountUserRepository accountUserRepository;
     private final R2StorageService r2StorageService;
+    private final ObjectMapper objectMapper;
 
     public EmployeeProfileResponse getMyProfile() {
         UUID accountId = SecurityContextUtils.getCurrentUserId();
@@ -54,12 +58,33 @@ public class EmployeeSelfService {
         return mapToResponse(employee);
     }
 
+    @Transactional
+    public void registerFace(FaceRegistrationRequest request) {
+        UUID accountId = SecurityContextUtils.getCurrentUserId();
+        if (accountId == null) {
+            throw new RuntimeException("Không tìm thấy thông tin đăng nhập.");
+        }
+
+        Employee employee = employeeRepository.findByUserInfo_Id(accountId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
+
+        try {
+            String jsonDescriptors = objectMapper.writeValueAsString(request.getFaceDescriptors());
+            employee.setFaceDescriptors(jsonDescriptors);
+            employeeRepository.save(employee);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Lỗi khi lưu trữ đặc trưng khuôn mặt.", e);
+        }
+    }
+
     private EmployeeProfileResponse mapToResponse(Employee employee) {
         AccountUser user = employee.getUserInfo();
         String imageUrl = employee.getImageUrl();
         if (imageUrl != null && !imageUrl.startsWith("http")) {
             imageUrl = r2StorageService.getPresignedGetUrl(imageUrl);
         }
+
+        boolean hasRegisteredFace = employee.getFaceDescriptors() != null && !employee.getFaceDescriptors().isEmpty();
 
         return EmployeeProfileResponse.builder()
                 .id(employee.getId())
@@ -71,6 +96,7 @@ public class EmployeeSelfService {
                 .address(employee.getAddress())
                 .dateOfBirth(employee.getDateOfBirth())
                 .isActive(user.isActive())
+                .hasRegisteredFace(hasRegisteredFace)
                 .build();
     }
 }
