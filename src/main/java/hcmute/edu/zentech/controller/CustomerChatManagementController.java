@@ -3,7 +3,9 @@ package hcmute.edu.zentech.controller;
 import hcmute.edu.zentech.dto.request.ChatConversationListQueryRequest;
 import hcmute.edu.zentech.dto.request.TransferRequestCreateRequest;
 import hcmute.edu.zentech.dto.request.TransferRequestUpdateRequest;
+import hcmute.edu.zentech.dto.request.ChatConversationTransferRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
+import hcmute.edu.zentech.dto.response.ChatStaffResponse;
 import hcmute.edu.zentech.dto.response.ConversationResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.dto.response.TransferRequestResponse;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -68,5 +71,19 @@ public class CustomerChatManagementController {
             @Valid @RequestBody TransferRequestUpdateRequest request
     ) {
         return ResponseEntity.ok(ApiResponse.success(transferRequestService.updateTransferRequest(requestId, request)));
+    }
+
+    @PostMapping("/conversations/{conversationId}/transfer")
+    public ResponseEntity<ApiResponse<ConversationResponse>> transferConversation(
+            @PathVariable UUID conversationId,
+            @RequestBody(required = false) ChatConversationTransferRequest request
+    ) {
+        UUID targetAccountId = (request != null) ? request.getTargetAccountId() : null;
+        return ResponseEntity.ok(ApiResponse.success(chatConversationService.transferConversation(conversationId, targetAccountId)));
+    }
+
+    @GetMapping("/staffs/active")
+    public ResponseEntity<ApiResponse<List<ChatStaffResponse>>> getActiveStaffList() {
+        return ResponseEntity.ok(ApiResponse.success(chatConversationService.getActiveStaffList()));
     }
 }
