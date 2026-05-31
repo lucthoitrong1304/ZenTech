@@ -23,4 +23,5 @@ public class EmployeeProfileResponse {
     private String address;
     private LocalDate dateOfBirth;
     private boolean isActive;
+    private boolean hasRegisteredFace;
 }

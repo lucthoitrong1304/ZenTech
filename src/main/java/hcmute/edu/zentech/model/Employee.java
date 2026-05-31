@@ -31,4 +31,7 @@ public class Employee {
     @OneToOne
     @JoinColumn(name = "account_id", referencedColumnName = "account_id")
     private AccountUser userInfo;
+
+    @Column(columnDefinition = "TEXT")
+    private String faceDescriptors;
 }
