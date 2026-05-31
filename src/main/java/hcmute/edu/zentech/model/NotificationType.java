@@ -4,5 +4,7 @@ public enum NotificationType {
     CHAT_MESSAGE,
     ORDER_STATUS,
     SYSTEM,
-    PROMOTION
+    PROMOTION,
+    AGENT_REQUEST,
+    CONVERSATION_TRANSFER
 }

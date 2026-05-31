@@ -13,6 +13,8 @@ import hcmute.edu.zentech.model.ParticipantStatus;
 import hcmute.edu.zentech.model.ParticipantType;
 import hcmute.edu.zentech.dto.response.ChatStaffResponse;
 import hcmute.edu.zentech.model.Role;
+import hcmute.edu.zentech.model.NotificationType;
+import hcmute.edu.zentech.service.NotificationService;
 import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import hcmute.edu.zentech.repository.EmployeeRepository;
@@ -48,6 +50,7 @@ public class ChatConversationService {
     private final ChatParticipantService chatParticipantService;
     private final ChatMapper chatMapper;
     private final SimpMessagingTemplate messagingTemplate;
+    private final NotificationService notificationService;
 
     @Transactional
     public ConversationResponse createOrGetCurrentCustomerConversation() {
@@ -111,6 +114,18 @@ public class ChatConversationService {
         Conversation savedConversation = conversationRepository.save(conversation);
         ConversationResponse response = toConversationResponse(savedConversation);
         messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
+
+        List<Role> staffRoles = List.of(Role.EMPLOYEE, Role.MANAGER, Role.OWNER, Role.ADMIN);
+        employeeRepository.findActiveStaff(staffRoles).forEach(staff -> {
+            notificationService.createNotification(
+                    staff.getUserInfo().getId(),
+                    "Yêu cầu hỗ trợ mới",
+                    "Khách hàng " + customer.getFullName() + " đang cần nhân viên hỗ trợ.",
+                    NotificationType.AGENT_REQUEST,
+                    conversationId
+            );
+        });
+
         return response;
     }
 
@@ -190,6 +205,19 @@ public class ChatConversationService {
                     currentStaff.referenceId(),
                     ParticipantStatus.LEFT
             );
+
+            List<Role> staffRoles = List.of(Role.EMPLOYEE, Role.MANAGER, Role.OWNER, Role.ADMIN);
+            employeeRepository.findActiveStaff(staffRoles).forEach(staff -> {
+                if (!staff.getUserInfo().getId().equals(currentStaff.accountId())) {
+                    notificationService.createNotification(
+                            staff.getUserInfo().getId(),
+                            "Cuộc hội thoại được chuyển giao",
+                            "Một cuộc hội thoại vừa được chuyển vào hàng đợi chung.",
+                            NotificationType.CONVERSATION_TRANSFER,
+                            conversationId
+                    );
+                }
+            });
         } else {
             // Find target staff
             var targetEmployee = employeeRepository.findByUserInfo_Id(targetAccountId)
@@ -209,6 +237,14 @@ public class ChatConversationService {
                     targetType,
                     targetEmployee.getId(),
                     ParticipantStatus.ACTIVE
+            );
+
+            notificationService.createNotification(
+                    targetAccountId,
+                    "Bạn được chỉ định một cuộc hội thoại",
+                    "Một cuộc hội thoại vừa được chuyển giao cho bạn.",
+                    NotificationType.CONVERSATION_TRANSFER,
+                    conversationId
             );
         }
 
