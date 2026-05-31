@@ -11,8 +11,11 @@ import hcmute.edu.zentech.model.ConversationStatus;
 import hcmute.edu.zentech.model.Customer;
 import hcmute.edu.zentech.model.ParticipantStatus;
 import hcmute.edu.zentech.model.ParticipantType;
+import hcmute.edu.zentech.dto.response.ChatStaffResponse;
+import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
+import hcmute.edu.zentech.repository.EmployeeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -41,6 +44,7 @@ public class ChatConversationService {
 
     private final ConversationRepository conversationRepository;
     private final ConversationParticipantRepository participantRepository;
+    private final EmployeeRepository employeeRepository;
     private final ChatParticipantService chatParticipantService;
     private final ChatMapper chatMapper;
     private final SimpMessagingTemplate messagingTemplate;
@@ -168,6 +172,87 @@ public class ChatConversationService {
         messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
         messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
         return response;
+    }
+
+    @Transactional
+    public ConversationResponse transferConversation(UUID conversationId, UUID targetAccountId) {
+        ChatParticipantService.StaffIdentity currentStaff = chatParticipantService.getCurrentStaffIdentity();
+        Conversation conversation = getConversation(conversationId);
+        ensureNotClosed(conversation);
+        
+        chatParticipantService.getActiveParticipant(conversationId, currentStaff.accountId());
+
+        if (targetAccountId == null) {
+            conversation.setStatus(ConversationStatus.WAITING_FOR_AGENT);
+            chatParticipantService.addOrUpdateParticipant(
+                    conversation,
+                    currentStaff.participantType(),
+                    currentStaff.referenceId(),
+                    ParticipantStatus.LEFT
+            );
+        } else {
+            // Find target staff
+            var targetEmployee = employeeRepository.findByUserInfo_Id(targetAccountId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Staff", "accountId", targetAccountId));
+            Role targetRole = targetEmployee.getUserInfo().getRole();
+            ParticipantType targetType = targetRole == Role.EMPLOYEE ? ParticipantType.EMPLOYEE : ParticipantType.EXPERT;
+
+            conversation.setStatus(ConversationStatus.AGENT_HANDLING);
+            chatParticipantService.addOrUpdateParticipant(
+                    conversation,
+                    currentStaff.participantType(),
+                    currentStaff.referenceId(),
+                    ParticipantStatus.LEFT
+            );
+            chatParticipantService.addOrUpdateParticipant(
+                    conversation,
+                    targetType,
+                    targetEmployee.getId(),
+                    ParticipantStatus.ACTIVE
+            );
+        }
+
+        conversation.setUpdatedAt(Instant.now());
+        ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
+        return response;
+    }
+
+    @Transactional
+    public ConversationResponse reopenConversation(UUID conversationId) {
+        Customer customer = chatParticipantService.getCurrentCustomer();
+        Conversation conversation = getConversation(conversationId);
+        chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
+
+        if (conversation.getStatus() != ConversationStatus.CLOSED) {
+            throw new AccessDeniedException("Conversation is not closed");
+        }
+
+        conversation.setStatus(ConversationStatus.WAITING_FOR_AGENT);
+        conversation.setClosedAt(null);
+        conversation.setUpdatedAt(Instant.now());
+        
+        chatParticipantService.makeBotSilent(conversation);
+        
+        ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
+        return response;
+    }
+
+    @Transactional(readOnly = true)
+    public List<ChatStaffResponse> getActiveStaffList() {
+        chatParticipantService.getCurrentStaffIdentity();
+        List<Role> staffRoles = List.of(Role.EMPLOYEE, Role.MANAGER, Role.OWNER, Role.ADMIN);
+        return employeeRepository.findActiveStaff(staffRoles).stream()
+                .map(e -> ChatStaffResponse.builder()
+                        .accountId(e.getUserInfo().getId())
+                        .fullName(e.getFullName())
+                        .imageUrl(e.getImageUrl())
+                        .role(e.getUserInfo().getRole().name())
+                        .build())
+                .toList();
     }
 
     @Transactional(readOnly = true)

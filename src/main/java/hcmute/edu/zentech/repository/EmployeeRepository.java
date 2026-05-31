@@ -10,12 +10,17 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface EmployeeRepository extends JpaRepository<Employee, UUID> {
     Optional<Employee> findByUserInfo_Id(UUID accountId);
+
+    @EntityGraph(attributePaths = {"userInfo"})
+    @Query("SELECT e FROM Employee e WHERE e.userInfo.isActive = true AND e.userInfo.role IN :roles")
+    List<Employee> findActiveStaff(@Param("roles") List<Role> roles);
 
     @EntityGraph(attributePaths = {"userInfo"})
     @Query(

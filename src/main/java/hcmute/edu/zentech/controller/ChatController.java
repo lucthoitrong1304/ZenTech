@@ -67,4 +67,9 @@ public class ChatController {
     public ResponseEntity<ApiResponse<ConversationResponse>> closeConversation(@PathVariable UUID conversationId) {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.closeConversation(conversationId)));
     }
+
+    @PostMapping("/{conversationId}/reopen")
+    public ResponseEntity<ApiResponse<ConversationResponse>> reopenConversation(@PathVariable UUID conversationId) {
+        return ResponseEntity.ok(ApiResponse.success(chatConversationService.reopenConversation(conversationId)));
+    }
 }
