@@ -28,6 +28,7 @@ public class WebRtcSignalMessage {
         ANSWER,
         ICE_CANDIDATE,
         HANG_UP,
-        BUSY
+        BUSY,
+        PARTNER_LEFT
     }
 }

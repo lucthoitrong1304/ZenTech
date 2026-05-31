@@ -32,9 +32,12 @@ public class WebRtcSignalingController {
 
         switch (message.getType()) {
             case CALL_REQUEST:
-                if (callStateService.isUserAvailable(targetEmail)) {
+                if (callStateService.isUserAvailable(targetEmail) || senderEmail.equals(callStateService.getPartner(targetEmail))) {
+                    callStateService.linkUsers(senderEmail, targetEmail);
                     callStateService.setUserState(senderEmail, CallState.RINGING);
-                    callStateService.setUserState(targetEmail, CallState.RINGING);
+                    if (callStateService.isUserAvailable(targetEmail)) {
+                        callStateService.setUserState(targetEmail, CallState.RINGING);
+                    }
                     messagingTemplate.convertAndSendToUser(targetEmail, "/queue/webrtc", message);
                 } else {
                     // Target is busy
@@ -55,6 +58,7 @@ public class WebRtcSignalingController {
 
             case CALL_REJECTED:
             case HANG_UP:
+                callStateService.unlinkUser(senderEmail);
                 callStateService.setUserState(senderEmail, CallState.IDLE);
                 callStateService.setUserState(targetEmail, CallState.IDLE);
                 messagingTemplate.convertAndSendToUser(targetEmail, "/queue/webrtc", message);
