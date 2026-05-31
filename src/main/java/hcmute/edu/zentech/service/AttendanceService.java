@@ -4,26 +4,38 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import hcmute.edu.zentech.dto.request.CheckInRequest;
-import hcmute.edu.zentech.dto.response.EmployeeProfileResponse;
+import hcmute.edu.zentech.dto.response.*;
 import hcmute.edu.zentech.model.AccountUser;
 import hcmute.edu.zentech.model.Attendance;
 import hcmute.edu.zentech.model.AttendanceStatus;
 import hcmute.edu.zentech.model.Employee;
+import hcmute.edu.zentech.model.Role;
+import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.AttendanceRepository;
 import hcmute.edu.zentech.repository.EmployeeRepository;
+import hcmute.edu.zentech.repository.projection.AttendanceRecordProjection;
+import hcmute.edu.zentech.repository.projection.AttendanceStatisticsProjection;
+import hcmute.edu.zentech.security.SecurityContextUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class AttendanceService {
     private final EmployeeRepository employeeRepository;
     private final AttendanceRepository attendanceRepository;
+    private final AccountUserRepository accountUserRepository;
     private final R2StorageService r2StorageService;
     private final ObjectMapper objectMapper;
 
@@ -124,6 +136,60 @@ public class AttendanceService {
                 .address(employee.getAddress())
                 .dateOfBirth(employee.getDateOfBirth())
                 .isActive(user.isActive())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public AttendanceReportResponse getAttendanceReport(LocalDate startDate, LocalDate endDate, int page, int size) {
+        UUID accountId = SecurityContextUtils.getCurrentUserId();
+        if (accountId == null) {
+            throw new RuntimeException("Không tìm thấy thông tin đăng nhập.");
+        }
+
+        AccountUser accountUser = accountUserRepository.findById(accountId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy người dùng."));
+
+        LocalDateTime startDateTime = startDate.atStartOfDay();
+        LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
+        Pageable pageable = PageRequest.of(page, size);
+
+        Page<AttendanceRecordProjection> records;
+        AttendanceStatisticsProjection stats;
+
+        if (accountUser.getRole() == Role.OWNER || accountUser.getRole() == Role.MANAGER || accountUser.getRole() == Role.ADMIN) {
+            records = attendanceRepository.findAllRecordsBetweenDates(startDateTime, endDateTime, pageable);
+            stats = attendanceRepository.getStatisticsBetweenDates(startDateTime, endDateTime);
+        } else if (accountUser.getRole() == Role.EMPLOYEE) {
+            Employee employee = employeeRepository.findByUserInfo_Id(accountId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
+            records = attendanceRepository.findRecordsByEmployeeIdAndDates(employee.getId(), startDateTime, endDateTime, pageable);
+            stats = attendanceRepository.getStatisticsByEmployeeIdAndDates(employee.getId(), startDateTime, endDateTime);
+        } else {
+            throw new RuntimeException("Bạn không có quyền truy cập báo cáo này.");
+        }
+
+        List<AttendanceRecordResponse> recordResponses = records.getContent().stream()
+                .map(r -> AttendanceRecordResponse.builder()
+                        .id(r.getId())
+                        .employeeId(r.getEmployeeId())
+                        .employeeName(r.getEmployeeName())
+                        .checkInTime(r.getCheckInTime())
+                        .status(r.getStatus())
+                        .build())
+                .collect(Collectors.toList());
+
+        PageResponse<AttendanceRecordResponse> pageResponse = PageResponse.from(records, recordResponses);
+
+        AttendanceStatisticsResponse statisticsResponse = AttendanceStatisticsResponse.builder()
+                .totalRecords(stats.getTotalRecords())
+                .totalOnTime(stats.getTotalOnTime())
+                .totalLate(stats.getTotalLate())
+                .totalEarly(stats.getTotalEarly())
+                .build();
+
+        return AttendanceReportResponse.builder()
+                .statistics(statisticsResponse)
+                .records(pageResponse)
                 .build();
     }
 }

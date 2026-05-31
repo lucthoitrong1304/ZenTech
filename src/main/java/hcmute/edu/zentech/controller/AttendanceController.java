@@ -6,11 +6,12 @@ import hcmute.edu.zentech.dto.response.EmployeeProfileResponse;
 import hcmute.edu.zentech.service.AttendanceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import hcmute.edu.zentech.dto.response.AttendanceReportResponse;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/attendance")
@@ -28,5 +29,16 @@ public class AttendanceController {
                 .data(employee)
                 .message("Check-in thành công. Xin chào " + employee.getFullName())
                 .build());
+    }
+
+    @GetMapping("/report")
+    public ResponseEntity<ApiResponse<AttendanceReportResponse>> getAttendanceReport(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        AttendanceReportResponse report = attendanceService.getAttendanceReport(startDate, endDate, page, size);
+        return ResponseEntity.ok(ApiResponse.success(report));
     }
 }
