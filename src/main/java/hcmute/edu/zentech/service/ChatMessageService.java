@@ -64,6 +64,52 @@ public class ChatMessageService {
         return getMessages(conversationId, page, size);
     }
 
+    @Transactional(readOnly = true)
+    public PageResponse<ChatMessageResponse> searchMessagesForCurrentUser(UUID conversationId, String keyword, int page, int size) {
+        Conversation conversation = getConversation(conversationId);
+        chatParticipantService.findCurrentCustomer()
+                .ifPresentOrElse(
+                        customer -> chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId()),
+                        chatParticipantService::getCurrentStaffIdentity
+                );
+                
+        Page<ChatMessage> messagePage = chatMessageRepository.searchMessages(
+                conversationId,
+                keyword,
+                PageRequest.of(
+                        Math.max(page, DEFAULT_PAGE),
+                        normalizeSize(size)
+                )
+        );
+        return PageResponse.from(messagePage, messagePage.getContent().stream()
+                .map(this::toChatMessageResponse)
+                .toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ChatMessageResponse> getMessageContextForCurrentUser(UUID conversationId, UUID messageId) {
+        Conversation conversation = getConversation(conversationId);
+        chatParticipantService.findCurrentCustomer()
+                .ifPresentOrElse(
+                        customer -> chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId()),
+                        chatParticipantService::getCurrentStaffIdentity
+                );
+                
+        ChatMessage targetMessage = chatMessageRepository.findById(messageId)
+                .orElseThrow(() -> new ResourceNotFoundException("ChatMessage", "id", messageId));
+                
+        if (!targetMessage.getConversation().getId().equals(conversationId)) {
+            throw new IllegalArgumentException("Message does not belong to the specified conversation");
+        }
+        
+        List<ChatMessage> contextMessages = chatMessageRepository.findByConversation_IdAndCreatedAtGreaterThanEqualOrderByCreatedAtAsc(
+                conversationId, targetMessage.getCreatedAt());
+                
+        return contextMessages.stream()
+                .map(this::toChatMessageResponse)
+                .toList();
+    }
+
     @Transactional
     public ChatMessageResponse sendMessage(UUID conversationId, ChatMessageRequest request, UUID accountId) {
         Conversation conversation = getConversation(conversationId);
