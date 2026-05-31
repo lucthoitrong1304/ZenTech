@@ -58,6 +58,28 @@ public class ChatController {
         ));
     }
 
+    @GetMapping("/{conversationId}/messages/search")
+    public ResponseEntity<ApiResponse<PageResponse<ChatMessageResponse>>> searchMessages(
+            @PathVariable UUID conversationId,
+            @RequestParam String keyword,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(
+                chatMessageService.searchMessagesForCurrentUser(conversationId, keyword, page, size)
+        ));
+    }
+
+    @GetMapping("/{conversationId}/messages/context")
+    public ResponseEntity<ApiResponse<java.util.List<ChatMessageResponse>>> getMessageContext(
+            @PathVariable UUID conversationId,
+            @RequestParam UUID messageId
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(
+                chatMessageService.getMessageContextForCurrentUser(conversationId, messageId)
+        ));
+    }
+
     @PostMapping("/{conversationId}/request-agent")
     public ResponseEntity<ApiResponse<ConversationResponse>> requestAgent(@PathVariable UUID conversationId) {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.requestAgent(conversationId)));
