@@ -6,13 +6,6 @@ import hcmute.edu.zentech.model.PaymentStatus;
 import hcmute.edu.zentech.repository.projection.CustomerOrderAggregateProjection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-
-import hcmute.edu.zentech.model.Order;
-import hcmute.edu.zentech.model.OrderStatus;
-import hcmute.edu.zentech.model.PaymentStatus;
-import hcmute.edu.zentech.repository.projection.CustomerOrderAggregateProjection;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -111,4 +104,17 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @EntityGraph(attributePaths = {"customer", "customer.userInfo", "address", "orderCoupons"})
     @Query("SELECT o FROM Order o WHERE o.id = :orderId")
     Optional<Order> findManagementDetailById(@Param("orderId") UUID orderId);
+
+    @Query("""
+            SELECT o
+            FROM Order o
+            WHERE o.createdAt >= :startDate
+              AND o.createdAt < :endDate
+              AND o.orderStatus <> :cancelledStatus
+            """)
+    List<Order> findSuccessfulOrdersBetween(
+            @Param("startDate") Instant startDate,
+            @Param("endDate") Instant endDate,
+            @Param("cancelledStatus") OrderStatus cancelledStatus
+    );
 }
