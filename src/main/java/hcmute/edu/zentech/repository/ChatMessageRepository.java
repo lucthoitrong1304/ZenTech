@@ -24,4 +24,7 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, UUID> 
 
     @EntityGraph(attributePaths = {"conversation", "participant"})
     List<ChatMessage> findByConversation_IdAndCreatedAtGreaterThanEqualOrderByCreatedAtAsc(UUID conversationId, Instant createdAt);
+
+    @EntityGraph(attributePaths = {"conversation", "participant"})
+    List<ChatMessage> findTop12ByConversation_IdOrderByCreatedAtDesc(UUID conversationId);
 }
