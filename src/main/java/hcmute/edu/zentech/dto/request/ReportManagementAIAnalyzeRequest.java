@@ -1,0 +1,15 @@
+package hcmute.edu.zentech.dto.request;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ReportManagementAIAnalyzeRequest {
+    private String category;
+    private String data;
+}
