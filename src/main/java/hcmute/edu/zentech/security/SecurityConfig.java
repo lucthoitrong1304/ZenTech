@@ -32,6 +32,7 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final AuthEntryPointJwt unauthorizedHandler;
     private final CustomUserDetailsService customUserDetailsService;
+    private final TraceIdFilter traceIdFilter;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -70,6 +71,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/customers/**").hasRole("CUSTOMER")
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers("/api/categories/**").permitAll()
+                        .requestMatchers("/api/logs/client").permitAll()
 
                         .requestMatchers("/api/management/search").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/products/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
@@ -86,7 +88,8 @@ public class SecurityConfig {
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authenticationProvider(authenticationProvider)
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(traceIdFilter, JwtAuthenticationFilter.class);
         return http.build();
     }
 
@@ -95,7 +98,8 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of("http://localhost:4200", "http://localhost:3000", "http://localhost:5173"));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Trace-Id"));
+        configuration.setExposedHeaders(List.of("X-Trace-Id"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
