@@ -58,15 +58,15 @@ public class JwtUtils {
             Jwts.parser().verifyWith(getAccessTokenKey()).build().parseSignedClaims(authToken);
             return true;
         } catch (MalformedJwtException e) {
-            logger.error("Token không hợp lệ: {}", e.getMessage());
+            logger.debug("Token không hợp lệ: {}", e.getMessage());
         } catch (ExpiredJwtException e) {
-            logger.error("Token đã hết hạn: {}", e.getMessage());
+            logger.debug("Token đã hết hạn: {}", e.getMessage());
         } catch (UnsupportedJwtException e) {
-            logger.error("Token không được hỗ trợ: {}", e.getMessage());
+            logger.debug("Token không được hỗ trợ: {}", e.getMessage());
         } catch (IllegalArgumentException e) {
-            logger.error("Chuỗi JWT claims bị rỗng: {}", e.getMessage());
+            logger.debug("Chuỗi JWT claims bị rỗng: {}", e.getMessage());
         } catch (SignatureException e) {
-            logger.error("Chữ ký JWT không khớp: {}", e.getMessage());
+            logger.debug("Chữ ký JWT không khớp: {}", e.getMessage());
         }
         return false;
     }
