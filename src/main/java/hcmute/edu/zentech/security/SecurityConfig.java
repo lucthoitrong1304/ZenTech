@@ -80,6 +80,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/management/customers/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/reports/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
 
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
