@@ -11,6 +11,7 @@ import hcmute.edu.zentech.model.Conversation;
 import hcmute.edu.zentech.model.ConversationParticipant;
 import hcmute.edu.zentech.model.ParticipantStatus;
 import hcmute.edu.zentech.model.ParticipantType;
+import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.repository.ChatMessageRepository;
 import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
@@ -43,6 +44,7 @@ public class ChatBotService {
     private final ConversationParticipantRepository participantRepository;
     private final ChatMapper chatMapper;
     private final ObjectMapper objectMapper;
+    private final AiManagementService aiManagementService;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
@@ -94,11 +96,22 @@ public class ChatBotService {
             String customerContent
     ) {
         try {
+            List<AiChatRespondRequest.HistoryMessage> history = loadHistory(conversationId, message.getId());
+            Optional<String> runtimeReply = aiManagementService.generateRuntimeReply(
+                    Role.CUSTOMER,
+                    customerContent,
+                    history,
+                    java.util.Map.of("conversationId", conversationId.toString())
+            );
+            if (runtimeReply.isPresent()) {
+                return runtimeReply;
+            }
+
             AiChatRespondRequest request = AiChatRespondRequest.builder()
                     .conversationId(conversationId)
                     .messageId(message.getId())
                     .message(customerContent)
-                    .history(loadHistory(conversationId, message.getId()))
+                    .history(history)
                     .build();
 
             HttpRequest httpRequest = HttpRequest.newBuilder()
