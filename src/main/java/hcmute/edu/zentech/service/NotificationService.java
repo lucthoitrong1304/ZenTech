@@ -15,6 +15,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.util.UUID;
 
@@ -25,7 +26,7 @@ public class NotificationService {
     private final AccountUserRepository accountUserRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void createNotification(UUID accountId, String title, String content, NotificationType type, UUID referenceId) {
         AccountUser accountUser = accountUserRepository.findById(accountId)
                 .orElseThrow(() -> new ResourceNotFoundException("AccountUser", "id", accountId));

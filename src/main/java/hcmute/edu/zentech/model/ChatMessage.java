@@ -59,7 +59,7 @@ public class ChatMessage {
     private ChatMessageType messageType;
 
     @Lob
-    @Column
+    @Column(columnDefinition = "TEXT")
     private String content;
 
     @Builder.Default

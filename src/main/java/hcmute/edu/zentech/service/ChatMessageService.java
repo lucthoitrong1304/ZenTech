@@ -21,6 +21,7 @@ import hcmute.edu.zentech.repository.ChatMessageRepository;
 import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -28,6 +29,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -37,6 +39,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ChatMessageService {
     private static final int DEFAULT_PAGE = 0;
     private static final int DEFAULT_SIZE = 20;
@@ -53,6 +56,7 @@ public class ChatMessageService {
     private final R2StorageService r2StorageService;
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationService notificationService;
+    private final TransactionTemplate transactionTemplate;
 
     @Transactional(readOnly = true)
     public PageResponse<ChatMessageResponse> getMessagesForCurrentUser(UUID conversationId, int page, int size) {
@@ -111,8 +115,38 @@ public class ChatMessageService {
                 .toList();
     }
 
-    @Transactional
     public ChatMessageResponse sendMessage(UUID conversationId, ChatMessageRequest request, UUID accountId) {
+        PersistedMessage persistedMessage = transactionTemplate.execute(status -> persistMessage(
+                conversationId,
+                request,
+                accountId
+        ));
+        if (persistedMessage == null) {
+            throw new IllegalStateException("Message could not be saved");
+        }
+
+        broadcastMessage(conversationId, persistedMessage.message());
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", persistedMessage.conversation());
+
+        if (persistedMessage.shouldTriggerBot()) {
+            try {
+                chatBotService.handleCustomerMessage(conversationId, persistedMessage.message())
+                        .ifPresent(botResponse -> broadcastMessage(conversationId, botResponse));
+            } catch (RuntimeException ex) {
+                log.warn("Failed to generate or save bot response for conversation {}", conversationId, ex);
+            }
+        }
+
+        sendNotificationsToOtherParticipants(
+                conversationId,
+                persistedMessage.senderParticipantId(),
+                persistedMessage.message()
+        );
+
+        return persistedMessage.message();
+    }
+
+    private PersistedMessage persistMessage(UUID conversationId, ChatMessageRequest request, UUID accountId) {
         Conversation conversation = getConversation(conversationId);
         ensureNotClosed(conversation);
         ConversationParticipant participant = chatParticipantService.getActiveParticipant(conversationId, accountId);
@@ -125,7 +159,7 @@ public class ChatMessageService {
                 .content(normalizeContent(request.getContent()))
                 .build();
 
-        ChatMessage savedMessage = chatMessageRepository.save(message);
+        ChatMessage savedMessage = chatMessageRepository.saveAndFlush(message);
         savedMessage.setAttachments(saveAttachments(savedMessage, request.getAttachments()));
         
         if (request.getMessageType() == ChatMessageType.TEXT) {
@@ -135,31 +169,27 @@ public class ChatMessageService {
         }
         
         conversation.setUpdatedAt(Instant.now());
-        conversationRepository.save(conversation);
+        Conversation savedConversation = conversationRepository.saveAndFlush(conversation);
 
         ChatMessageResponse response = toChatMessageResponse(savedMessage);
-        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
-        
+
         List<ConversationParticipant> participants = participantRepository.findByConversation_Id(conversationId);
-        ConversationResponse convResponse = chatMapper.toConversationResponse(conversation, participants);
-        messagingTemplate.convertAndSend("/topic/management.chat.queue", convResponse);
+        ConversationResponse convResponse = chatMapper.toConversationResponse(savedConversation, participants);
+        boolean shouldTriggerBot = savedConversation.getStatus() == ConversationStatus.BOT_CONSULTING
+                && participant.getUserType() == ParticipantType.CUSTOMER;
 
-        if (conversation.getStatus() == ConversationStatus.BOT_CONSULTING
-                && participant.getUserType() == ParticipantType.CUSTOMER) {
-            chatBotService.handleCustomerMessage(conversationId, response)
-                    .ifPresent(botResponse -> messagingTemplate.convertAndSend(
-                            "/topic/conversations." + conversationId,
-                            botResponse
-                    ));
-        }
-
-        // Send Notification to other participants
-        sendNotificationsToOtherParticipants(conversationId, participant.getId(), savedMessage);
-
-        return response;
+        return new PersistedMessage(response, convResponse, participant.getId(), shouldTriggerBot);
     }
 
-    private void sendNotificationsToOtherParticipants(UUID conversationId, UUID senderParticipantId, ChatMessage message) {
+    private void broadcastMessage(UUID conversationId, ChatMessageResponse response) {
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+    }
+
+    private void sendNotificationsToOtherParticipants(
+            UUID conversationId,
+            UUID senderParticipantId,
+            ChatMessageResponse message
+    ) {
         List<ConversationParticipant> otherParticipants = participantRepository.findByConversation_Id(conversationId).stream()
                 .filter(p -> !p.getId().equals(senderParticipantId))
                 .toList();
@@ -167,18 +197,31 @@ public class ChatMessageService {
         for (ConversationParticipant p : otherParticipants) {
             chatParticipantService.resolveAccountId(p.getUserType(), p.getReferenceId())
                     .ifPresent(accountId -> {
-                        String title = "Tin nhắn mới từ " + (message.getParticipant().getUserType() == ParticipantType.CUSTOMER ? "Khách hàng" : "Nhân viên");
-                        String content = message.getMessageType() == hcmute.edu.zentech.model.ChatMessageType.TEXT ? 
-                                         message.getContent() : "Đã gửi một tệp đính kèm";
-                        notificationService.createNotification(
-                                accountId,
-                                title,
-                                content,
-                                hcmute.edu.zentech.model.NotificationType.CHAT_MESSAGE,
-                                conversationId
-                        );
+                        try {
+                            String title = "Tin nhắn mới từ " + (message.getSenderType() == ParticipantType.CUSTOMER ? "Khách hàng" : "Nhân viên");
+                            String content = message.getMessageType() == ChatMessageType.TEXT
+                                    ? message.getContent()
+                                    : "Đã gửi một tệp đính kèm";
+                            notificationService.createNotification(
+                                    accountId,
+                                    title,
+                                    content,
+                                    hcmute.edu.zentech.model.NotificationType.CHAT_MESSAGE,
+                                    conversationId
+                            );
+                        } catch (RuntimeException ex) {
+                            log.warn("Failed to create chat notification for account {} in conversation {}", accountId, conversationId, ex);
+                        }
                     });
         }
+    }
+
+    private record PersistedMessage(
+            ChatMessageResponse message,
+            ConversationResponse conversation,
+            UUID senderParticipantId,
+            boolean shouldTriggerBot
+    ) {
     }
 
     private PageResponse<ChatMessageResponse> getMessages(UUID conversationId, int page, int size) {
