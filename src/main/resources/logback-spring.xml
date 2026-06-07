@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <include resource="org/springframework/boot/logging/logback/defaults.xml" />
+
+    <!-- Thư mục log lưu tương đối từ thư mục dự án ZenTech sang docker/logs -->
+    <property name="LOG_DIR" value="../docker/logs" />
+
+    <!-- Định dạng log ghi vào backend.log (Không sử dụng mã màu ANSI để tránh file log bị rác) -->
+    <!-- Định dạng có thêm [%X{traceId}] để tự động in traceId nếu được lưu trong MDC -->
+    <property name="FILE_LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}] %logger{36} - %msg%n" />
+
+    <!-- Định dạng log hiển thị trên Console (sử dụng màu sắc của Spring Boot + traceId) -->
+    <property name="CONSOLE_LOG_PATTERN" value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr([%X{traceId}]){yellow} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}" />
+
+    <!-- Appender Console -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- Appender File cho Backend log -->
+    <appender name="BACKEND_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/backend.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- Xoay vòng file hàng ngày -->
+            <fileNamePattern>${LOG_DIR}/archived/backend-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <!-- Giới hạn lưu trữ tối đa 30 ngày -->
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- Appender File cho Frontend log (Chỉ nhận log đẩy từ client Angular) -->
+    <appender name="FRONTEND_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/frontend.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archived/frontend-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <!-- Format cho log frontend ghi nhận trực tiếp nội dung gửi từ client -->
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%X{traceId}] - %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- Logger riêng biệt cho Frontend logs (additivity="false" để không ghi đè vào Console hay backend.log) -->
+    <logger name="frontend-logger" level="INFO" additivity="false">
+        <appender-ref ref="FRONTEND_FILE" />
+    </logger>
+
+    <!-- Cấu hình Log Root (mặc định log của dự án sẽ ghi cả Console và backend.log) -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="BACKEND_FILE" />
+    </root>
+
+</configuration>
