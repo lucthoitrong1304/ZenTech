@@ -31,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -181,15 +182,16 @@ public class ChatMessageService {
     }
 
     private PageResponse<ChatMessageResponse> getMessages(UUID conversationId, int page, int size) {
-        Page<ChatMessage> messagePage = chatMessageRepository.findByConversation_IdOrderByCreatedAtAsc(
+        Page<ChatMessage> messagePage = chatMessageRepository.findByConversation_Id(
                 conversationId,
                 PageRequest.of(
                         Math.max(page, DEFAULT_PAGE),
                         normalizeSize(size),
-                        Sort.by(Sort.Direction.ASC, "createdAt", "id")
+                        Sort.by(Sort.Direction.DESC, "createdAt", "id")
                 )
         );
         return PageResponse.from(messagePage, messagePage.getContent().stream()
+                .sorted(Comparator.comparing(ChatMessage::getCreatedAt).thenComparing(ChatMessage::getId))
                 .map(this::toChatMessageResponse)
                 .toList());
     }

@@ -19,6 +19,9 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, UUID> 
     Page<ChatMessage> findByConversation_IdOrderByCreatedAtAsc(UUID conversationId, Pageable pageable);
 
     @EntityGraph(attributePaths = {"conversation", "participant"})
+    Page<ChatMessage> findByConversation_Id(UUID conversationId, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"conversation", "participant"})
     @Query("SELECT m FROM ChatMessage m WHERE m.conversation.id = :conversationId AND LOWER(CAST(m.content AS string)) LIKE LOWER(CONCAT('%', :keyword, '%')) ORDER BY m.createdAt DESC")
     Page<ChatMessage> searchMessages(@Param("conversationId") UUID conversationId, @Param("keyword") String keyword, Pageable pageable);
 

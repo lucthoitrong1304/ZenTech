@@ -63,6 +63,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/management/chat/**").hasAnyRole("EMPLOYEE", "MANAGER", "OWNER", "ADMIN")
+                        .requestMatchers("/api/management/ai/**").hasAnyRole("EMPLOYEE", "MANAGER", "OWNER", "ADMIN")
                         .requestMatchers("/api/chat/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/uploads/presign").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/products/*/reviews").authenticated()
