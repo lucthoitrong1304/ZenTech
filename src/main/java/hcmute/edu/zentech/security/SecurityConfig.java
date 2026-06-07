@@ -63,6 +63,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
+                        .requestMatchers("/api/payments/**").permitAll()
                         .requestMatchers("/api/management/ai/**").hasAnyRole("EMPLOYEE", "MANAGER", "OWNER", "ADMIN")
                         .requestMatchers("/api/chat/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/uploads/presign").authenticated()

@@ -10,12 +10,16 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface CustomerVoucherRepository extends JpaRepository<CustomerVoucher, UUID> {
     @EntityGraph(attributePaths = {"coupon"})
     Page<CustomerVoucher> findByCustomer_Id(UUID customerId, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"coupon", "customer"})
+    Optional<CustomerVoucher> findByIdAndCustomer_Id(UUID id, UUID customerId);
 
     @EntityGraph(attributePaths = {"coupon"})
     Page<CustomerVoucher> findByCustomer_IdAndUsedAtIsNotNull(UUID customerId, Pageable pageable);
