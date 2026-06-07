@@ -83,7 +83,16 @@ public class AdminLogService {
                     "service", (String) payload.getOrDefault("service", "")
             );
 
-            ResponseEntity<Map> response = restTemplate.postForEntity(explainUrl, requestBody, Map.class);
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+            String traceId = org.slf4j.MDC.get("traceId");
+            if (traceId != null && !traceId.trim().isEmpty()) {
+                headers.set("X-Trace-Id", traceId.trim());
+            }
+
+            org.springframework.http.HttpEntity<Map<String, String>> entity = new org.springframework.http.HttpEntity<>(requestBody, headers);
+
+            ResponseEntity<Map> response = restTemplate.postForEntity(explainUrl, entity, Map.class);
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 return (Map<String, Object>) response.getBody();
             }

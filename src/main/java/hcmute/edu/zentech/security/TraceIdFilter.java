@@ -4,6 +4,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -12,6 +13,7 @@ import java.io.IOException;
 import java.util.UUID;
 
 @Component
+@Slf4j
 public class TraceIdFilter extends OncePerRequestFilter {
 
     private static final String TRACE_ID_HEADER = "X-Trace-Id";
@@ -36,9 +38,30 @@ public class TraceIdFilter extends OncePerRequestFilter {
         // 3. Gán traceId vào HTTP Response Header để Client dễ dàng kiểm tra và map thông tin
         response.setHeader(TRACE_ID_HEADER, traceId);
 
+        String uri = request.getRequestURI();
+        String method = request.getMethod();
+        
+        // Bỏ qua ghi log cho endpoint đẩy log client, websocket và health để tránh rác log file
+        boolean shouldLog = !uri.contains("/api/logs/client") && !uri.startsWith("/ws") && !uri.equals("/health") && !uri.startsWith("/api/health");
+
+        if (shouldLog) {
+            log.info("Incoming Request: {} {} từ IP: {}", method, uri, request.getRemoteAddr());
+        }
+
+        long startTime = System.currentTimeMillis();
         try {
             filterChain.doFilter(request, response);
+        } catch (ServletException | IOException | RuntimeException ex) {
+            if (shouldLog) {
+                long duration = System.currentTimeMillis() - startTime;
+                log.error("Request failed: {} {} - Lỗi: {} - Thời gian xử lý: {}ms", method, uri, ex.getMessage(), duration);
+            }
+            throw ex;
         } finally {
+            if (shouldLog) {
+                long duration = System.currentTimeMillis() - startTime;
+                log.info("Outgoing Response: {} cho {} {} - Thời gian xử lý: {}ms", response.getStatus(), method, uri, duration);
+            }
             // 4. Xóa traceId khỏi MDC sau khi kết thúc request để tránh rò rỉ bộ nhớ sang request khác
             MDC.remove(MDC_TRACE_ID_KEY);
         }

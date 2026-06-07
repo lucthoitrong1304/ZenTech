@@ -101,10 +101,18 @@ public class ChatBotService {
                     .history(loadHistory(conversationId, message.getId()))
                     .build();
 
-            HttpRequest httpRequest = HttpRequest.newBuilder()
+            String traceId = org.slf4j.MDC.get("traceId");
+            
+            var requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/chat/respond"))
                     .timeout(Duration.ofMillis(aiTimeoutMs))
-                    .header("Content-Type", "application/json")
+                    .header("Content-Type", "application/json");
+
+            if (traceId != null && !traceId.trim().isEmpty()) {
+                requestBuilder.header("X-Trace-Id", traceId.trim());
+            }
+
+            HttpRequest httpRequest = requestBuilder
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(request)))
                     .build();
 
