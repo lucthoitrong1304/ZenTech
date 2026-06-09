@@ -18,6 +18,8 @@ import java.util.UUID;
 public interface EmployeeRepository extends JpaRepository<Employee, UUID> {
     Optional<Employee> findByUserInfo_Id(UUID accountId);
 
+    List<Employee> findByUserInfo_IdIn(List<UUID> accountIds);
+
     @EntityGraph(attributePaths = {"userInfo"})
     @Query("SELECT e FROM Employee e WHERE e.userInfo.isActive = true AND e.userInfo.role IN :roles")
     List<Employee> findActiveStaff(@Param("roles") List<Role> roles);

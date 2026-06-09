@@ -16,10 +16,14 @@ import hcmute.edu.zentech.model.PaymentGateway;
 import hcmute.edu.zentech.model.PaymentMethod;
 import hcmute.edu.zentech.model.PaymentStatus;
 import hcmute.edu.zentech.model.ProductVariant;
+import hcmute.edu.zentech.model.InventoryTransaction;
+import hcmute.edu.zentech.model.InventoryTransactionReason;
+import hcmute.edu.zentech.model.InventoryTransactionType;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.CustomerVoucherRepository;
 import hcmute.edu.zentech.repository.OrderRepository;
 import hcmute.edu.zentech.repository.ProductVariantRepository;
+import hcmute.edu.zentech.repository.InventoryTransactionRepository;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import hcmute.edu.zentech.service.payment.PaymentGatewayCreateResult;
 import hcmute.edu.zentech.service.payment.MomoGatewayClient;
@@ -46,6 +50,7 @@ public class CheckoutService {
     private final PaymentService paymentService;
     private final VnpayGatewayClient vnpayGatewayClient;
     private final MomoGatewayClient momoGatewayClient;
+    private final InventoryTransactionRepository inventoryTransactionRepository;
 
     @Transactional
     public CheckoutResponse checkout(CheckoutRequest request, String clientIp) {
@@ -74,6 +79,19 @@ public class CheckoutService {
         order.setOrderItems(new HashSet<>(orderDetails));
 
         Order savedOrder = orderRepository.save(order);
+
+        // Log inventory transactions
+        for (OrderDetail detail : orderDetails) {
+            InventoryTransaction transaction = InventoryTransaction.builder()
+                    .productVariant(detail.getProductVariant())
+                    .type(InventoryTransactionType.EXPORT)
+                    .quantity(detail.getQuantity())
+                    .reason(InventoryTransactionReason.CUSTOMER_ORDER)
+                    .note("Khách hàng đặt mua đơn hàng #" + savedOrder.getId())
+                    .build();
+            inventoryTransactionRepository.save(transaction);
+        }
+
         String paymentUrl = createPaymentUrlIfNeeded(savedOrder, orderDetails, clientIp);
 
         return CheckoutResponse.builder()

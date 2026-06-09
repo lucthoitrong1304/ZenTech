@@ -77,6 +77,7 @@ public class SecurityConfig {
 
                         .requestMatchers("/api/management/search").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/products/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
+                        .requestMatchers("/api/management/inventory/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/product-groups/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/chat/**").hasAnyRole("EMPLOYEE", "MANAGER", "OWNER")
                         .requestMatchers("/api/management/orders/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
