@@ -8,6 +8,7 @@ import hcmute.edu.zentech.repository.ProductCategoryRepository;
 import hcmute.edu.zentech.repository.ProductGroupRepository;
 import hcmute.edu.zentech.repository.ProductRepository;
 import hcmute.edu.zentech.repository.ProductVariantRepository;
+import hcmute.edu.zentech.repository.InventoryTransactionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
@@ -27,24 +28,29 @@ public class InventoryMockDataInitializer implements CommandLineRunner {
     private final ProductVariantRepository productVariantRepository;
     private final ProductCategoryRepository categoryRepository;
     private final ProductGroupRepository groupRepository;
+    private final InventoryTransactionRepository inventoryTransactionRepository;
 
     @Override
     public void run(String... args) throws Exception {
         log.info("=== Bắt đầu tiến trình tạo Mock Data cho Tồn Kho ===");
 
-        // 1. Tạo Low Stock
-        List<ProductVariant> variants = productVariantRepository.findAll();
-        if (variants.size() > 5) {
-            int lowStockUpdated = 0;
-            for (ProductVariant v : variants) {
-                if (v.getStockQuantity() > 5) {
-                    v.setStockQuantity(2); // Set to low stock
-                    productVariantRepository.save(v);
-                    lowStockUpdated++;
+        // 1. Tạo Low Stock nếu chưa có giao dịch nào phát sinh
+        if (inventoryTransactionRepository.count() == 0) {
+            List<ProductVariant> variants = productVariantRepository.findAll();
+            if (variants.size() > 5) {
+                int lowStockUpdated = 0;
+                for (ProductVariant v : variants) {
+                    if (v.getStockQuantity() > 5) {
+                        v.setStockQuantity(2); // Set to low stock
+                        productVariantRepository.save(v);
+                        lowStockUpdated++;
+                    }
+                    if (lowStockUpdated >= 5) break; // Only mock 5 low stock items
                 }
-                if (lowStockUpdated >= 5) break; // Only mock 5 low stock items
+                log.info("Đã cập nhật {} biến thể thành trạng thái sắp hết hàng (Low Stock).", lowStockUpdated);
             }
-            log.info("Đã cập nhật {} biến thể thành trạng thái sắp hết hàng (Low Stock).", lowStockUpdated);
+        } else {
+            log.info("Đã có giao dịch kho trong hệ thống. Bỏ qua cập nhật Mock Low Stock để bảo toàn dữ liệu thực tế.");
         }
 
         // 2. Tạo Dead Stock (sản phẩm chưa từng được bán)
