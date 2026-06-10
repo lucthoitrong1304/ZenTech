@@ -521,6 +521,23 @@ public class R2StorageService {
      * @param folderPrefix Tên thư mục (VD: "Alpha65 & Power Strip Bundle - Image/")
      * @return Danh sách các Presigned URL của tất cả file trong thư mục đó
      */
+    public byte[] getObjectBytes(String fileKey) {
+        if (fileKey == null || fileKey.isBlank()) {
+            throw new IllegalArgumentException("fileKey is required");
+        }
+
+        try {
+            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileKey)
+                    .build();
+
+            return s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
+        } catch (NoSuchKeyException e) {
+            throw new IllegalArgumentException("Uploaded file does not exist", e);
+        }
+    }
+
     public List<String> getAllPresignedUrlsInFolder(String folderPrefix) {
         try {
             String finalPrefix = folderPrefix.endsWith("/") ? folderPrefix : folderPrefix + "/";

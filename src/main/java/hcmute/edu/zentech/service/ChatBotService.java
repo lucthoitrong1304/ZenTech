@@ -1,11 +1,11 @@
 package hcmute.edu.zentech.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import hcmute.edu.zentech.dto.request.AiChatRespondRequest;
-import hcmute.edu.zentech.dto.response.AiChatRespondResponse;
+import hcmute.edu.zentech.dto.request.AiAgentRuntimeRequest;
+import hcmute.edu.zentech.dto.response.ChatAttachmentResponse;
 import hcmute.edu.zentech.dto.response.ChatMessageResponse;
 import hcmute.edu.zentech.mapper.ChatMapper;
 import hcmute.edu.zentech.model.ChatMessage;
+import hcmute.edu.zentech.model.ChatAttachmentType;
 import hcmute.edu.zentech.model.ChatMessageType;
 import hcmute.edu.zentech.model.Conversation;
 import hcmute.edu.zentech.model.ConversationParticipant;
@@ -17,18 +17,15 @@ import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -36,29 +33,27 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class ChatBotService {
-    private static final String FALLBACK_REPLY = "ZenTech AI dang ban. Ban co the thu lai hoac yeu cau nhan vien ho tro.";
+    private static final String FALLBACK_REPLY = "ZenTech AI đang bận. Bạn có thể thử lại hoặc yêu cầu nhân viên hỗ trợ.";
+    private static final String UNSUPPORTED_ATTACHMENT_REPLY = "Hiện tại ZenTech AI chỉ phân tích được ảnh, PDF, TXT và MD. Bạn vui lòng mô tả nội dung file hoặc yêu cầu nhân viên hỗ trợ nhé.";
     private static final int MAX_BOT_REPLY_LENGTH = 5000;
+    private static final int MAX_ANALYZABLE_ATTACHMENTS = 3;
 
     private final ChatMessageRepository chatMessageRepository;
     private final ConversationRepository conversationRepository;
-
     private final ConversationParticipantRepository participantRepository;
     private final ChatMapper chatMapper;
-    private final ObjectMapper objectMapper;
+    private final R2StorageService r2StorageService;
     private final AiManagementService aiManagementService;
     private final TransactionTemplate transactionTemplate;
-
-    @Value("${app.ai.base-url:http://localhost:8000}")
-    private String aiBaseUrl;
-
-    @Value("${app.ai.timeout-ms:15000}")
-    private long aiTimeoutMs;
 
     public Optional<ChatMessageResponse> handleCustomerMessage(UUID conversationId, ChatMessageResponse message) {
         log.info("Starting handleCustomerMessage for conversation: {}, messageId: {}", conversationId, message.getId());
         String customerContent = normalizeContent(message.getContent());
-        if (customerContent == null || message.getMessageType() != ChatMessageType.TEXT) {
-            log.warn("Invalid customer content or message type for conversation: {}", conversationId);
+        List<AiAgentRuntimeRequest.Attachment> attachments = buildAnalyzableAttachments(message);
+        boolean hasAttachments = message.getAttachments() != null && !message.getAttachments().isEmpty();
+
+        if (!isBotSupportedMessageType(message.getMessageType())) {
+            log.warn("Unsupported customer message type {} for conversation: {}", message.getMessageType(), conversationId);
             return Optional.empty();
         }
 
@@ -77,8 +72,29 @@ public class ChatBotService {
             return Optional.empty();
         }
 
+        if (customerContent == null && attachments.isEmpty()) {
+            log.warn("Customer message has no readable content for conversation: {}", conversationId);
+            if (hasAttachments) {
+                return transactionTemplate.execute(status -> saveBotMessage(
+                        conversation.getId(),
+                        botParticipant.get().getId(),
+                        UNSUPPORTED_ATTACHMENT_REPLY
+                ));
+            }
+            return Optional.empty();
+        }
+
+        if (hasAttachments && attachments.isEmpty()) {
+            return transactionTemplate.execute(status -> saveBotMessage(
+                    conversation.getId(),
+                    botParticipant.get().getId(),
+                    UNSUPPORTED_ATTACHMENT_REPLY
+            ));
+        }
+
+        String prompt = buildCustomerPrompt(message, customerContent);
         log.info("Requesting AI reply for conversation: {}", conversationId);
-        String replyContent = requestAiReply(conversationId, message, customerContent)
+        String replyContent = requestAiReply(conversationId, message, prompt, attachments)
                 .orElse(FALLBACK_REPLY);
         log.info("Received reply content for conversation: {}", conversationId);
 
@@ -125,73 +141,140 @@ public class ChatBotService {
     private Optional<String> requestAiReply(
             UUID conversationId,
             ChatMessageResponse message,
-            String customerContent
+            String customerContent,
+            List<AiAgentRuntimeRequest.Attachment> attachments
     ) {
         try {
-            List<AiChatRespondRequest.HistoryMessage> history = loadHistory(conversationId, message.getId());
+            List<AiAgentRuntimeRequest.HistoryMessage> history = loadHistory(conversationId, message.getId());
             log.info("Loaded {} history messages for conversation: {}", history.size(), conversationId);
-            Optional<String> runtimeReply = aiManagementService.generateRuntimeReply(
-                    Role.CUSTOMER,
+
+            Role role = determineRole(message.getSenderType());
+            return aiManagementService.generateRuntimeReply(
+                    role,
                     customerContent,
                     history,
+                    attachments,
                     java.util.Map.of("conversationId", conversationId.toString())
             );
-            if (runtimeReply.isPresent()) {
-                log.info("Generated runtime reply for conversation: {}", conversationId);
-                return runtimeReply;
-            }
-
-            log.info("Preparing request to external AI service for conversation: {}", conversationId);
-            AiChatRespondRequest request = AiChatRespondRequest.builder()
-                    .conversationId(conversationId)
-                    .messageId(message.getId())
-                    .message(customerContent)
-                    .history(history)
-                    .build();
-
-            String traceId = org.slf4j.MDC.get("traceId");
-            
-            var requestBuilder = HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/chat/respond"))
-                    .timeout(Duration.ofMillis(aiTimeoutMs))
-                    .header("Content-Type", "application/json");
-
-            if (traceId != null && !traceId.trim().isEmpty()) {
-                requestBuilder.header("X-Trace-Id", traceId.trim());
-            }
-
-            HttpRequest httpRequest = requestBuilder
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(request)))
-                    .build();
-
-            log.info("Sending POST request to AI service: {}/chat/respond", normalizeBaseUrl(aiBaseUrl));
-            HttpResponse<String> response = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofMillis(aiTimeoutMs))
-                    .build()
-                    .send(httpRequest, HttpResponse.BodyHandlers.ofString());
-
-            log.info("Received response from AI service with status code: {}", response.statusCode());
-
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                log.warn("AI service returned status {} for conversation {}", response.statusCode(), conversationId);
-                return Optional.empty();
-            }
-
-            AiChatRespondResponse aiResponse = objectMapper.readValue(response.body(), AiChatRespondResponse.class);
-            return Optional.ofNullable(normalizeContent(aiResponse.getContent()));
         } catch (Exception ex) {
             log.warn("AI service failed for conversation {}", conversationId, ex);
             return Optional.empty();
         }
     }
 
-    private List<AiChatRespondRequest.HistoryMessage> loadHistory(UUID conversationId, UUID currentMessageId) {
+    private Role determineRole(ParticipantType participantType) {
+        if (participantType == null) {
+            return Role.CUSTOMER;
+        }
+        return switch (participantType) {
+            case EMPLOYEE, EXPERT -> Role.EMPLOYEE;
+            default -> Role.CUSTOMER;
+        };
+    }
+
+    private boolean isBotSupportedMessageType(ChatMessageType messageType) {
+        return messageType == ChatMessageType.TEXT
+                || messageType == ChatMessageType.IMAGE
+                || messageType == ChatMessageType.FILE
+                || messageType == ChatMessageType.MEDIA;
+    }
+
+    private List<AiAgentRuntimeRequest.Attachment> buildAnalyzableAttachments(ChatMessageResponse message) {
+        List<ChatAttachmentResponse> source = message.getAttachments() == null ? List.of() : message.getAttachments();
+        if (source.isEmpty()) {
+            return List.of();
+        }
+
+        List<AiAgentRuntimeRequest.Attachment> attachments = new ArrayList<>();
+        for (ChatAttachmentResponse attachment : source) {
+            if (attachments.size() >= MAX_ANALYZABLE_ATTACHMENTS) {
+                break;
+            }
+
+            AiAgentRuntimeRequest.Attachment aiAttachment = buildAnalyzableAttachment(attachment);
+            if (aiAttachment != null) {
+                attachments.add(aiAttachment);
+            }
+        }
+        return attachments;
+    }
+
+    private AiAgentRuntimeRequest.Attachment buildAnalyzableAttachment(ChatAttachmentResponse attachment) {
+        if (attachment.getAttachmentType() == ChatAttachmentType.IMAGE) {
+            String mediaUrl = normalizeContent(attachment.getMediaUrl());
+            if (mediaUrl == null) {
+                return null;
+            }
+            return AiAgentRuntimeRequest.Attachment.builder()
+                    .fileName(attachment.getFileName())
+                    .contentType(attachment.getContentType())
+                    .attachmentType(attachment.getAttachmentType())
+                    .mediaUrl(mediaUrl)
+                    .build();
+        }
+
+        if (attachment.getAttachmentType() != ChatAttachmentType.FILE || !isSupportedDocument(attachment)) {
+            return null;
+        }
+
+        try {
+            byte[] raw = r2StorageService.getObjectBytes(attachment.getFileKey());
+            return AiAgentRuntimeRequest.Attachment.builder()
+                    .fileName(attachment.getFileName())
+                    .contentType(attachment.getContentType())
+                    .attachmentType(attachment.getAttachmentType())
+                    .contentBase64(Base64.getEncoder().encodeToString(raw))
+                    .build();
+        } catch (RuntimeException ex) {
+            log.warn("Could not read chat attachment {} for AI analysis", attachment.getFileKey(), ex);
+            return null;
+        }
+    }
+
+    private boolean isSupportedDocument(ChatAttachmentResponse attachment) {
+        String contentType = Optional.ofNullable(attachment.getContentType())
+                .orElse("")
+                .toLowerCase(Locale.ROOT);
+        String fileName = Optional.ofNullable(attachment.getFileName())
+                .orElse("")
+                .toLowerCase(Locale.ROOT);
+
+        return contentType.equals("application/pdf")
+                || contentType.equals("text/plain")
+                || contentType.equals("text/markdown")
+                || fileName.endsWith(".pdf")
+                || fileName.endsWith(".txt")
+                || fileName.endsWith(".md");
+    }
+
+    private String buildCustomerPrompt(ChatMessageResponse message, String customerContent) {
+        String normalized = normalizeContent(customerContent);
+        List<ChatAttachmentResponse> attachments = message.getAttachments() == null ? List.of() : message.getAttachments();
+        if (attachments.isEmpty()) {
+            return normalized;
+        }
+
+        String attachmentNames = attachments.stream()
+                .map(ChatAttachmentResponse::getFileName)
+                .map(this::normalizeContent)
+                .filter(name -> name != null)
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("tep dinh kem");
+
+        if (normalized == null || normalized.equals(attachmentNames)) {
+            return "Khách hàng đã gửi tệp đính kèm: " + attachmentNames + ". Hãy phân tích nội dung và hỗ trợ ngắn gọn.";
+        }
+
+        return normalized;
+    }
+
+    private List<AiAgentRuntimeRequest.HistoryMessage> loadHistory(UUID conversationId, UUID currentMessageId) {
         return chatMessageRepository.findTop12ByConversation_IdOrderByCreatedAtDesc(conversationId).stream()
                 .filter(message -> !message.getId().equals(currentMessageId))
                 .filter(message -> message.getMessageType() == ChatMessageType.TEXT)
                 .filter(message -> normalizeContent(message.getContent()) != null)
                 .sorted(Comparator.comparing(ChatMessage::getCreatedAt))
-                .map(message -> AiChatRespondRequest.HistoryMessage.builder()
+                .map(message -> AiAgentRuntimeRequest.HistoryMessage.builder()
                         .role(toAiRole(message.getParticipant()))
                         .content(normalizeContent(message.getContent()))
                         .build())
@@ -209,11 +292,6 @@ public class ChatBotService {
             return "customer";
         }
         return "staff";
-    }
-
-    private String normalizeBaseUrl(String baseUrl) {
-        String normalized = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8000" : baseUrl.trim();
-        return normalized.endsWith("/") ? normalized.substring(0, normalized.length() - 1) : normalized;
     }
 
     private String normalizeContent(String content) {
