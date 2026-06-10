@@ -12,10 +12,14 @@ import hcmute.edu.zentech.model.Product;
 import hcmute.edu.zentech.model.ProductVariant;
 import hcmute.edu.zentech.model.Employee;
 import hcmute.edu.zentech.model.AccountUser;
+import hcmute.edu.zentech.model.Customer;
+import hcmute.edu.zentech.model.Order;
 import hcmute.edu.zentech.repository.EmployeeRepository;
 import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.InventoryTransactionRepository;
 import hcmute.edu.zentech.repository.ProductVariantRepository;
+import hcmute.edu.zentech.repository.CustomerRepository;
+import hcmute.edu.zentech.repository.OrderRepository;
 import hcmute.edu.zentech.repository.projection.TransactionStatsProjection;
 import hcmute.edu.zentech.dto.response.InventoryTransactionStatsResponse;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +56,8 @@ public class InventoryManagementService {
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final EmployeeRepository employeeRepository;
     private final AccountUserRepository accountUserRepository;
+    private final CustomerRepository customerRepository;
+    private final OrderRepository orderRepository;
     private final R2StorageService r2StorageService;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
@@ -307,6 +313,13 @@ public class InventoryManagementService {
         return toTransactionResponse(transaction, employeeMap, accountMap);
     }
 
+    private String resolveImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank() || imageUrl.startsWith("http")) {
+            return imageUrl;
+        }
+        return r2StorageService.getPresignedGetUrl(imageUrl);
+    }
+
     private InventoryTransactionResponse toTransactionResponse(
             InventoryTransaction transaction,
             Map<UUID, Employee> employeeMap,
@@ -319,13 +332,38 @@ public class InventoryManagementService {
         String createdByEmail = null;
         String createdByAvatar = null;
 
-        if (transaction.getCreatedBy() != null) {
+        if (transaction.getReason() == InventoryTransactionReason.CUSTOMER_ORDER) {
+            Customer customer = null;
+            if (transaction.getCreatedBy() != null) {
+                customer = customerRepository.findByUserInfo_Id(transaction.getCreatedBy()).orElse(null);
+            }
+            if (customer == null && transaction.getNote() != null) {
+                int hashIndex = transaction.getNote().lastIndexOf('#');
+                if (hashIndex != -1 && hashIndex < transaction.getNote().length() - 1) {
+                    try {
+                        String orderIdStr = transaction.getNote().substring(hashIndex + 1).trim();
+                        UUID orderId = UUID.fromString(orderIdStr);
+                        Order order = orderRepository.findById(orderId).orElse(null);
+                        if (order != null) {
+                            customer = order.getCustomer();
+                        }
+                    } catch (IllegalArgumentException e) {
+                        // ignore malformed UUID
+                    }
+                }
+            }
+            if (customer != null) {
+                createdByName = customer.getFullName();
+                createdByEmail = customer.getUserInfo() != null ? customer.getUserInfo().getEmail() : null;
+                createdByAvatar = resolveImageUrl(customer.getImageUrl());
+            }
+        } else if (transaction.getCreatedBy() != null) {
             Employee emp = employeeMap.get(transaction.getCreatedBy());
             AccountUser account = accountMap.get(transaction.getCreatedBy());
             if (emp != null) {
                 createdByName = emp.getFullName();
                 createdByEmail = emp.getUserInfo() != null ? emp.getUserInfo().getEmail() : null;
-                createdByAvatar = emp.getImageUrl();
+                createdByAvatar = resolveImageUrl(emp.getImageUrl());
             } else if (account != null) {
                 createdByEmail = account.getEmail();
                 createdByName = account.getEmail();
