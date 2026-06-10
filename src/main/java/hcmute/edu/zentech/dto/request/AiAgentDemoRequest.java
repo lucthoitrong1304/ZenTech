@@ -13,5 +13,5 @@ public class AiAgentDemoRequest {
     @NotBlank
     private String message;
 
-    private List<AiChatRespondRequest.HistoryMessage> history = new ArrayList<>();
+    private List<AiAgentRuntimeRequest.HistoryMessage> history = new ArrayList<>();
 }

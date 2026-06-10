@@ -6,7 +6,6 @@ import hcmute.edu.zentech.dto.request.AiAgentDemoRequest;
 import hcmute.edu.zentech.dto.request.AiAgentRequest;
 import hcmute.edu.zentech.dto.request.AiAgentRolesRequest;
 import hcmute.edu.zentech.dto.request.AiAgentRuntimeRequest;
-import hcmute.edu.zentech.dto.request.AiChatRespondRequest;
 import hcmute.edu.zentech.dto.request.AiDatasetRequest;
 import hcmute.edu.zentech.dto.request.AiKnowledgeIngestRequest;
 import hcmute.edu.zentech.dto.response.AiAgentDemoResponse;
@@ -220,11 +219,12 @@ public class AiManagementService {
     public Optional<String> generateRuntimeReply(
             Role role,
             String message,
-            List<AiChatRespondRequest.HistoryMessage> history,
+            List<AiAgentRuntimeRequest.HistoryMessage> history,
+            List<AiAgentRuntimeRequest.Attachment> attachments,
             Map<String, Object> businessContext
     ) {
         return findAgentForRole(role)
-                .flatMap(agent -> requestAiReply(agent, role, message, history, businessContext)
+                .flatMap(agent -> requestAiReply(agent, role, message, history, attachments, businessContext)
                         .map(AiAgentRuntimeResponse::getContent)
                         .map(this::normalizeText));
     }
@@ -236,7 +236,13 @@ public class AiManagementService {
                 agent,
                 role,
                 request.getMessage(),
-                request.getHistory(),
+                request.getHistory() == null ? List.of() : request.getHistory().stream()
+                        .map(h -> AiAgentRuntimeRequest.HistoryMessage.builder()
+                                .role(h.getRole())
+                                .content(h.getContent())
+                                .build())
+                        .toList(),
+                List.of(), // no attachments for demo
                 buildBusinessContext(role)
         ).orElseGet(() -> {
             AiAgentRuntimeResponse fallback = new AiAgentRuntimeResponse();
@@ -297,7 +303,8 @@ public class AiManagementService {
             AiAgent agent,
             Role role,
             String message,
-            List<AiChatRespondRequest.HistoryMessage> history,
+            List<AiAgentRuntimeRequest.HistoryMessage> history,
+            List<AiAgentRuntimeRequest.Attachment> attachments,
             Map<String, Object> businessContext
     ) {
         try {
@@ -306,6 +313,7 @@ public class AiManagementService {
                     .role(role)
                     .message(message)
                     .history(history == null ? List.of() : history)
+                    .attachments(attachments == null ? List.of() : attachments)
                     .datasetIds(agent.getDatasets().stream().map(AiDataset::getId).toList())
                     .businessContext(businessContext == null ? Map.of() : businessContext)
                     .build();
