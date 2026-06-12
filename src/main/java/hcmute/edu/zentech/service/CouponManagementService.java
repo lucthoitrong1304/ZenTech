@@ -12,6 +12,7 @@ import hcmute.edu.zentech.model.Coupon;
 import hcmute.edu.zentech.model.CouponType;
 import hcmute.edu.zentech.model.Customer;
 import hcmute.edu.zentech.model.CustomerVoucher;
+import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.repository.CouponRepository;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.CustomerVoucherRepository;
@@ -161,13 +162,20 @@ public class CouponManagementService {
             Customer customer = customerRepository.findById(request.getCustomerId())
                     .orElseThrow(() -> new ResourceNotFoundException("Customer", "id", request.getCustomerId()));
             
+            if (customerVoucherRepository.existsByCustomer_IdAndCoupon_Id(customer.getId(), coupon.getId())) {
+                throw new RuntimeException("Khách hàng đã sở hữu mã giảm giá này rồi");
+            }
+
             CustomerVoucher customerVoucher = new CustomerVoucher();
             customerVoucher.setCustomer(customer);
             customerVoucher.setCoupon(coupon);
             customerVoucherRepository.save(customerVoucher);
         } else {
-            List<Customer> allCustomers = customerRepository.findAll();
+            List<Customer> allCustomers = customerRepository.findByUserInfo_Role(Role.CUSTOMER);
             for (Customer customer : allCustomers) {
+                if (customerVoucherRepository.existsByCustomer_IdAndCoupon_Id(customer.getId(), coupon.getId())) {
+                    continue;
+                }
                 CustomerVoucher customerVoucher = new CustomerVoucher();
                 customerVoucher.setCustomer(customer);
                 customerVoucher.setCoupon(coupon);

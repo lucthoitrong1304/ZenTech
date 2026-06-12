@@ -10,7 +10,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "customer_vouchers")
+@Table(
+    name = "customer_vouchers",
+    uniqueConstraints = @UniqueConstraint(columnNames = {"customer_id", "coupon_id"})
+)
 @NoArgsConstructor
 @AllArgsConstructor
 @Data
