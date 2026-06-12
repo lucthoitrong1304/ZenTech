@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Random;
 
-@Component
+// @Component
 @Order(99)
 @RequiredArgsConstructor
 @Slf4j

@@ -21,6 +21,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import hcmute.edu.zentech.service.R2StorageService;
+
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -29,6 +31,7 @@ public class ReportManagementService {
     private final OrderRepository orderRepository;
     private final OrderDetailRepository orderDetailRepository;
     private final ProductVariantRepository productVariantRepository;
+    private final R2StorageService r2StorageService;
 
 
     public ReportManagementSummaryResponse getReportsSummary(Instant startDate, Instant endDate) {
@@ -63,19 +66,15 @@ public class ReportManagementService {
         double averageOrderValue = currentOrderCount > 0 ? (currentRevenue / currentOrderCount) : 0.0;
 
         // Dynamic tech metrics
-        double aiOpsScore = 98.4;
+        double aiOpsScore = 100.0;
         if (currentOrderCount > 0) {
             long completedCount = currentOrders.stream()
                     .filter(o -> o.getOrderStatus() == OrderStatus.COMPLETED)
                     .count();
-            aiOpsScore = 95.0 + ((double) completedCount / currentOrderCount) * 4.0;
-            if (aiOpsScore > 100.0) aiOpsScore = 100.0;
+            aiOpsScore = ((double) completedCount / currentOrderCount) * 100.0;
         }
 
-        double autoFulfillmentRate = 94.2;
-        if (currentRevenue > 5000) {
-            autoFulfillmentRate = 96.5;
-        }
+        double autoFulfillmentRate = aiOpsScore;
 
         return ReportManagementSummaryResponse.builder()
                 .totalRevenue(currentRevenue)
@@ -96,15 +95,46 @@ public class ReportManagementService {
         Duration duration = Duration.between(start, end);
         Instant prevStart = start.minus(duration);
 
-        List<Order> currentOrders = getSuccessfulOrdersBetween(start, end);
-        List<Order> prevOrders = getSuccessfulOrdersBetween(prevStart, start);
-
         int daysCount = (int) ChronoUnit.DAYS.between(start.atZone(ZoneId.systemDefault()), end.atZone(ZoneId.systemDefault())) + 1;
         if (daysCount <= 0) daysCount = 1;
 
+        List<Order> currentOrders = getSuccessfulOrdersBetween(start, end);
+        List<Order> prevOrders;
+        if (daysCount == 1) {
+            prevOrders = getSuccessfulOrdersBetween(start.minus(1, ChronoUnit.DAYS), start);
+        } else {
+            prevOrders = getSuccessfulOrdersBetween(prevStart, start);
+        }
+
         List<ReportManagementRevenueSeriesResponse> series = new ArrayList<>();
 
-        if (daysCount > 90) {
+        if (daysCount == 1) {
+            // Hourly breakdown for 1 day (every 2 hours)
+            for (int i = 0; i < 24; i += 2) {
+                Instant intervalStart = start.plus(i, ChronoUnit.HOURS);
+                Instant intervalEnd = intervalStart.plus(2, ChronoUnit.HOURS);
+                String label = String.format("%02d:00", i);
+
+                double currentValue = currentOrders.stream()
+                        .filter(o -> !o.getCreatedAt().isBefore(intervalStart) && o.getCreatedAt().isBefore(intervalEnd))
+                        .mapToDouble(Order::getFinalPrice)
+                        .sum();
+
+                Instant prevIntervalStart = intervalStart.minus(24, ChronoUnit.HOURS);
+                Instant prevIntervalEnd = intervalEnd.minus(24, ChronoUnit.HOURS);
+
+                double prevValue = prevOrders.stream()
+                        .filter(o -> !o.getCreatedAt().isBefore(prevIntervalStart) && o.getCreatedAt().isBefore(prevIntervalEnd))
+                        .mapToDouble(Order::getFinalPrice)
+                        .sum();
+
+                series.add(ReportManagementRevenueSeriesResponse.builder()
+                        .label(label)
+                        .currentValue(currentValue)
+                        .previousValue(prevValue)
+                        .build());
+            }
+        } else if (daysCount > 90) {
             DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("MM/yyyy").withZone(ZoneId.systemDefault());
             int monthsCount = (int) ChronoUnit.MONTHS.between(start.atZone(ZoneId.systemDefault()), end.atZone(ZoneId.systemDefault())) + 1;
             
@@ -192,7 +222,8 @@ public class ReportManagementService {
                 .map(entry -> {
                     ProductVariant variant = entry.getKey();
                     String productName = variant.getProduct() != null ? variant.getProduct().getProductName() : "Unknown Product";
-                    String imageUrl = (variant.getProduct() != null) ? variant.getProduct().getRepresentativeImageKey() : null;
+                    String imageKey = (variant.getProduct() != null) ? variant.getProduct().getRepresentativeImageKey() : null;
+                    String imageUrl = (imageKey != null && !imageKey.isBlank()) ? r2StorageService.getPresignedGetUrl(imageKey) : null;
                     String categoryName = (variant.getProduct() != null && !variant.getProduct().getCategories().isEmpty()) 
                             ? variant.getProduct().getCategories().stream().findFirst().get().getCategoryName() : "Khác";
                     double price = variant.getSalePrice() != null ? variant.getSalePrice() : variant.getOriginalPrice();
@@ -538,12 +569,19 @@ public class ReportManagementService {
         List<Order> currentOrders = getSuccessfulOrdersBetween(start, end);
         
         Set<UUID> soldVariantIds = new HashSet<>();
+        Map<ProductVariant, Integer> quantityMap = new HashMap<>();
+        Map<ProductVariant, Double> revenueMap = new HashMap<>();
+
         if (!currentOrders.isEmpty()) {
             List<UUID> orderIds = currentOrders.stream().map(Order::getId).collect(Collectors.toList());
             List<OrderDetail> details = orderDetailRepository.findByOrder_IdIn(orderIds);
             for (OrderDetail detail : details) {
-                if (detail.getProductVariant() != null) {
-                    soldVariantIds.add(detail.getProductVariant().getId());
+                ProductVariant variant = detail.getProductVariant();
+                if (variant != null) {
+                    soldVariantIds.add(variant.getId());
+                    quantityMap.put(variant, quantityMap.getOrDefault(variant, 0) + detail.getQuantity());
+                    double itemRev = detail.getQuantity() * detail.getPriceAtPurchase();
+                    revenueMap.put(variant, revenueMap.getOrDefault(variant, 0.0) + itemRev);
                 }
             }
         }
@@ -552,20 +590,49 @@ public class ReportManagementService {
         int totalItems = 0;
         int lowStockCount = 0;
         int deadStockCount = 0;
+        List<ReportManagementProductPerformanceResponse> lowStockProducts = new ArrayList<>();
 
         for (ProductVariant v : allVariants) {
+            if (v.isDeleted() || v.getProduct() == null || v.getProduct().isDeleted()) {
+                continue;
+            }
+
             int stock = v.getStockQuantity();
             if (stock > 0) {
                 totalItems += stock;
                 // Use salePrice if available, else originalPrice
                 double price = v.getSalePrice() != null ? v.getSalePrice() : v.getOriginalPrice();
                 totalValue += stock * price;
-                if (stock < 5) {
-                    lowStockCount++;
-                }
+                
                 if (!soldVariantIds.contains(v.getId())) {
                     deadStockCount++;
                 }
+            }
+
+            // Low stock condition: stock < 5
+            if (stock < 5) {
+                lowStockCount++;
+
+                String productName = v.getProduct() != null ? v.getProduct().getProductName() : "Unknown Product";
+                String imageKey = (v.getProduct() != null) ? v.getProduct().getRepresentativeImageKey() : null;
+                String imageUrl = (imageKey != null && !imageKey.isBlank()) ? r2StorageService.getPresignedGetUrl(imageKey) : null;
+                String categoryName = (v.getProduct() != null && !v.getProduct().getCategories().isEmpty()) 
+                        ? v.getProduct().getCategories().stream().findFirst().get().getCategoryName() : "Khác";
+                double price = v.getSalePrice() != null ? v.getSalePrice() : v.getOriginalPrice();
+
+                int qtySold = quantityMap.getOrDefault(v, 0);
+                double rev = revenueMap.getOrDefault(v, 0.0);
+
+                lowStockProducts.add(ReportManagementProductPerformanceResponse.builder()
+                        .productName(productName)
+                        .variantName(v.getName())
+                        .imageUrl(imageUrl)
+                        .categoryName(categoryName)
+                        .price(price)
+                        .quantitySold(qtySold)
+                        .revenue(rev)
+                        .stockRemaining(stock)
+                        .build());
             }
         }
 
@@ -574,6 +641,7 @@ public class ReportManagementService {
                 .totalItemsInStock(totalItems)
                 .lowStockVariations(lowStockCount)
                 .deadStockVariations(deadStockCount)
+                .lowStockProducts(lowStockProducts)
                 .build();
     }
 
@@ -582,8 +650,14 @@ public class ReportManagementService {
     }
 
     private Instant[] normalizeDates(Instant startDate, Instant endDate) {
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
         Instant end = endDate != null ? endDate : Instant.now();
-        Instant start = startDate != null ? startDate : end.minus(30, ChronoUnit.DAYS);
+        Instant start;
+        if (startDate != null) {
+            start = startDate;
+        } else {
+            start = end.atZone(zone).minusDays(30).toLocalDate().atStartOfDay(zone).toInstant();
+        }
         return new Instant[]{start, end};
     }
 }
