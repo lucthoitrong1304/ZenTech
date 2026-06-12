@@ -121,4 +121,6 @@ public interface CustomerVoucherRepository extends JpaRepository<CustomerVoucher
     @org.springframework.data.jpa.repository.Modifying
     @Query("DELETE FROM CustomerVoucher cv WHERE cv.coupon.id = :couponId")
     void deleteVouchersByCouponId(@Param("couponId") UUID couponId);
+
+    boolean existsByCustomer_IdAndCoupon_Id(UUID customerId, UUID couponId);
 }
