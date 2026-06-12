@@ -41,7 +41,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class CheckoutService {
-    private static final double DEFAULT_SHIPPING_FEE = 0D;
+    private static final double DEFAULT_SHIPPING_FEE = 25000D;
 
     private final CustomerRepository customerRepository;
     private final CustomerVoucherRepository customerVoucherRepository;
