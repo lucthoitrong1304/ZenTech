@@ -1,5 +1,9 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.dto.request.ProductGroupCreateRequest;
 import hcmute.edu.zentech.dto.request.ProductGroupUpdateRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
@@ -46,6 +50,7 @@ public class ProductGroupManagementController {
     }
 
     @PostMapping
+    @TrackActivity(action = ActivityAction.CREATE_PRODUCT_GROUP, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT_GROUP", severity = ActivitySeverity.IMPORTANT, summary = "Tạo nhóm sản phẩm")
     public ResponseEntity<ApiResponse<ProductGroupResponse>> createGroup(
             @Valid @RequestBody ProductGroupCreateRequest request
     ) {
@@ -53,6 +58,7 @@ public class ProductGroupManagementController {
     }
 
     @PatchMapping("/{groupId}")
+    @TrackActivity(action = ActivityAction.UPDATE_PRODUCT_GROUP, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT_GROUP", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật nhóm sản phẩm")
     public ResponseEntity<ApiResponse<ProductGroupResponse>> updateGroup(
             @PathVariable UUID groupId,
             @Valid @RequestBody ProductGroupUpdateRequest request
@@ -61,6 +67,7 @@ public class ProductGroupManagementController {
     }
 
     @DeleteMapping("/{groupId}")
+    @TrackActivity(action = ActivityAction.DELETE_PRODUCT_GROUP, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT_GROUP", severity = ActivitySeverity.CRITICAL, summary = "Xóa nhóm sản phẩm")
     public ResponseEntity<ApiResponse<ProductGroupResponse>> deleteGroup(@PathVariable UUID groupId) {
         return ResponseEntity.ok(ApiResponse.success(productGroupService.deleteGroup(groupId)));
     }
