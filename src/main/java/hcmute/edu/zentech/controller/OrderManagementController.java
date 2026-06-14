@@ -1,5 +1,9 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.dto.request.OrderCreateRequest;
 import hcmute.edu.zentech.dto.request.OrderUpdateRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
@@ -60,6 +64,7 @@ public class OrderManagementController {
     }
 
     @PatchMapping("/{orderId}")
+    @TrackActivity(action = ActivityAction.UPDATE_ORDER_STATUS, area = ActivityArea.MANAGEMENT, module = "ORDER", targetType = "ORDER", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật trạng thái đơn hàng")
     public ResponseEntity<ApiResponse<OrderManagementDetailResponse>> updateOrder(
             @PathVariable UUID orderId,
             @Valid @RequestBody OrderUpdateRequest request
@@ -68,6 +73,7 @@ public class OrderManagementController {
     }
 
     @DeleteMapping("/{orderId}")
+    @TrackActivity(action = ActivityAction.CANCEL_ORDER, area = ActivityArea.MANAGEMENT, module = "ORDER", targetType = "ORDER", severity = ActivitySeverity.CRITICAL, summary = "Hủy đơn hàng")
     public ResponseEntity<ApiResponse<OrderManagementDetailResponse>> cancelOrder(@PathVariable UUID orderId) {
         return ResponseEntity.ok(ApiResponse.success(orderManagementService.cancelOrder(orderId)));
     }

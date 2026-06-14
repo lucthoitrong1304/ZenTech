@@ -1,5 +1,6 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
 import hcmute.edu.zentech.dto.request.InventoryAdjustmentRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.InventorySummaryResponse;
@@ -7,6 +8,9 @@ import hcmute.edu.zentech.dto.response.InventoryTransactionResponse;
 import hcmute.edu.zentech.dto.response.InventoryStatsResponse;
 import hcmute.edu.zentech.dto.response.InventoryTransactionStatsResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import hcmute.edu.zentech.service.InventoryManagementService;
 import jakarta.validation.Valid;
@@ -73,6 +77,7 @@ public class InventoryManagementController {
     }
 
     @PostMapping("/adjust")
+    @TrackActivity(action = ActivityAction.UPDATE_STOCK, area = ActivityArea.MANAGEMENT, module = "INVENTORY", targetType = "INVENTORY", severity = ActivitySeverity.IMPORTANT, summary = "Điều chỉnh tồn kho")
     public ResponseEntity<ApiResponse<InventoryTransactionResponse>> adjustStock(
             @Valid @RequestBody InventoryAdjustmentRequest request
     ) {

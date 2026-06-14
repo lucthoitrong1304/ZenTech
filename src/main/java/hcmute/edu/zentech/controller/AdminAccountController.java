@@ -1,5 +1,9 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.dto.request.CreateInternalAccountRequest;
 import hcmute.edu.zentech.dto.request.UpdateAccountRoleRequest;
 import hcmute.edu.zentech.dto.request.UpdateAccountStatusRequest;
@@ -40,6 +44,7 @@ public class AdminAccountController {
 
     @PatchMapping("/{accountId}/role")
     @PreAuthorize("hasRole('ADMIN')")
+    @TrackActivity(action = ActivityAction.CHANGE_ROLE, area = ActivityArea.ADMIN, module = "ACCOUNT", targetType = "ACCOUNT", severity = ActivitySeverity.SECURITY, summary = "Admin thay đổi vai trò tài khoản")
     public ResponseEntity<ApiResponse<Void>> updateAccountRole(
             @PathVariable UUID accountId,
             @Valid @RequestBody UpdateAccountRoleRequest request
@@ -50,6 +55,7 @@ public class AdminAccountController {
 
     @PatchMapping("/{accountId}/status")
     @PreAuthorize("hasRole('ADMIN')")
+    @TrackActivity(action = ActivityAction.UPDATE_ACCOUNT, area = ActivityArea.ADMIN, module = "ACCOUNT", targetType = "ACCOUNT", severity = ActivitySeverity.SECURITY, summary = "Admin cập nhật trạng thái tài khoản")
     public ResponseEntity<ApiResponse<Void>> updateAccountStatus(
             @PathVariable UUID accountId,
             @Valid @RequestBody UpdateAccountStatusRequest request
@@ -60,6 +66,7 @@ public class AdminAccountController {
 
     @PostMapping("/internal")
     @PreAuthorize("hasRole('ADMIN')")
+    @TrackActivity(action = ActivityAction.CREATE_ACCOUNT, area = ActivityArea.ADMIN, module = "ACCOUNT", targetType = "ACCOUNT", severity = ActivitySeverity.SECURITY, summary = "Admin tạo tài khoản nội bộ")
     public ResponseEntity<ApiResponse<Void>> createInternalAccount(
             @Valid @RequestBody CreateInternalAccountRequest request
     ) {
