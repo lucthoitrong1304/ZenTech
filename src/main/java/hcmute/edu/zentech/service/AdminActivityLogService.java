@@ -132,7 +132,8 @@ public class AdminActivityLogService {
 
     public PageResponse<ActivityLogResponseDto> getActivityLogs(int page, int size, String search) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<ActivityLog> logPage = activityLogRepository.searchLogs(search, pageable);
+        String preprocessedSearch = preprocessSearchTerm(search);
+        Page<ActivityLog> logPage = activityLogRepository.searchLogs(preprocessedSearch, pageable);
 
         List<ActivityLogResponseDto> dtoList = logPage.getContent().stream()
                 .map(this::mapToDto)
@@ -190,17 +191,31 @@ public class AdminActivityLogService {
             email = activityLog.getUser().getEmail();
             UUID accountId = activityLog.getUser().getId();
             
-            // Search in Employee first (as staff are the main operators)
-            Optional<Employee> empOpt = employeeRepository.findByUserInfo_Id(accountId);
-            if (empOpt.isPresent()) {
-                fullName = empOpt.get().getFullName();
-                avatar = empOpt.get().getImageUrl();
-            } else {
-                // Search in Customer
+            if (activityLog.getArea() == hcmute.edu.zentech.model.ActivityArea.CUSTOMER) {
+                // If it is customer area, search in Customer first
                 Optional<Customer> custOpt = customerRepository.findByUserInfo_Id(accountId);
                 if (custOpt.isPresent()) {
                     fullName = custOpt.get().getFullName();
                     avatar = custOpt.get().getImageUrl();
+                } else {
+                    Optional<Employee> empOpt = employeeRepository.findByUserInfo_Id(accountId);
+                    if (empOpt.isPresent()) {
+                        fullName = empOpt.get().getFullName();
+                        avatar = empOpt.get().getImageUrl();
+                    }
+                }
+            } else {
+                // Otherwise (MANAGEMENT, ADMIN, SYSTEM), search in Employee first
+                Optional<Employee> empOpt = employeeRepository.findByUserInfo_Id(accountId);
+                if (empOpt.isPresent()) {
+                    fullName = empOpt.get().getFullName();
+                    avatar = empOpt.get().getImageUrl();
+                } else {
+                    Optional<Customer> custOpt = customerRepository.findByUserInfo_Id(accountId);
+                    if (custOpt.isPresent()) {
+                        fullName = custOpt.get().getFullName();
+                        avatar = custOpt.get().getImageUrl();
+                    }
                 }
             }
 
@@ -394,6 +409,18 @@ public class AdminActivityLogService {
             case VIEW_LOG_DETAIL -> "Xem chi tiết log";
             case CLEAR_LOG -> "Xóa log hiển thị";
             case ARCHIVE_LOG -> "Lưu trữ log";
+            case CREATE_PRODUCT_GROUP -> "Tạo nhóm sản phẩm";
+            case UPDATE_PRODUCT_GROUP -> "Cập nhật nhóm sản phẩm";
+            case DELETE_PRODUCT_GROUP -> "Xóa nhóm sản phẩm";
+            case CREATE_AI_AGENT -> "Tạo AI agent";
+            case UPDATE_AI_AGENT -> "Cập nhật AI agent";
+            case DELETE_AI_AGENT -> "Xóa AI agent";
+            case CHANGE_AI_AGENT_ROLE -> "Thay đổi vai trò AI agent";
+            case CREATE_AI_DATASET -> "Tạo bộ dữ liệu AI";
+            case UPDATE_AI_DATASET -> "Cập nhật bộ dữ liệu AI";
+            case DELETE_AI_DATASET -> "Xóa bộ dữ liệu AI";
+            case UPLOAD_AI_DOCUMENT -> "Tải lên tài liệu AI";
+            case DELETE_AI_DOCUMENT -> "Xóa tài liệu AI";
             default -> action.name().replace('_', ' ');
         };
     }
@@ -440,5 +467,42 @@ public class AdminActivityLogService {
         }
         String trimmed = value.trim();
         return trimmed.substring(0, 1).toUpperCase() + trimmed.substring(1);
+    }
+
+    private String preprocessSearchTerm(String search) {
+        if (search == null || search.isBlank()) {
+            return search;
+        }
+        String clean = search.trim().toLowerCase();
+        
+        // Map Area labels
+        if (clean.contains("nội bộ") || clean.contains("noi bo")) {
+            return "MANAGEMENT";
+        }
+        if (clean.contains("mua hàng") || clean.contains("mua hang")) {
+            return "CUSTOMER";
+        }
+        if (clean.contains("hệ thống") || clean.contains("he thong")) {
+            return "SYSTEM";
+        }
+        if (clean.equals("admin")) {
+            return "ADMIN";
+        }
+        
+        // Map Severity labels
+        if (clean.contains("quan trọng") || clean.contains("quan trong")) {
+            return "IMPORTANT";
+        }
+        if (clean.contains("nghiêm trọng") || clean.contains("nghiem trong")) {
+            return "CRITICAL";
+        }
+        if (clean.contains("bảo mật") || clean.contains("bao mat")) {
+            return "SECURITY";
+        }
+        if (clean.contains("thông tin") || clean.contains("thong tin")) {
+            return "INFO";
+        }
+        
+        return search;
     }
 }

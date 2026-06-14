@@ -1,5 +1,9 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.dto.request.AiAgentDatasetsRequest;
 import hcmute.edu.zentech.dto.request.AiAgentDemoRequest;
 import hcmute.edu.zentech.dto.request.AiAgentRequest;
@@ -41,6 +45,7 @@ public class AiManagementController {
     }
 
     @PostMapping("/agents")
+    @TrackActivity(action = ActivityAction.CREATE_AI_AGENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.IMPORTANT, summary = "Tạo AI agent")
     public ResponseEntity<ApiResponse<AiAgentResponse>> createAgent(@Valid @RequestBody AiAgentRequest request) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.createAgent(request)));
     }
@@ -51,6 +56,7 @@ public class AiManagementController {
     }
 
     @PatchMapping("/agents/{agentId}")
+    @TrackActivity(action = ActivityAction.UPDATE_AI_AGENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật AI agent")
     public ResponseEntity<ApiResponse<AiAgentResponse>> updateAgent(
             @PathVariable UUID agentId,
             @Valid @RequestBody AiAgentRequest request
@@ -59,11 +65,13 @@ public class AiManagementController {
     }
 
     @DeleteMapping("/agents/{agentId}")
+    @TrackActivity(action = ActivityAction.DELETE_AI_AGENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.CRITICAL, summary = "Xóa AI agent")
     public ResponseEntity<ApiResponse<AiAgentResponse>> deleteAgent(@PathVariable UUID agentId) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.deleteAgent(agentId)));
     }
 
     @PatchMapping("/agents/{agentId}/roles")
+    @TrackActivity(action = ActivityAction.CHANGE_AI_AGENT_ROLE, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật vai trò phục vụ của AI agent")
     public ResponseEntity<ApiResponse<AiAgentResponse>> updateAgentRoles(
             @PathVariable UUID agentId,
             @Valid @RequestBody AiAgentRolesRequest request
@@ -72,6 +80,7 @@ public class AiManagementController {
     }
 
     @PatchMapping("/agents/{agentId}/datasets")
+    @TrackActivity(action = ActivityAction.UPDATE_AI_AGENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật bộ dữ liệu liên kết với AI agent")
     public ResponseEntity<ApiResponse<AiAgentResponse>> updateAgentDatasets(
             @PathVariable UUID agentId,
             @RequestBody AiAgentDatasetsRequest request
@@ -93,6 +102,7 @@ public class AiManagementController {
     }
 
     @PostMapping("/datasets")
+    @TrackActivity(action = ActivityAction.CREATE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.IMPORTANT, summary = "Tạo bộ dữ liệu AI")
     public ResponseEntity<ApiResponse<AiDatasetResponse>> createDataset(@Valid @RequestBody AiDatasetRequest request) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.createDataset(request)));
     }
@@ -103,6 +113,7 @@ public class AiManagementController {
     }
 
     @PatchMapping("/datasets/{datasetId}")
+    @TrackActivity(action = ActivityAction.UPDATE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật bộ dữ liệu AI")
     public ResponseEntity<ApiResponse<AiDatasetResponse>> updateDataset(
             @PathVariable UUID datasetId,
             @Valid @RequestBody AiDatasetRequest request
@@ -111,6 +122,7 @@ public class AiManagementController {
     }
 
     @DeleteMapping("/datasets/{datasetId}")
+    @TrackActivity(action = ActivityAction.DELETE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.CRITICAL, summary = "Xóa bộ dữ liệu AI")
     public ResponseEntity<ApiResponse<AiDatasetResponse>> deleteDataset(@PathVariable UUID datasetId) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.deleteDataset(datasetId)));
     }
@@ -119,6 +131,7 @@ public class AiManagementController {
             value = "/datasets/{datasetId}/documents",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
+    @TrackActivity(action = ActivityAction.UPLOAD_AI_DOCUMENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DOCUMENT", severity = ActivitySeverity.IMPORTANT, summary = "Tải lên tài liệu AI")
     public ResponseEntity<ApiResponse<AiDocumentResponse>> uploadDocument(
             @PathVariable UUID datasetId,
             @RequestPart("file") MultipartFile file
@@ -127,6 +140,7 @@ public class AiManagementController {
     }
 
     @DeleteMapping("/documents/{documentId}")
+    @TrackActivity(action = ActivityAction.DELETE_AI_DOCUMENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DOCUMENT", severity = ActivitySeverity.CRITICAL, summary = "Xóa tài liệu AI")
     public ResponseEntity<ApiResponse<AiDocumentResponse>> deleteDocument(@PathVariable UUID documentId) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.deleteDocument(documentId)));
     }

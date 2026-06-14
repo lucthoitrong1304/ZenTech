@@ -5,6 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.TextNode;
+import hcmute.edu.zentech.dto.request.UpdateCustomerStatusRequest;
+import hcmute.edu.zentech.dto.request.UpdateAccountStatusRequest;
+import hcmute.edu.zentech.dto.response.ApiResponse;
+import hcmute.edu.zentech.dto.response.CustomerDetailResponse;
+import hcmute.edu.zentech.dto.response.ProductGroupResponse;
+import hcmute.edu.zentech.dto.response.AiAgentResponse;
+import hcmute.edu.zentech.dto.response.AiDatasetResponse;
+import hcmute.edu.zentech.dto.response.AiDocumentResponse;
 import hcmute.edu.zentech.dto.response.AuthResponse;
 import hcmute.edu.zentech.model.ActivityAction;
 import hcmute.edu.zentech.model.ActivityArea;
@@ -94,6 +102,24 @@ public class ActivityLogAspect {
                         continue;
                     }
 
+                    if (arg instanceof UpdateCustomerStatusRequest customerStatusReq) {
+                        if (Boolean.FALSE.equals(customerStatusReq.getActive())) {
+                            action = ActivityAction.LOCK_ACCOUNT;
+                            configuredSummary = "Khóa tài khoản khách hàng";
+                        } else {
+                            action = ActivityAction.UNLOCK_ACCOUNT;
+                            configuredSummary = "Mở khóa tài khoản khách hàng";
+                        }
+                    } else if (arg instanceof UpdateAccountStatusRequest accountStatusReq) {
+                        if (Boolean.FALSE.equals(accountStatusReq.getActive())) {
+                            action = ActivityAction.LOCK_ACCOUNT;
+                            configuredSummary = "Khóa tài khoản";
+                        } else {
+                            action = ActivityAction.UNLOCK_ACCOUNT;
+                            configuredSummary = "Mở khóa tài khoản";
+                        }
+                    }
+
                     String paramName = (parameterNames != null && parameterNames.length > i) ? parameterNames[i] : "";
                     String className = arg.getClass().getSimpleName();
                     String loweredParam = paramName.toLowerCase();
@@ -126,7 +152,7 @@ public class ActivityLogAspect {
             AuthResponse authResponse = extractAuthResponse(result);
             ActivityArea effectiveArea = resolveArea(trackActivity.area(), authResponse);
             String targetType = firstNonBlank(trackActivity.targetType(), determineTargetTypeFromUri(requestUri));
-            String targetLabel = firstNonBlank(resolveAuthTargetLabel(authResponse), targetId, targetType);
+            String targetLabel = extractTargetLabel(result, targetId, targetType);
             String summary = buildSummary(action, configuredSummary, effectiveArea.name(), targetType, targetLabel);
             String metadataJson = metadata.isEmpty() ? null : objectMapper.writeValueAsString(metadata);
             UUID loggedInUserId = resolveUserId(action, authResponse);
@@ -234,16 +260,82 @@ public class ActivityLogAspect {
         }
         String cleanUri = uri.toLowerCase();
         if (cleanUri.contains("/inventory")) return "INVENTORY";
+        if (cleanUri.contains("/product-groups")) return "PRODUCT_GROUP";
         if (cleanUri.contains("/products")) return "PRODUCT";
         if (cleanUri.contains("/categories")) return "CATEGORY";
         if (cleanUri.contains("/orders")) return "ORDER";
+        if (cleanUri.contains("/customers")) return "CUSTOMER";
         if (cleanUri.contains("/accounts")) return "ACCOUNT";
         if (cleanUri.contains("/coupons")) return "COUPON";
         if (cleanUri.contains("/vouchers")) return "VOUCHER";
         if (cleanUri.contains("/auth")) return "AUTH";
         if (cleanUri.contains("/payments")) return "PAYMENT";
+        if (cleanUri.contains("/ai")) return "AI_AGENT";
         if (cleanUri.contains("/logs")) return "LOG";
         return "SYSTEM";
+    }
+
+    private String extractTargetLabel(Object result, String targetId, String targetType) {
+        if (result == null) {
+            return targetId.isBlank() ? targetType : targetId;
+        }
+        Object body = result;
+        if (result instanceof ResponseEntity<?> responseEntity) {
+            body = responseEntity.getBody();
+        }
+        if (body instanceof ApiResponse<?> apiResponse) {
+            body = apiResponse.getData();
+        }
+
+        if (body == null) {
+            return targetId.isBlank() ? targetType : targetId;
+        }
+
+        if (body instanceof AuthResponse authResponse) {
+            String label = firstNonBlank(authResponse.getEmail(), authResponse.getFullName(), authResponse.getAccountId());
+            if (!label.isBlank()) return label;
+        } else if (body instanceof CustomerDetailResponse customerDetail) {
+            String label = firstNonBlank(customerDetail.getEmail(), customerDetail.getFullName());
+            if (!label.isBlank()) return label;
+        } else if (body instanceof ProductGroupResponse productGroup) {
+            String label = productGroup.getGroupName();
+            if (label != null && !label.isBlank()) return label;
+        } else if (body instanceof AiAgentResponse aiAgent) {
+            String label = aiAgent.getName();
+            if (label != null && !label.isBlank()) return label;
+        } else if (body instanceof AiDatasetResponse aiDataset) {
+            String label = aiDataset.getName();
+            if (label != null && !label.isBlank()) return label;
+        } else if (body instanceof AiDocumentResponse aiDocument) {
+            String label = aiDocument.getFileName();
+            if (label != null && !label.isBlank()) return label;
+        }
+
+        try {
+            Method getEmail = body.getClass().getMethod("getEmail");
+            String email = (String) getEmail.invoke(body);
+            if (email != null && !email.isBlank()) return email;
+        } catch (Exception ignored) {}
+
+        try {
+            Method getName = body.getClass().getMethod("getName");
+            String name = (String) getName.invoke(body);
+            if (name != null && !name.isBlank()) return name;
+        } catch (Exception ignored) {}
+
+        try {
+            Method getGroupName = body.getClass().getMethod("getGroupName");
+            String groupName = (String) getGroupName.invoke(body);
+            if (groupName != null && !groupName.isBlank()) return groupName;
+        } catch (Exception ignored) {}
+
+        try {
+            Method getFileName = body.getClass().getMethod("getFileName");
+            String fileName = (String) getFileName.invoke(body);
+            if (fileName != null && !fileName.isBlank()) return fileName;
+        } catch (Exception ignored) {}
+
+        return targetId.isBlank() ? targetType : targetId;
     }
 
     private boolean isFrameworkClass(Object arg) {

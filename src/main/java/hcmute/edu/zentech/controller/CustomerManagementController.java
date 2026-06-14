@@ -1,5 +1,9 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.dto.request.UpdateCustomerStatusRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.CustomerDetailResponse;
@@ -46,6 +50,7 @@ public class CustomerManagementController {
     }
 
     @PatchMapping("/{customerId}/status")
+    @TrackActivity(action = ActivityAction.UPDATE_ACCOUNT, area = ActivityArea.MANAGEMENT, module = "CUSTOMER", targetType = "CUSTOMER", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật trạng thái khách hàng")
     public ResponseEntity<ApiResponse<CustomerDetailResponse>> updateCustomerStatus(
             @PathVariable UUID customerId,
             @Valid @RequestBody UpdateCustomerStatusRequest request
