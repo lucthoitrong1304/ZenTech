@@ -1,5 +1,9 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.dto.request.CheckoutRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.CheckoutResponse;
@@ -20,6 +24,7 @@ public class CustomerCheckoutController {
     private final CheckoutService checkoutService;
 
     @PostMapping("/checkout")
+    @TrackActivity(action = ActivityAction.CHECKOUT_COMPLETED, failureAction = ActivityAction.CHECKOUT_FAILED, area = ActivityArea.CUSTOMER, module = "CHECKOUT", targetType = "ORDER", severity = ActivitySeverity.CRITICAL, summary = "Khách hàng đặt hàng", logOnFailure = true)
     public ResponseEntity<ApiResponse<CheckoutResponse>> checkout(
             @Valid @RequestBody CheckoutRequest request,
             HttpServletRequest httpServletRequest

@@ -4,7 +4,12 @@ import hcmute.edu.zentech.service.AdminLogService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
@@ -17,9 +22,6 @@ public class AdminLogController {
 
     private final AdminLogService adminLogService;
 
-    /**
-     * API dành riêng cho ADMIN truy vấn log hệ thống (từ Loki)
-     */
     @GetMapping("/admin/logs")
     public ResponseEntity<List<Map<String, Object>>> getLogs(
             @RequestParam(value = "level", required = false, defaultValue = "ALL") String level,
@@ -32,9 +34,6 @@ public class AdminLogController {
         return ResponseEntity.ok(logs);
     }
 
-    /**
-     * API công khai (PermitAll) để Frontend gửi log lỗi trình duyệt lên
-     */
     @PostMapping("/logs/client")
     public ResponseEntity<Map<String, Object>> recordClientLog(@RequestBody Map<String, Object> logPayload) {
         adminLogService.writeClientLog(logPayload);
@@ -44,9 +43,6 @@ public class AdminLogController {
         ));
     }
 
-    /**
-     * API gọi AI giải thích log lỗi dành cho ADMIN
-     */
     @PostMapping("/admin/logs/explain")
     public ResponseEntity<Map<String, Object>> explainLog(@RequestBody Map<String, Object> logPayload) {
         log.info("Request to explain log received");

@@ -1,5 +1,9 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.dto.request.*;
 import hcmute.edu.zentech.dto.response.AuthResponse;
 import hcmute.edu.zentech.service.AuthService;
@@ -16,6 +20,7 @@ public class AuthController {
 
     // --- 1. ĐĂNG KÝ ---
     @PostMapping("/register")
+    @TrackActivity(action = ActivityAction.CREATE_ACCOUNT, area = ActivityArea.CUSTOMER, module = "AUTH", targetType = "ACCOUNT", severity = ActivitySeverity.IMPORTANT, summary = "Khách hàng đăng ký tài khoản")
     public ResponseEntity<String> register(@Valid @RequestBody RegisterRequest request) {
         authService.registerUser(request);
         return ResponseEntity.ok("Đăng ký tài khoản thành công!");
@@ -23,12 +28,14 @@ public class AuthController {
 
     // --- 2. ĐĂNG NHẬP (THƯỜNG) ---
     @PostMapping("/login")
+    @TrackActivity(action = ActivityAction.LOGIN, failureAction = ActivityAction.LOGIN_FAILED, area = ActivityArea.SYSTEM, module = "AUTH", targetType = "ACCOUNT", severity = ActivitySeverity.SECURITY, summary = "Đăng nhập hệ thống", logOnFailure = true)
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.authenticate(request));
     }
 
     // --- 3. ĐĂNG NHẬP BẰNG GOOGLE ---
     @PostMapping("/google")
+    @TrackActivity(action = ActivityAction.LOGIN, failureAction = ActivityAction.LOGIN_FAILED, area = ActivityArea.SYSTEM, module = "AUTH", targetType = "ACCOUNT", severity = ActivitySeverity.SECURITY, summary = "Đăng nhập Google", logOnFailure = true)
     public ResponseEntity<AuthResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request) {
         // Đã sửa thành authenticateWithGoogle cho khớp AuthService
         return ResponseEntity.ok(authService.authenticateWithGoogle(request.getToken()));
@@ -42,6 +49,7 @@ public class AuthController {
 
     // --- 5. ĐĂNG XUẤT ---
     @PostMapping("/logout")
+    @TrackActivity(action = ActivityAction.LOGOUT, area = ActivityArea.SYSTEM, module = "AUTH", targetType = "ACCOUNT", severity = ActivitySeverity.SECURITY, summary = "Đăng xuất hệ thống")
     public ResponseEntity<String> logout(@Valid @RequestBody TokenRefreshRequest request) {
         authService.logout(request.getRefreshToken());
         return ResponseEntity.ok("Đăng xuất thành công!");
@@ -64,6 +72,7 @@ public class AuthController {
 
     // --- 8. ĐỔI MẬT KHẨU HOẶC ĐẶT MẬT KHẨU LẦN ĐẦU ---
     @PutMapping("/password")
+    @TrackActivity(action = ActivityAction.PASSWORD_CHANGED, area = ActivityArea.SYSTEM, module = "AUTH", targetType = "ACCOUNT", severity = ActivitySeverity.SECURITY, summary = "Đổi mật khẩu")
     public ResponseEntity<String> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         authService.changePassword(request);
         return ResponseEntity.ok("Cập nhật mật khẩu thành công.");

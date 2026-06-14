@@ -1,5 +1,9 @@
 package hcmute.edu.zentech.controller;
 
+import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import hcmute.edu.zentech.dto.request.ProductCreateRequest;
 import hcmute.edu.zentech.dto.request.ProductUpdateRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
@@ -47,6 +51,7 @@ public class ProductManagementController {
     }
 
     @PostMapping
+    @TrackActivity(action = ActivityAction.CREATE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.IMPORTANT, summary = "Tạo sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> createProduct(
             @Valid @RequestBody ProductCreateRequest request
     ) {
@@ -54,6 +59,7 @@ public class ProductManagementController {
     }
 
     @PatchMapping("/{productId}")
+    @TrackActivity(action = ActivityAction.UPDATE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> updateProduct(
             @PathVariable UUID productId,
             @Valid @RequestBody ProductUpdateRequest request
@@ -62,6 +68,7 @@ public class ProductManagementController {
     }
 
     @DeleteMapping("/{productId}")
+    @TrackActivity(action = ActivityAction.DELETE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.CRITICAL, summary = "Xóa sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> deleteProduct(@PathVariable UUID productId) {
         return ResponseEntity.ok(ApiResponse.success(productManagementService.deleteProduct(productId)));
     }

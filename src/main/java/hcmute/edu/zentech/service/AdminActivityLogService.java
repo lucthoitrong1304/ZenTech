@@ -1,0 +1,444 @@
+package hcmute.edu.zentech.service;
+
+import hcmute.edu.zentech.dto.response.ActivityLogResponseDto;
+import hcmute.edu.zentech.dto.response.PageResponse;
+import hcmute.edu.zentech.model.AccountUser;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivityLog;
+import hcmute.edu.zentech.model.ActivitySeverity;
+import hcmute.edu.zentech.model.Employee;
+import hcmute.edu.zentech.model.Customer;
+import hcmute.edu.zentech.model.Role;
+import hcmute.edu.zentech.repository.EmployeeRepository;
+import hcmute.edu.zentech.repository.CustomerRepository;
+import hcmute.edu.zentech.repository.AccountUserRepository;
+import hcmute.edu.zentech.repository.ActivityLogRepository;
+import hcmute.edu.zentech.security.SecurityContextUtils;
+import jakarta.servlet.http.HttpServletRequest;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class AdminActivityLogService {
+
+    private final ActivityLogRepository activityLogRepository;
+    private final AccountUserRepository accountUserRepository;
+    private final EmployeeRepository employeeRepository;
+    private final CustomerRepository customerRepository;
+    private final R2StorageService r2StorageService;
+    private final SimpMessagingTemplate messagingTemplate;
+
+    private static final String ACTIVITY_LOG_TOPIC = "/topic/admin.activity-logs";
+
+    public void log(ActivityAction action, String targetType, String targetId, String description) {
+        UUID currentUserId = SecurityContextUtils.getCurrentUserId();
+        log(currentUserId, action, targetType, targetId, description);
+    }
+
+    public void log(UUID userId, ActivityAction action, String targetType, String targetId, String description) {
+        log(userId, ActivityArea.SYSTEM, "SYSTEM", action, ActivitySeverity.INFO, targetType, targetId, null, description, null);
+    }
+
+    public void log(
+            UUID userId,
+            ActivityArea area,
+            String module,
+            ActivityAction action,
+            ActivitySeverity severity,
+            String targetType,
+            String targetId,
+            String targetLabel,
+            String summary,
+            String metadata
+    ) {
+        try {
+            if (userId == null) {
+                userId = SecurityContextUtils.getCurrentUserId();
+            }
+            AccountUser user = null;
+            if (userId != null) {
+                user = accountUserRepository.findById(userId).orElse(null);
+            }
+
+            ActivityArea effectiveArea = resolveArea(area, module, user);
+            String effectiveTargetLabel = resolveTargetLabel(targetLabel, targetType, user);
+            String effectiveSummary = resolveSummary(summary, action, module, user);
+
+            HttpServletRequest request = getCurrentRequest();
+            String ipAddress = getClientIp(request);
+            String userAgent = getUserAgent(request);
+
+            String safeSummary = trim(sanitizeText(effectiveSummary), 1000);
+            String safeDescription = trim(sanitizeText(effectiveSummary), 1000);
+            String safeMetadata = sanitizeText(metadata);
+            if (safeMetadata != null && safeMetadata.length() > 4000) {
+                safeMetadata = safeMetadata.substring(0, 3995) + "...";
+            }
+
+            if (safeDescription == null || safeDescription.isBlank()) {
+                safeDescription = buildFallbackSummary(action, targetType, targetLabel, targetId);
+            }
+
+            if (safeDescription != null && safeDescription.length() > 1000) {
+                safeDescription = safeDescription.substring(0, 995) + "...";
+            }
+
+            String safeUserAgent = userAgent;
+            if (safeUserAgent != null && safeUserAgent.length() > 255) {
+                safeUserAgent = safeUserAgent.substring(0, 250) + "...";
+            }
+
+            ActivityLog activityLog = ActivityLog.builder()
+                    .user(user)
+                    .area(effectiveArea)
+                    .module(trim(module, 80))
+                    .action(action)
+                    .severity(severity != null ? severity : ActivitySeverity.INFO)
+                    .targetType(targetType)
+                    .targetId(targetId)
+                    .targetLabel(trim(effectiveTargetLabel, 255))
+                    .summary(safeSummary != null && !safeSummary.isBlank() ? safeSummary : safeDescription)
+                    .description(safeDescription)
+                    .metadata(safeMetadata)
+                    .ipAddress(ipAddress)
+                    .userAgent(safeUserAgent)
+                    .createdAt(Instant.now())
+                    .build();
+
+            ActivityLog savedLog = activityLogRepository.save(activityLog);
+            publishRealtimeActivityLog(savedLog);
+            log.info("Activity logged: {} in {} by user {} from IP {}", action, effectiveArea, user != null ? user.getEmail() : "anonymous", ipAddress);
+        } catch (Exception e) {
+            log.error("Failed to log activity: {}", e.getMessage(), e);
+        }
+    }
+
+    public PageResponse<ActivityLogResponseDto> getActivityLogs(int page, int size, String search) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<ActivityLog> logPage = activityLogRepository.searchLogs(search, pageable);
+
+        List<ActivityLogResponseDto> dtoList = logPage.getContent().stream()
+                .map(this::mapToDto)
+                .collect(Collectors.toList());
+
+        return PageResponse.from(logPage, dtoList);
+    }
+
+    private HttpServletRequest getCurrentRequest() {
+        try {
+            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attributes != null) {
+                return attributes.getRequest();
+            }
+        } catch (Exception e) {
+            log.debug("Not in an HTTP request context: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        if (request == null) {
+            return "unknown";
+        }
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("Proxy-Client-IP");
+        }
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("WL-Proxy-Client-IP");
+        }
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getRemoteAddr();
+        }
+        if (ip != null && ip.contains(",")) {
+            ip = ip.split(",")[0].trim();
+        }
+        return ip;
+    }
+
+    private String getUserAgent(HttpServletRequest request) {
+        if (request == null) {
+            return "unknown";
+        }
+        String ua = request.getHeader("User-Agent");
+        return ua != null ? ua : "unknown";
+    }
+
+    private ActivityLogResponseDto mapToDto(ActivityLog activityLog) {
+        String email = "anonymous@zentech.local";
+        String fullName = "Anonymous";
+        String avatar = null;
+
+        if (activityLog.getUser() != null) {
+            email = activityLog.getUser().getEmail();
+            UUID accountId = activityLog.getUser().getId();
+            
+            // Search in Employee first (as staff are the main operators)
+            Optional<Employee> empOpt = employeeRepository.findByUserInfo_Id(accountId);
+            if (empOpt.isPresent()) {
+                fullName = empOpt.get().getFullName();
+                avatar = empOpt.get().getImageUrl();
+            } else {
+                // Search in Customer
+                Optional<Customer> custOpt = customerRepository.findByUserInfo_Id(accountId);
+                if (custOpt.isPresent()) {
+                    fullName = custOpt.get().getFullName();
+                    avatar = custOpt.get().getImageUrl();
+                }
+            }
+
+            if (avatar != null && !avatar.trim().isEmpty() && !avatar.startsWith("http")) {
+                avatar = r2StorageService.getPresignedGetUrl(avatar);
+            }
+        }
+
+        StringBuilder targetBuilder = new StringBuilder();
+        if (activityLog.getTargetType() != null && !activityLog.getTargetType().isEmpty()) {
+            targetBuilder.append("[").append(activityLog.getTargetType()).append("]");
+        }
+        if (activityLog.getTargetId() != null && !activityLog.getTargetId().isEmpty()) {
+            targetBuilder.append(" ID: ").append(activityLog.getTargetId());
+        }
+        if (activityLog.getDescription() != null && !activityLog.getDescription().isEmpty()) {
+            if (targetBuilder.length() > 0) {
+                targetBuilder.append(" - ");
+            }
+            targetBuilder.append(activityLog.getDescription());
+        }
+        String target = activityLog.getTargetLabel();
+        if (target == null || target.isBlank()) {
+            target = targetBuilder.length() > 0 ? targetBuilder.toString() : "N/A";
+        }
+
+        return ActivityLogResponseDto.builder()
+                .id(activityLog.getId())
+                .operatorEmail(email)
+                .operatorFullName(fullName)
+                .operatorAvatar(avatar)
+                .area(activityLog.getArea())
+                .module(activityLog.getModule())
+                .action(activityLog.getAction())
+                .actionLabel(toActionLabel(activityLog.getAction()))
+                .severity(activityLog.getSeverity())
+                .targetType(activityLog.getTargetType())
+                .targetId(activityLog.getTargetId())
+                .targetLabel(activityLog.getTargetLabel())
+                .target(target)
+                .summary(firstNonBlank(activityLog.getSummary(), activityLog.getDescription(), target))
+                .metadata(activityLog.getMetadata())
+                .ipAddress(activityLog.getIpAddress())
+                .userAgent(activityLog.getUserAgent())
+                .timestamp(activityLog.getCreatedAt())
+                .build();
+    }
+
+    private void publishRealtimeActivityLog(ActivityLog activityLog) {
+        try {
+            messagingTemplate.convertAndSend(ACTIVITY_LOG_TOPIC, mapToDto(activityLog));
+        } catch (Exception e) {
+            log.warn("Failed to publish realtime activity log {}: {}", activityLog.getId(), e.getMessage());
+        }
+    }
+
+    private String trim(String value, int maxLength) {
+        if (value == null) {
+            return null;
+        }
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, Math.max(0, maxLength - 3)) + "...";
+    }
+
+    private String sanitizeText(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replaceAll(
+                "(?i)(password|token|refresh|access|secret|credential|otp|authorization)([\\w.-]*)(\\s*[=:]\\s*)([^,\\s}\\\"]+)",
+                "$1$2$3[MASKED]"
+        );
+    }
+
+    private ActivityArea resolveArea(ActivityArea area, String module, AccountUser user) {
+        if (area != null && area != ActivityArea.SYSTEM) {
+            return area;
+        }
+        if (user == null || user.getRole() == null || module == null || !module.equalsIgnoreCase("AUTH")) {
+            return area != null ? area : ActivityArea.SYSTEM;
+        }
+        Role role = user.getRole();
+        if (role == Role.ADMIN) {
+            return ActivityArea.ADMIN;
+        }
+        if (role == Role.OWNER || role == Role.MANAGER || role == Role.EMPLOYEE) {
+            return ActivityArea.MANAGEMENT;
+        }
+        if (role == Role.CUSTOMER) {
+            return ActivityArea.CUSTOMER;
+        }
+        return ActivityArea.SYSTEM;
+    }
+
+    private String resolveTargetLabel(String targetLabel, String targetType, AccountUser user) {
+        if (targetLabel != null && !targetLabel.isBlank() && !targetLabel.equalsIgnoreCase(targetType)) {
+            return targetLabel;
+        }
+        if (user != null && user.getEmail() != null && !user.getEmail().isBlank()) {
+            return user.getEmail();
+        }
+        return targetLabel;
+    }
+
+    private String resolveSummary(String summary, ActivityAction action, String module, AccountUser user) {
+        if ((summary == null || summary.isBlank()) && user != null) {
+            return action.name() + " - " + user.getEmail();
+        }
+        if (user == null || module == null || !module.equalsIgnoreCase("AUTH")) {
+            return normalizeSummary(summary);
+        }
+        String authSummary = normalizeSummary(summary);
+        return switch (action) {
+            case LOGIN -> buildUserAuthSummary(user.getEmail(), authSummary, "đăng nhập");
+            case LOGIN_FAILED -> buildUserAuthSummary(user.getEmail(), authSummary, "đăng nhập thất bại");
+            case LOGOUT -> buildUserAuthSummary(user.getEmail(), authSummary, "đăng xuất");
+            case PASSWORD_CHANGED -> buildUserAuthSummary(user.getEmail(), authSummary, "đổi mật khẩu");
+            default -> authSummary;
+        };
+    }
+
+    private String buildUserAuthSummary(String email, String summary, String fallbackAction) {
+        String actionSummary = firstNonBlank(summary, fallbackAction);
+        if (email == null || email.isBlank()) {
+            return formatSentence(actionSummary);
+        }
+        if (actionSummary.toLowerCase().startsWith(email.toLowerCase())) {
+            return formatSentence(actionSummary);
+        }
+        return email + " " + decapitalizeFirst(actionSummary);
+    }
+
+    private String decapitalizeFirst(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        return trimmed.substring(0, 1).toLowerCase() + trimmed.substring(1);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "N/A";
+    }
+
+    private String buildFallbackSummary(ActivityAction action, String targetType, String targetLabel, String targetId) {
+        String target = firstNonBlank(targetLabel, targetId, targetType, "hệ thống");
+        return formatSentence(toActionLabel(action) + " trên " + target);
+    }
+
+    private String toActionLabel(ActivityAction action) {
+        if (action == null) {
+            return "Không xác định";
+        }
+        return switch (action) {
+            case LOGIN -> "Đăng nhập";
+            case LOGIN_FAILED -> "Đăng nhập thất bại";
+            case LOGOUT -> "Đăng xuất";
+            case PASSWORD_CHANGED -> "Đổi mật khẩu";
+            case CREATE_ACCOUNT -> "Tạo tài khoản";
+            case UPDATE_ACCOUNT -> "Cập nhật tài khoản";
+            case DELETE_ACCOUNT -> "Xóa tài khoản";
+            case LOCK_ACCOUNT -> "Khóa tài khoản";
+            case UNLOCK_ACCOUNT -> "Mở khóa tài khoản";
+            case CHANGE_ROLE -> "Đổi vai trò";
+            case CHANGE_PERMISSION -> "Đổi phân quyền";
+            case CHECKOUT_COMPLETED -> "Đặt hàng thành công";
+            case CHECKOUT_FAILED -> "Đặt hàng thất bại";
+            case PAYMENT_COMPLETED -> "Thanh toán thành công";
+            case PAYMENT_FAILED -> "Thanh toán thất bại";
+            case CREATE_PRODUCT -> "Tạo sản phẩm";
+            case UPDATE_PRODUCT -> "Cập nhật sản phẩm";
+            case DELETE_PRODUCT -> "Xóa sản phẩm";
+            case UPDATE_PRICE -> "Cập nhật giá";
+            case UPDATE_STOCK -> "Cập nhật tồn kho";
+            case IMPORT_STOCK -> "Nhập kho";
+            case EXPORT_STOCK -> "Xuất kho";
+            case UPDATE_ORDER_STATUS -> "Cập nhật đơn hàng";
+            case CANCEL_ORDER -> "Hủy đơn hàng";
+            case CREATE_COUPON -> "Tạo mã giảm giá";
+            case UPDATE_COUPON -> "Cập nhật mã giảm giá";
+            case DELETE_COUPON -> "Xóa mã giảm giá";
+            case ISSUE_VOUCHER -> "Phát voucher";
+            case REVOKE_VOUCHER -> "Thu hồi voucher";
+            case VIEW_LOG_DETAIL -> "Xem chi tiết log";
+            case CLEAR_LOG -> "Xóa log hiển thị";
+            case ARCHIVE_LOG -> "Lưu trữ log";
+            default -> action.name().replace('_', ' ');
+        };
+    }
+
+    private String normalizeSummary(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value
+                .replaceAll("(?i)cap nhat trang thai don hang", "cập nhật trạng thái đơn hàng")
+                .replaceAll("(?i)dieu chinh ton kho", "điều chỉnh tồn kho")
+                .replaceAll("(?i)dang nhap Google", "đăng nhập Google")
+                .replaceAll("(?i)dang nhap he thong", "đăng nhập hệ thống")
+                .replaceAll("(?i)dang xuat he thong", "đăng xuất hệ thống")
+                .replaceAll("(?i)doi mat khau", "đổi mật khẩu")
+                .replaceAll("(?i)khach hang", "khách hàng")
+                .replaceAll("(?i)tai khoan", "tài khoản")
+                .replaceAll("(?i)trang thai", "trạng thái")
+                .replaceAll("(?i)don hang", "đơn hàng")
+                .replaceAll("(?i)ton kho", "tồn kho")
+                .replaceAll("(?i)san pham", "sản phẩm")
+                .replaceAll("(?i)ma giam gia", "mã giảm giá")
+                .replaceAll("(?i)noi bo", "nội bộ")
+                .replaceAll("(?i)chi tiet", "chi tiết")
+                .replaceAll("(?i)danh sach", "danh sách")
+                .replaceAll("(?i)dang hien thi", "đang hiển thị")
+                .replaceAll("(?i)thay doi", "thay đổi")
+                .replaceAll("(?i)vai tro", "vai trò")
+                .replaceAll("(?i)xoa", "xóa")
+                .replaceAll("(?i)tao", "tạo")
+                .replaceAll("(?i)huy", "hủy")
+                .replaceAll("(?i)phat voucher", "phát voucher")
+                .replaceAll("(?i)thu hoi voucher", "thu hồi voucher")
+                .replaceAll("(?i)cap nhat", "cập nhật")
+                .replaceAll("(?i)dang ky", "đăng ký")
+                .replaceAll("(?i)bat/tat", "bật/tắt")
+                .replaceAll("(?i)cua", "của");
+        return formatSentence(normalized);
+    }
+
+    private String formatSentence(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        return trimmed.substring(0, 1).toUpperCase() + trimmed.substring(1);
+    }
+}
