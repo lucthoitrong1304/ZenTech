@@ -51,7 +51,7 @@ public class ProductManagementController {
     }
 
     @PostMapping
-    @TrackActivity(action = ActivityAction.CREATE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.IMPORTANT, summary = "Tạo sản phẩm")
+    @TrackActivity(action = ActivityAction.CREATE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.INFO, summary = "Tạo sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> createProduct(
             @Valid @RequestBody ProductCreateRequest request
     ) {
@@ -59,7 +59,7 @@ public class ProductManagementController {
     }
 
     @PatchMapping("/{productId}")
-    @TrackActivity(action = ActivityAction.UPDATE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật sản phẩm")
+    @TrackActivity(action = ActivityAction.UPDATE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.INFO, summary = "Cập nhật sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> updateProduct(
             @PathVariable UUID productId,
             @Valid @RequestBody ProductUpdateRequest request
@@ -68,7 +68,7 @@ public class ProductManagementController {
     }
 
     @DeleteMapping("/{productId}")
-    @TrackActivity(action = ActivityAction.DELETE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.CRITICAL, summary = "Xóa sản phẩm")
+    @TrackActivity(action = ActivityAction.DELETE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.IMPORTANT, summary = "Xóa sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> deleteProduct(@PathVariable UUID productId) {
         return ResponseEntity.ok(ApiResponse.success(productManagementService.deleteProduct(productId)));
     }

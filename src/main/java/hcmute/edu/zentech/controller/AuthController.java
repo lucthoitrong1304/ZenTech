@@ -20,7 +20,7 @@ public class AuthController {
 
     // --- 1. ĐĂNG KÝ ---
     @PostMapping("/register")
-    @TrackActivity(action = ActivityAction.CREATE_ACCOUNT, area = ActivityArea.CUSTOMER, module = "AUTH", targetType = "ACCOUNT", severity = ActivitySeverity.IMPORTANT, summary = "Khách hàng đăng ký tài khoản")
+    @TrackActivity(action = ActivityAction.CREATE_ACCOUNT, area = ActivityArea.CUSTOMER, module = "AUTH", targetType = "ACCOUNT", severity = ActivitySeverity.INFO, summary = "Khách hàng đăng ký tài khoản")
     public ResponseEntity<String> register(@Valid @RequestBody RegisterRequest request) {
         authService.registerUser(request);
         return ResponseEntity.ok("Đăng ký tài khoản thành công!");

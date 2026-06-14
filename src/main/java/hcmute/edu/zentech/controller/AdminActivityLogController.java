@@ -6,6 +6,9 @@ import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import hcmute.edu.zentech.service.AdminActivityLogService;
+import hcmute.edu.zentech.model.ActivityAction;
+import hcmute.edu.zentech.model.ActivityArea;
+import hcmute.edu.zentech.model.ActivitySeverity;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,12 +32,27 @@ public class AdminActivityLogController {
     public ResponseEntity<ApiResponse<PageResponse<ActivityLogResponseDto>>> getActivityLogs(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "10") int size,
-            @RequestParam(value = "search", required = false, defaultValue = "") String search
+            @RequestParam(value = "search", required = false, defaultValue = "") String search,
+            @RequestParam(value = "area", required = false) ActivityArea area,
+            @RequestParam(value = "severity", required = false) ActivitySeverity severity,
+            @RequestParam(value = "module", required = false) String module,
+            @RequestParam(value = "action", required = false) ActivityAction action
     ) {
-        log.info("Request query activity logs received. page={}, size={}, search={}", page, size, search);
+        log.info("Request query activity logs received. page={}, size={}, search={}, area={}, severity={}, module={}, action={}", 
+                page, size, search, area, severity, module, action);
         return ResponseEntity.ok(ApiResponse.success(
-                activityLogService.getActivityLogs(page, size, search)
+                activityLogService.getActivityLogs(page, size, search, area, severity, module, action)
         ));
+    }
+
+    @GetMapping("/modules")
+    public ResponseEntity<ApiResponse<java.util.List<String>>> getDistinctModules() {
+        return ResponseEntity.ok(ApiResponse.success(activityLogService.getDistinctModules()));
+    }
+
+    @GetMapping("/actions")
+    public ResponseEntity<ApiResponse<java.util.List<ActivityAction>>> getDistinctActions() {
+        return ResponseEntity.ok(ApiResponse.success(activityLogService.getDistinctActions()));
     }
 
     @PostMapping("/record")
