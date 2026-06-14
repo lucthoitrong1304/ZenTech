@@ -29,6 +29,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -130,16 +131,61 @@ public class AdminActivityLogService {
         }
     }
 
-    public PageResponse<ActivityLogResponseDto> getActivityLogs(int page, int size, String search) {
+    public PageResponse<ActivityLogResponseDto> getActivityLogs(
+            int page,
+            int size,
+            String search,
+            ActivityArea area,
+            ActivitySeverity severity,
+            String module,
+            ActivityAction action
+    ) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         String preprocessedSearch = preprocessSearchTerm(search);
-        Page<ActivityLog> logPage = activityLogRepository.searchLogs(preprocessedSearch, pageable);
+        Page<ActivityLog> logPage = activityLogRepository.searchLogs(
+                preprocessedSearch,
+                area,
+                severity,
+                module,
+                action,
+                pageable
+        );
+
+        List<UUID> userIds = logPage.getContent().stream()
+                .map(ActivityLog::getUser)
+                .filter(java.util.Objects::nonNull)
+                .map(AccountUser::getId)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<UUID, Customer> customerMap = new java.util.HashMap<>();
+        Map<UUID, Employee> employeeMap = new java.util.HashMap<>();
+
+        if (!userIds.isEmpty()) {
+            customerRepository.findByUserInfo_IdIn(userIds).forEach(c -> {
+                if (c.getUserInfo() != null) {
+                    customerMap.put(c.getUserInfo().getId(), c);
+                }
+            });
+            employeeRepository.findByUserInfo_IdIn(userIds).forEach(e -> {
+                if (e.getUserInfo() != null) {
+                    employeeMap.put(e.getUserInfo().getId(), e);
+                }
+            });
+        }
+
+        final Map<UUID, Customer> finalCustMap = customerMap;
+        final Map<UUID, Employee> finalEmpMap = employeeMap;
 
         List<ActivityLogResponseDto> dtoList = logPage.getContent().stream()
-                .map(this::mapToDto)
+                .map(log -> mapToDto(log, finalCustMap, finalEmpMap))
                 .collect(Collectors.toList());
 
         return PageResponse.from(logPage, dtoList);
+    }
+
+    public PageResponse<ActivityLogResponseDto> getActivityLogs(int page, int size, String search) {
+        return getActivityLogs(page, size, search, null, null, null, null);
     }
 
     private HttpServletRequest getCurrentRequest() {
@@ -183,6 +229,14 @@ public class AdminActivityLogService {
     }
 
     private ActivityLogResponseDto mapToDto(ActivityLog activityLog) {
+        return mapToDto(activityLog, null, null);
+    }
+
+    private ActivityLogResponseDto mapToDto(
+            ActivityLog activityLog,
+            Map<UUID, Customer> customerMap,
+            Map<UUID, Employee> employeeMap
+    ) {
         String email = "anonymous@zentech.local";
         String fullName = "Anonymous";
         String avatar = null;
@@ -193,28 +247,52 @@ public class AdminActivityLogService {
             
             if (activityLog.getArea() == hcmute.edu.zentech.model.ActivityArea.CUSTOMER) {
                 // If it is customer area, search in Customer first
-                Optional<Customer> custOpt = customerRepository.findByUserInfo_Id(accountId);
-                if (custOpt.isPresent()) {
-                    fullName = custOpt.get().getFullName();
-                    avatar = custOpt.get().getImageUrl();
+                Customer cust = customerMap != null ? customerMap.get(accountId) : null;
+                if (cust != null) {
+                    fullName = cust.getFullName();
+                    avatar = cust.getImageUrl();
                 } else {
-                    Optional<Employee> empOpt = employeeRepository.findByUserInfo_Id(accountId);
-                    if (empOpt.isPresent()) {
-                        fullName = empOpt.get().getFullName();
-                        avatar = empOpt.get().getImageUrl();
+                    Employee emp = employeeMap != null ? employeeMap.get(accountId) : null;
+                    if (emp != null) {
+                        fullName = emp.getFullName();
+                        avatar = emp.getImageUrl();
+                    } else {
+                        Optional<Customer> custOpt = customerRepository.findByUserInfo_Id(accountId);
+                        if (custOpt.isPresent()) {
+                            fullName = custOpt.get().getFullName();
+                            avatar = custOpt.get().getImageUrl();
+                        } else {
+                            Optional<Employee> empOpt = employeeRepository.findByUserInfo_Id(accountId);
+                            if (empOpt.isPresent()) {
+                                fullName = empOpt.get().getFullName();
+                                avatar = empOpt.get().getImageUrl();
+                            }
+                        }
                     }
                 }
             } else {
                 // Otherwise (MANAGEMENT, ADMIN, SYSTEM), search in Employee first
-                Optional<Employee> empOpt = employeeRepository.findByUserInfo_Id(accountId);
-                if (empOpt.isPresent()) {
-                    fullName = empOpt.get().getFullName();
-                    avatar = empOpt.get().getImageUrl();
+                Employee emp = employeeMap != null ? employeeMap.get(accountId) : null;
+                if (emp != null) {
+                    fullName = emp.getFullName();
+                    avatar = emp.getImageUrl();
                 } else {
-                    Optional<Customer> custOpt = customerRepository.findByUserInfo_Id(accountId);
-                    if (custOpt.isPresent()) {
-                        fullName = custOpt.get().getFullName();
-                        avatar = custOpt.get().getImageUrl();
+                    Customer cust = customerMap != null ? customerMap.get(accountId) : null;
+                    if (cust != null) {
+                        fullName = cust.getFullName();
+                        avatar = cust.getImageUrl();
+                    } else {
+                        Optional<Employee> empOpt = employeeRepository.findByUserInfo_Id(accountId);
+                        if (empOpt.isPresent()) {
+                            fullName = empOpt.get().getFullName();
+                            avatar = empOpt.get().getImageUrl();
+                        } else {
+                            Optional<Customer> custOpt = customerRepository.findByUserInfo_Id(accountId);
+                            if (custOpt.isPresent()) {
+                                fullName = custOpt.get().getFullName();
+                                avatar = custOpt.get().getImageUrl();
+                            }
+                        }
                     }
                 }
             }
@@ -262,6 +340,14 @@ public class AdminActivityLogService {
                 .userAgent(activityLog.getUserAgent())
                 .timestamp(activityLog.getCreatedAt())
                 .build();
+    }
+
+    public List<String> getDistinctModules() {
+        return activityLogRepository.findDistinctModules();
+    }
+
+    public List<hcmute.edu.zentech.model.ActivityAction> getDistinctActions() {
+        return activityLogRepository.findDistinctActions();
     }
 
     private void publishRealtimeActivityLog(ActivityLog activityLog) {

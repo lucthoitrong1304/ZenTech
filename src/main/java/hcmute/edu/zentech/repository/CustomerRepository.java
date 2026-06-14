@@ -56,4 +56,8 @@ public interface CustomerRepository extends JpaRepository<Customer, UUID> {
 
     @EntityGraph(attributePaths = {"userInfo"})
     java.util.List<Customer> findByUserInfo_Role(Role role);
+
+    @EntityGraph(attributePaths = {"userInfo"})
+    java.util.List<Customer> findByUserInfo_IdIn(java.util.List<java.util.UUID> accountIds);
 }
+

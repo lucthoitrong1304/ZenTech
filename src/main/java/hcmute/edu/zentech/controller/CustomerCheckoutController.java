@@ -24,7 +24,7 @@ public class CustomerCheckoutController {
     private final CheckoutService checkoutService;
 
     @PostMapping("/checkout")
-    @TrackActivity(action = ActivityAction.CHECKOUT_COMPLETED, failureAction = ActivityAction.CHECKOUT_FAILED, area = ActivityArea.CUSTOMER, module = "CHECKOUT", targetType = "ORDER", severity = ActivitySeverity.CRITICAL, summary = "Khách hàng đặt hàng", logOnFailure = true)
+    @TrackActivity(action = ActivityAction.CHECKOUT_COMPLETED, failureAction = ActivityAction.CHECKOUT_FAILED, area = ActivityArea.CUSTOMER, module = "CHECKOUT", targetType = "ORDER", severity = ActivitySeverity.INFO, summary = "Khách hàng đặt hàng", logOnFailure = true)
     public ResponseEntity<ApiResponse<CheckoutResponse>> checkout(
             @Valid @RequestBody CheckoutRequest request,
             HttpServletRequest httpServletRequest

@@ -73,7 +73,7 @@ public class OrderManagementController {
     }
 
     @DeleteMapping("/{orderId}")
-    @TrackActivity(action = ActivityAction.CANCEL_ORDER, area = ActivityArea.MANAGEMENT, module = "ORDER", targetType = "ORDER", severity = ActivitySeverity.CRITICAL, summary = "Hủy đơn hàng")
+    @TrackActivity(action = ActivityAction.CANCEL_ORDER, area = ActivityArea.MANAGEMENT, module = "ORDER", targetType = "ORDER", severity = ActivitySeverity.IMPORTANT, summary = "Hủy đơn hàng")
     public ResponseEntity<ApiResponse<OrderManagementDetailResponse>> cancelOrder(@PathVariable UUID orderId) {
         return ResponseEntity.ok(ApiResponse.success(orderManagementService.cancelOrder(orderId)));
     }
