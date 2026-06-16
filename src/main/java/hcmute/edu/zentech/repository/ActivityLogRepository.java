@@ -50,5 +50,7 @@ public interface ActivityLogRepository extends JpaRepository<ActivityLog, UUID> 
 
     @Query("SELECT DISTINCT a.action FROM ActivityLog a ORDER BY a.action")
     java.util.List<hcmute.edu.zentech.model.ActivityAction> findDistinctActions();
+
+    java.util.List<ActivityLog> findByUserOrderByCreatedAtDesc(hcmute.edu.zentech.model.AccountUser user);
 }
 
