@@ -82,6 +82,12 @@ public class AdminTicketService {
             ticketRepository.findByIncidentId(incident.getId()).ifPresent(existingTicket -> {
                 throw new IllegalStateException("Sự cố này đã được liên kết với Ticket: " + existingTicket.getCode());
             });
+            if (incident.getUser() != null) {
+                createdBy = incident.getUser();
+            }
+            if (incident.getAssignee() != null && !incident.getAssignee().isBlank() && assignee == null) {
+                assignee = accountUserRepository.findByEmailIgnoreCase(incident.getAssignee().trim()).orElse(null);
+            }
         }
 
         Ticket ticket = Ticket.builder()

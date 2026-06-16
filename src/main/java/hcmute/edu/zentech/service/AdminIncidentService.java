@@ -105,6 +105,7 @@ public class AdminIncidentService {
         IncidentResponseDto response = incidentMapper.toResponseDto(saved, null, null);
         try {
             messagingTemplate.convertAndSend("/topic/admin.incidents", response);
+            messagingTemplate.convertAndSend("/topic/admin.incidents.new", response);
         } catch (Exception e) {
             log.error("Failed to send websocket notification for incident: {}", saved.getCode(), e);
         }
@@ -190,6 +191,7 @@ public class AdminIncidentService {
         try {
             IncidentResponseDto response = incidentMapper.toResponseDto(saved, null, null);
             messagingTemplate.convertAndSend("/topic/admin.incidents", response);
+            messagingTemplate.convertAndSend("/topic/admin.incidents.new", response);
         } catch (Exception e) {
             log.error("Failed to send websocket notification for automatically created incident: {}", saved.getCode(), e);
         }
