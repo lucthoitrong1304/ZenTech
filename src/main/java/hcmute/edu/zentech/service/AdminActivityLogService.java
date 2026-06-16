@@ -18,6 +18,7 @@ import hcmute.edu.zentech.security.SecurityContextUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -85,6 +86,7 @@ public class AdminActivityLogService {
             HttpServletRequest request = getCurrentRequest();
             String ipAddress = getClientIp(request);
             String userAgent = getUserAgent(request);
+            String traceId = trim(MDC.get("traceId"), 64);
 
             String safeSummary = trim(sanitizeText(effectiveSummary), 1000);
             String safeDescription = trim(sanitizeText(effectiveSummary), 1000);
@@ -120,6 +122,7 @@ public class AdminActivityLogService {
                     .metadata(safeMetadata)
                     .ipAddress(ipAddress)
                     .userAgent(safeUserAgent)
+                    .traceId(traceId)
                     .createdAt(Instant.now())
                     .build();
 
@@ -138,7 +141,9 @@ public class AdminActivityLogService {
             ActivityArea area,
             ActivitySeverity severity,
             String module,
-            ActivityAction action
+            ActivityAction action,
+            Instant from,
+            Instant to
     ) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         String preprocessedSearch = preprocessSearchTerm(search);
@@ -148,6 +153,8 @@ public class AdminActivityLogService {
                 severity,
                 module,
                 action,
+                from,
+                to,
                 pageable
         );
 
@@ -185,7 +192,62 @@ public class AdminActivityLogService {
     }
 
     public PageResponse<ActivityLogResponseDto> getActivityLogs(int page, int size, String search) {
-        return getActivityLogs(page, size, search, null, null, null, null);
+        return getActivityLogs(page, size, search, null, null, null, null, null, null);
+    }
+
+    public PageResponse<ActivityLogResponseDto> getActivityTimeline(
+            UUID userId,
+            String email,
+            Instant from,
+            Instant to,
+            int page,
+            int size,
+            ActivitySeverity severity,
+            String module,
+            ActivityAction action
+    ) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "createdAt"));
+        Page<ActivityLog> logPage = activityLogRepository.searchTimeline(
+                userId,
+                email,
+                from,
+                to,
+                severity,
+                module,
+                action,
+                pageable
+        );
+
+        List<UUID> userIds = logPage.getContent().stream()
+                .map(ActivityLog::getUser)
+                .filter(java.util.Objects::nonNull)
+                .map(AccountUser::getId)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<UUID, Customer> customerMap = new java.util.HashMap<>();
+        Map<UUID, Employee> employeeMap = new java.util.HashMap<>();
+
+        if (!userIds.isEmpty()) {
+            customerRepository.findByUserInfo_IdIn(userIds).forEach(c -> {
+                if (c.getUserInfo() != null) {
+                    customerMap.put(c.getUserInfo().getId(), c);
+                }
+            });
+            employeeRepository.findByUserInfo_IdIn(userIds).forEach(e -> {
+                if (e.getUserInfo() != null) {
+                    employeeMap.put(e.getUserInfo().getId(), e);
+                }
+            });
+        }
+
+        Map<UUID, Customer> finalCustomerMap = customerMap;
+        Map<UUID, Employee> finalEmployeeMap = employeeMap;
+        List<ActivityLogResponseDto> dtoList = logPage.getContent().stream()
+                .map(log -> mapToDto(log, finalCustomerMap, finalEmployeeMap))
+                .collect(Collectors.toList());
+
+        return PageResponse.from(logPage, dtoList);
     }
 
     private HttpServletRequest getCurrentRequest() {
@@ -338,6 +400,7 @@ public class AdminActivityLogService {
                 .metadata(activityLog.getMetadata())
                 .ipAddress(activityLog.getIpAddress())
                 .userAgent(activityLog.getUserAgent())
+                .traceId(activityLog.getTraceId())
                 .timestamp(activityLog.getCreatedAt())
                 .build();
     }
@@ -424,7 +487,6 @@ public class AdminActivityLogService {
             default -> authSummary;
         };
     }
-
     private String buildUserAuthSummary(String email, String summary, String fallbackAction) {
         String actionSummary = firstNonBlank(summary, fallbackAction);
         if (email == null || email.isBlank()) {
@@ -467,6 +529,9 @@ public class AdminActivityLogService {
             case LOGIN_FAILED -> "Đăng nhập thất bại";
             case LOGOUT -> "Đăng xuất";
             case PASSWORD_CHANGED -> "Đổi mật khẩu";
+            case PASSWORD_RESET_REQUESTED -> "Yêu cầu đặt lại mật khẩu";
+            case PASSWORD_RESET_COMPLETED -> "Đặt lại mật khẩu";
+            case ACCESS_DENIED -> "Từ chối truy cập";
             case CREATE_ACCOUNT -> "Tạo tài khoản";
             case UPDATE_ACCOUNT -> "Cập nhật tài khoản";
             case DELETE_ACCOUNT -> "Xóa tài khoản";
@@ -474,30 +539,52 @@ public class AdminActivityLogService {
             case UNLOCK_ACCOUNT -> "Mở khóa tài khoản";
             case CHANGE_ROLE -> "Đổi vai trò";
             case CHANGE_PERMISSION -> "Đổi phân quyền";
+            case CHECKOUT_STARTED -> "Bắt đầu đặt hàng";
             case CHECKOUT_COMPLETED -> "Đặt hàng thành công";
             case CHECKOUT_FAILED -> "Đặt hàng thất bại";
+            case PAYMENT_STARTED -> "Bắt đầu thanh toán";
             case PAYMENT_COMPLETED -> "Thanh toán thành công";
             case PAYMENT_FAILED -> "Thanh toán thất bại";
+            case ORDER_CANCELLED_BY_CUSTOMER -> "Khách hủy đơn hàng";
+            case REVIEW_CREATED -> "Tạo đánh giá";
+            case REVIEW_UPDATED -> "Cập nhật đánh giá";
+            case REVIEW_DELETED -> "Xóa đánh giá";
             case CREATE_PRODUCT -> "Tạo sản phẩm";
             case UPDATE_PRODUCT -> "Cập nhật sản phẩm";
             case DELETE_PRODUCT -> "Xóa sản phẩm";
+            case UPDATE_PRODUCT_STATUS -> "Cập nhật trạng thái sản phẩm";
             case UPDATE_PRICE -> "Cập nhật giá";
             case UPDATE_STOCK -> "Cập nhật tồn kho";
             case IMPORT_STOCK -> "Nhập kho";
             case EXPORT_STOCK -> "Xuất kho";
-            case UPDATE_ORDER_STATUS -> "Cập nhật đơn hàng";
-            case CANCEL_ORDER -> "Hủy đơn hàng";
             case CREATE_COUPON -> "Tạo mã giảm giá";
             case UPDATE_COUPON -> "Cập nhật mã giảm giá";
             case DELETE_COUPON -> "Xóa mã giảm giá";
             case ISSUE_VOUCHER -> "Phát voucher";
             case REVOKE_VOUCHER -> "Thu hồi voucher";
+            case UPDATE_ORDER_STATUS -> "Cập nhật đơn hàng";
+            case CANCEL_ORDER -> "Hủy đơn hàng";
+            case ASSIGN_ORDER -> "Phân công đơn hàng";
+            case CREATE_EMPLOYEE -> "Tạo nhân viên";
+            case UPDATE_EMPLOYEE -> "Cập nhật nhân viên";
+            case DELETE_EMPLOYEE -> "Xóa nhân viên";
+            case UPDATE_SHIFT -> "Cập nhật ca làm";
+            case CHECK_IN -> "Chấm công vào";
+            case CHECK_OUT -> "Chấm công ra";
+            case CREATE_TICKET -> "Tạo ticket";
+            case UPDATE_TICKET_STATUS -> "Cập nhật trạng thái ticket";
+            case ASSIGN_TICKET -> "Gán ticket";
+            case REPLY_TICKET -> "Phản hồi ticket";
+            case CLOSE_TICKET -> "Đóng ticket";
+            case STAFF_JOIN_CHAT -> "Nhân viên vào chat";
+            case STAFF_LEAVE_CHAT -> "Nhân viên rời chat";
             case VIEW_LOG_DETAIL -> "Xem chi tiết log";
-            case CLEAR_LOG -> "Xóa log hiển thị";
+            case EXPORT_LOG -> "Xuất log";
             case ARCHIVE_LOG -> "Lưu trữ log";
-            case CREATE_PRODUCT_GROUP -> "Tạo nhóm sản phẩm";
-            case UPDATE_PRODUCT_GROUP -> "Cập nhật nhóm sản phẩm";
-            case DELETE_PRODUCT_GROUP -> "Xóa nhóm sản phẩm";
+            case CLEAR_LOG -> "Xóa log hiển thị";
+            case CREATE_INCIDENT -> "Tạo sự cố";
+            case UPDATE_INCIDENT -> "Cập nhật sự cố";
+            case RESOLVE_INCIDENT -> "Xử lý sự cố";
             case CREATE_AI_AGENT -> "Tạo AI agent";
             case UPDATE_AI_AGENT -> "Cập nhật AI agent";
             case DELETE_AI_AGENT -> "Xóa AI agent";
@@ -507,6 +594,7 @@ public class AdminActivityLogService {
             case DELETE_AI_DATASET -> "Xóa bộ dữ liệu AI";
             case UPLOAD_AI_DOCUMENT -> "Tải lên tài liệu AI";
             case DELETE_AI_DOCUMENT -> "Xóa tài liệu AI";
+            case UPDATE_SYSTEM_SETTING -> "Cập nhật cấu hình hệ thống";
             default -> action.name().replace('_', ' ');
         };
     }
@@ -560,8 +648,7 @@ public class AdminActivityLogService {
             return search;
         }
         String clean = search.trim().toLowerCase();
-        
-        // Map Area labels
+
         if (clean.contains("nội bộ") || clean.contains("noi bo")) {
             return "MANAGEMENT";
         }
@@ -574,8 +661,6 @@ public class AdminActivityLogService {
         if (clean.equals("admin")) {
             return "ADMIN";
         }
-        
-        // Map Severity labels
         if (clean.contains("quan trọng") || clean.contains("quan trong")) {
             return "IMPORTANT";
         }
@@ -588,7 +673,7 @@ public class AdminActivityLogService {
         if (clean.contains("thông tin") || clean.contains("thong tin")) {
             return "INFO";
         }
-        
+
         return search;
     }
 }

@@ -31,5 +31,6 @@ public class ActivityLogResponseDto {
     private String metadata;
     private String ipAddress;
     private String userAgent;
+    private String traceId;
     private Instant timestamp;
 }
