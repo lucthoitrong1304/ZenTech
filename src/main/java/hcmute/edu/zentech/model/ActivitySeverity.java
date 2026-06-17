@@ -4,5 +4,6 @@ public enum ActivitySeverity {
     INFO,
     IMPORTANT,
     SECURITY,
-    CRITICAL
+    CRITICAL,
+    WARNING
 }
