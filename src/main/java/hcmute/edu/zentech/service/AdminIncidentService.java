@@ -6,11 +6,15 @@ import hcmute.edu.zentech.dto.response.AiAnalysisResponseDto;
 import hcmute.edu.zentech.dto.response.IncidentResponseDto;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.IncidentMapper;
+import hcmute.edu.zentech.mapper.TicketMapper;
+import hcmute.edu.zentech.dto.response.TicketResponseDto;
 import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -33,6 +37,7 @@ public class AdminIncidentService {
     private final AiAnalysisRepository aiAnalysisRepository;
     private final AccountUserRepository accountUserRepository;
     private final IncidentMapper incidentMapper;
+    private final TicketMapper ticketMapper;
     private final LokiService lokiService;
     private final SimpMessagingTemplate messagingTemplate;
 
@@ -47,25 +52,25 @@ public class AdminIncidentService {
         return String.format("INC-%04d", count + 1);
     }
 
-    public List<IncidentResponseDto> getIncidents(IncidentStatus status) {
-        List<Incident> incidents;
-        if (status == null) {
-            incidents = incidentRepository.findAll();
-            // Sort by createdAt desc
-            incidents.sort((a, b) -> b.getCreatedAt().compareTo(a.getCreatedAt()));
-        } else {
-            incidents = incidentRepository.findByStatusOrderByCreatedAtDesc(status);
-        }
-
-        return incidents.stream()
-                .map(incident -> {
-                    AiAnalysis analysis = aiAnalysisRepository.findByIncidentId(incident.getId()).orElse(null);
-                    String ticketCode = ticketRepository.findByIncidentId(incident.getId())
-                            .map(Ticket::getCode)
-                            .orElse(null);
-                    return incidentMapper.toResponseDto(incident, analysis, ticketCode);
-                })
-                .collect(Collectors.toList());
+    public Page<IncidentResponseDto> getIncidents(
+            IncidentStatus status,
+            IncidentSeverity severity,
+            String assignee,
+            Instant startDate,
+            Instant endDate,
+            String search,
+            Pageable pageable
+    ) {
+        Page<Incident> incidents = incidentRepository.searchIncidents(
+                status, severity, assignee, startDate, endDate, search, pageable
+        );
+        return incidents.map(incident -> {
+            AiAnalysis analysis = aiAnalysisRepository.findByIncidentId(incident.getId()).orElse(null);
+            String ticketCode = ticketRepository.findByIncidentId(incident.getId())
+                    .map(Ticket::getCode)
+                    .orElse(null);
+            return incidentMapper.toResponseDto(incident, analysis, ticketCode);
+        });
     }
 
     public IncidentResponseDto getIncidentById(UUID id) {
@@ -139,7 +144,28 @@ public class AdminIncidentService {
             incident.setSeverity(request.getSeverity());
         }
         if (request.getAssignee() != null) {
-            incident.setAssignee(request.getAssignee());
+            String newAssigneeEmail = request.getAssignee().trim();
+            incident.setAssignee(newAssigneeEmail.isEmpty() ? null : newAssigneeEmail);
+
+            // Đồng bộ sang Ticket liên kết nếu có
+            ticketRepository.findByIncidentId(incident.getId()).ifPresent(ticket -> {
+                AccountUser ticketAssignee = null;
+                if (!newAssigneeEmail.isEmpty() && !newAssigneeEmail.equalsIgnoreCase("UNASSIGNED")) {
+                    ticketAssignee = accountUserRepository.findByEmailIgnoreCase(newAssigneeEmail).orElse(null);
+                }
+                if (!java.util.Objects.equals(ticket.getAssignee(), ticketAssignee)) {
+                    ticket.setAssignee(ticketAssignee);
+                    ticketRepository.save(ticket);
+                    log.info("Synchronized assignee from Incident {} to Ticket {}", incident.getCode(), ticket.getCode());
+                    // Gửi websocket cập nhật ticket
+                    try {
+                        TicketResponseDto tckDto = ticketMapper.toResponseDto(ticket);
+                        messagingTemplate.convertAndSend("/topic/admin.tickets", tckDto);
+                    } catch (Exception e) {
+                        log.error("Failed to send ticket update websocket notification", e);
+                    }
+                }
+            });
         }
 
         Incident saved = incidentRepository.save(incident);

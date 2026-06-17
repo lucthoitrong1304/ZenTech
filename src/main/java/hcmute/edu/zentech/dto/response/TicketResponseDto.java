@@ -5,7 +5,6 @@ import hcmute.edu.zentech.model.TicketStatus;
 import lombok.*;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -30,5 +29,4 @@ public class TicketResponseDto {
     private String createdByEmail;
     private Instant createdAt;
     private Instant resolvedAt;
-    private List<TicketMessageResponseDto> messages;
 }

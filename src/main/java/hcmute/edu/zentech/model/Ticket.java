@@ -4,7 +4,6 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -54,9 +53,6 @@ public class Ticket {
 
     @Column(name = "resolved_at")
     private Instant resolvedAt;
-
-    @OneToMany(mappedBy = "ticket", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private List<TicketMessage> messages;
 
     @PrePersist
     protected void onCreate() {
