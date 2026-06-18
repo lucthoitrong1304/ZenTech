@@ -38,4 +38,13 @@ public class EmployeeSelfController {
                 .message("Đăng ký khuôn mặt thành công.")
                 .build());
     }
+
+    @DeleteMapping("/face")
+    public ResponseEntity<ApiResponse<Void>> deleteFace() {
+        employeeSelfService.deleteFace();
+        return ResponseEntity.ok(ApiResponse.<Void>builder()
+                .success(true)
+                .message("Xóa khuôn mặt thành công.")
+                .build());
+    }
 }
