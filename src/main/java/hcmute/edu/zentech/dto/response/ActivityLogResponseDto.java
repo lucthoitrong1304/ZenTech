@@ -3,6 +3,7 @@ package hcmute.edu.zentech.dto.response;
 import hcmute.edu.zentech.model.ActivityAction;
 import hcmute.edu.zentech.model.ActivityArea;
 import hcmute.edu.zentech.model.ActivitySeverity;
+import hcmute.edu.zentech.model.Role;
 import lombok.*;
 
 import java.time.Instant;
@@ -18,6 +19,7 @@ public class ActivityLogResponseDto {
     private String operatorEmail;
     private String operatorFullName;
     private String operatorAvatar;
+    private Role operatorRole;
     private ActivityArea area;
     private String module;
     private ActivityAction action;
@@ -31,5 +33,6 @@ public class ActivityLogResponseDto {
     private String metadata;
     private String ipAddress;
     private String userAgent;
+    private String traceId;
     private Instant timestamp;
 }

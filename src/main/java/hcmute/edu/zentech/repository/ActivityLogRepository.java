@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Repository
@@ -22,6 +23,8 @@ public interface ActivityLogRepository extends JpaRepository<ActivityLog, UUID> 
            "(:severity IS NULL OR a.severity = :severity) AND " +
            "(:module IS NULL OR :module = '' OR a.module = :module) AND " +
            "(:action IS NULL OR a.action = :action) AND " +
+           "(:from IS NULL OR a.createdAt >= :from) AND " +
+           "(:to IS NULL OR a.createdAt <= :to) AND " +
            "(:search IS NULL OR :search = '' OR " +
            "LOWER(u.email) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
            "LOWER(e.fullName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
@@ -39,6 +42,29 @@ public interface ActivityLogRepository extends JpaRepository<ActivityLog, UUID> 
     Page<ActivityLog> searchLogs(
             @Param("search") String search,
             @Param("area") hcmute.edu.zentech.model.ActivityArea area,
+            @Param("severity") hcmute.edu.zentech.model.ActivitySeverity severity,
+            @Param("module") String module,
+            @Param("action") hcmute.edu.zentech.model.ActivityAction action,
+            @Param("from") Instant from,
+            @Param("to") Instant to,
+            Pageable pageable
+    );
+
+    @Query("SELECT a FROM ActivityLog a " +
+           "LEFT JOIN a.user u " +
+           "WHERE " +
+           "(:userId IS NULL OR u.id = :userId) AND " +
+           "(:email IS NULL OR :email = '' OR LOWER(u.email) LIKE LOWER(CONCAT('%', :email, '%'))) AND " +
+           "(:from IS NULL OR a.createdAt >= :from) AND " +
+           "(:to IS NULL OR a.createdAt <= :to) AND " +
+           "(:severity IS NULL OR a.severity = :severity) AND " +
+           "(:module IS NULL OR :module = '' OR a.module = :module) AND " +
+           "(:action IS NULL OR a.action = :action)")
+    Page<ActivityLog> searchTimeline(
+            @Param("userId") UUID userId,
+            @Param("email") String email,
+            @Param("from") Instant from,
+            @Param("to") Instant to,
             @Param("severity") hcmute.edu.zentech.model.ActivitySeverity severity,
             @Param("module") String module,
             @Param("action") hcmute.edu.zentech.model.ActivityAction action,

@@ -1,7 +1,9 @@
 package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.request.ActivityLogRecordRequest;
+import hcmute.edu.zentech.dto.request.ActivityTimelineSummaryRequest;
 import hcmute.edu.zentech.dto.response.ActivityLogResponseDto;
+import hcmute.edu.zentech.dto.response.ActivityTimelineSummaryResponse;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.security.SecurityContextUtils;
@@ -12,6 +14,7 @@ import hcmute.edu.zentech.model.ActivitySeverity;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,6 +22,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.Instant;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/admin/activity-logs")
@@ -36,12 +42,31 @@ public class AdminActivityLogController {
             @RequestParam(value = "area", required = false) ActivityArea area,
             @RequestParam(value = "severity", required = false) ActivitySeverity severity,
             @RequestParam(value = "module", required = false) String module,
+            @RequestParam(value = "action", required = false) ActivityAction action,
+            @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to
+    ) {
+        log.info("Request query activity logs received. page={}, size={}, search={}, area={}, severity={}, module={}, action={}, from={}, to={}",
+                page, size, search, area, severity, module, action, from, to);
+        return ResponseEntity.ok(ApiResponse.success(
+                activityLogService.getActivityLogs(page, size, search, area, severity, module, action, from, to)
+        ));
+    }
+
+    @GetMapping("/timeline")
+    public ResponseEntity<ApiResponse<PageResponse<ActivityLogResponseDto>>> getActivityTimeline(
+            @RequestParam(value = "userId", required = false) UUID userId,
+            @RequestParam(value = "email", required = false, defaultValue = "") String email,
+            @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "50") int size,
+            @RequestParam(value = "severity", required = false) ActivitySeverity severity,
+            @RequestParam(value = "module", required = false) String module,
             @RequestParam(value = "action", required = false) ActivityAction action
     ) {
-        log.info("Request query activity logs received. page={}, size={}, search={}, area={}, severity={}, module={}, action={}", 
-                page, size, search, area, severity, module, action);
         return ResponseEntity.ok(ApiResponse.success(
-                activityLogService.getActivityLogs(page, size, search, area, severity, module, action)
+                activityLogService.getActivityTimeline(userId, email, from, to, page, size, severity, module, action)
         ));
     }
 
@@ -53,6 +78,13 @@ public class AdminActivityLogController {
     @GetMapping("/actions")
     public ResponseEntity<ApiResponse<java.util.List<ActivityAction>>> getDistinctActions() {
         return ResponseEntity.ok(ApiResponse.success(activityLogService.getDistinctActions()));
+    }
+
+    @PostMapping("/timeline/summary")
+    public ResponseEntity<ApiResponse<ActivityTimelineSummaryResponse>> summarizeTimeline(
+            @RequestBody ActivityTimelineSummaryRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(activityLogService.summarizeTimeline(request)));
     }
 
     @PostMapping("/record")
