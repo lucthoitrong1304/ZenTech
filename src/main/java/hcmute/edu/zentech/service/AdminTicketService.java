@@ -33,6 +33,29 @@ public class AdminTicketService {
     private final TicketMapper ticketMapper;
     private final IncidentMapper incidentMapper;
     private final SimpMessagingTemplate messagingTemplate;
+    private final AdminActivityLogService activityLogService;
+    private final ActivityLogRepository activityLogRepository;
+
+    private java.util.List<String> getAffectedUserEmails(Ticket ticket) {
+        java.util.Set<String> emails = new java.util.LinkedHashSet<>();
+        if (ticket.getCreatedBy() != null && ticket.getCreatedBy().getRole() == Role.CUSTOMER && ticket.getCreatedBy().getEmail() != null) {
+            emails.add(ticket.getCreatedBy().getEmail());
+        }
+        if (ticket.getIncident() != null) {
+            Incident incident = ticket.getIncident();
+            if (incident.getUser() != null && incident.getUser().getRole() == Role.CUSTOMER && incident.getUser().getEmail() != null) {
+                emails.add(incident.getUser().getEmail());
+            }
+            UUID incidentId = incident.getId();
+            try {
+                java.util.List<String> systemUserEmails = activityLogRepository.findUserEmailsByTargetTypeAndTargetIdAndSystemArea("Incident", incidentId.toString());
+                emails.addAll(systemUserEmails);
+            } catch (Exception e) {
+                log.error("Failed to fetch affected user emails for linked incident: {}", e.getMessage());
+            }
+        }
+        return new java.util.ArrayList<>(emails);
+    }
 
     private synchronized String generateTicketCode() {
         long count = ticketRepository.countAllTickets();
@@ -51,13 +74,13 @@ public class AdminTicketService {
         Page<Ticket> tickets = ticketRepository.searchTickets(
                 status, priority, assigneeEmail, startDate, endDate, search, pageable
         );
-        return tickets.map(ticketMapper::toResponseDto);
+        return tickets.map(ticket -> ticketMapper.toResponseDto(ticket, getAffectedUserEmails(ticket)));
     }
 
     public TicketResponseDto getTicketById(UUID id) {
         Ticket ticket = ticketRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Ticket hỗ trợ với ID: " + id));
-        return ticketMapper.toResponseDto(ticket);
+        return ticketMapper.toResponseDto(ticket, getAffectedUserEmails(ticket));
     }
 
     @Transactional
@@ -122,7 +145,40 @@ public class AdminTicketService {
         }
 
         Ticket saved = ticketRepository.save(ticket);
-        TicketResponseDto response = ticketMapper.toResponseDto(saved);
+        
+        // Ghi log hoạt động tạo ticket mới
+        activityLogService.log(
+                createdById,
+                ActivityArea.ADMIN,
+                "TICKET",
+                ActivityAction.CREATE_TICKET,
+                ActivitySeverity.INFO,
+                "Ticket",
+                saved.getId().toString(),
+                saved.getCode(),
+                "Tạo Ticket hỗ trợ mới: " + saved.getCode(),
+                null
+        );
+
+        // Nếu tạo Ticket từ Incident và gán trạng thái khác RESOLVED/CLOSED, tự động chuyển Incident sang INVESTIGATING
+        if (incident != null && request.getStatus() != TicketStatus.RESOLVED && request.getStatus() != TicketStatus.CLOSED) {
+            incident.setStatus(IncidentStatus.INVESTIGATING);
+            if (assignee != null) {
+                // Đồng bộ tên người phụ trách cho Incident
+                incident.setAssignee(assignee.getEmail());
+            }
+            incidentRepository.save(incident);
+            
+            // Gửi websocket sự cố cập nhật
+            try {
+                IncidentResponseDto incDto = incidentMapper.toResponseDto(incident, null, ticket.getCode());
+                messagingTemplate.convertAndSend("/topic/admin.incidents", incDto);
+            } catch (Exception e) {
+                log.error("Failed to send incident update websocket notification", e);
+            }
+        }
+
+        TicketResponseDto response = ticketMapper.toResponseDto(saved, getAffectedUserEmails(saved));
         try {
             messagingTemplate.convertAndSend("/topic/admin.tickets", response);
         } catch (Exception e) {
@@ -136,6 +192,7 @@ public class AdminTicketService {
         Ticket ticket = ticketRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Ticket hỗ trợ với ID: " + id));
 
+        TicketStatus oldStatus = ticket.getStatus();
         ticket.setStatus(status);
         boolean incidentUpdated = false;
         Incident incidentToNotify = null;
@@ -151,6 +208,21 @@ public class AdminTicketService {
                     incident.setResolvedAt(Instant.now());
                     incidentRepository.save(incident);
                     log.info("Automatically resolved linked incident: {}", incident.getCode());
+
+                    // Ghi log hoạt động đồng bộ
+                    activityLogService.log(
+                            null,
+                            ActivityArea.SYSTEM,
+                            "INCIDENT",
+                            ActivityAction.RESOLVE_INCIDENT,
+                            ActivitySeverity.INFO,
+                            "Incident",
+                            incident.getId().toString(),
+                            incident.getCode(),
+                            "Hệ thống tự động đóng sự cố liên kết: " + incident.getCode() + " do đóng Ticket",
+                            null
+                    );
+
                     incidentUpdated = true;
                     incidentToNotify = incident;
                 }
@@ -166,6 +238,21 @@ public class AdminTicketService {
                     incident.setResolvedAt(null);
                     incidentRepository.save(incident);
                     log.info("Automatically reopened linked incident: {}", incident.getCode());
+
+                    // Ghi log hoạt động đồng bộ
+                    activityLogService.log(
+                            null,
+                            ActivityArea.SYSTEM,
+                            "INCIDENT",
+                            ActivityAction.UPDATE_INCIDENT,
+                            ActivitySeverity.INFO,
+                            "Incident",
+                            incident.getId().toString(),
+                            incident.getCode(),
+                            "Hệ thống tự động mở lại sự cố liên kết: " + incident.getCode() + " do mở lại Ticket",
+                            null
+                    );
+
                     incidentUpdated = true;
                     incidentToNotify = incident;
                 }
@@ -173,6 +260,23 @@ public class AdminTicketService {
         }
 
         Ticket saved = ticketRepository.save(ticket);
+
+        // Ghi log hoạt động đổi trạng thái Ticket
+        if (status != oldStatus) {
+            ActivityAction act = (status == TicketStatus.RESOLVED || status == TicketStatus.CLOSED) ? ActivityAction.CLOSE_TICKET : ActivityAction.UPDATE_TICKET_STATUS;
+            activityLogService.log(
+                    null,
+                    ActivityArea.ADMIN,
+                    "TICKET",
+                    act,
+                    ActivitySeverity.INFO,
+                    "Ticket",
+                    saved.getId().toString(),
+                    saved.getCode(),
+                    "Cập nhật trạng thái Ticket " + saved.getCode() + " thành " + status,
+                    null
+            );
+        }
 
         // Notify incident update if changed
         if (incidentUpdated && incidentToNotify != null) {
@@ -184,7 +288,7 @@ public class AdminTicketService {
             }
         }
 
-        TicketResponseDto response = ticketMapper.toResponseDto(saved);
+        TicketResponseDto response = ticketMapper.toResponseDto(saved, getAffectedUserEmails(saved));
         try {
             messagingTemplate.convertAndSend("/topic/admin.tickets", response);
         } catch (Exception e) {
@@ -198,6 +302,7 @@ public class AdminTicketService {
         Ticket ticket = ticketRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Ticket hỗ trợ với ID: " + id));
 
+        AccountUser oldAssignee = ticket.getAssignee();
         AccountUser assignee = null;
         if (assigneeId != null) {
             assignee = accountUserRepository.findById(assigneeId)
@@ -207,6 +312,22 @@ public class AdminTicketService {
         ticket.setAssignee(assignee);
         Ticket saved = ticketRepository.save(ticket);
 
+        // Ghi log hoạt động phân công ticket
+        if (!java.util.Objects.equals(oldAssignee, assignee)) {
+            activityLogService.log(
+                    null,
+                    ActivityArea.ADMIN,
+                    "TICKET",
+                    ActivityAction.ASSIGN_TICKET,
+                    ActivitySeverity.INFO,
+                    "Ticket",
+                    saved.getId().toString(),
+                    saved.getCode(),
+                    "Phân công Ticket " + saved.getCode() + " cho " + (assignee == null ? "chưa phân công" : assignee.getEmail()),
+                    null
+            );
+        }
+
         // Đồng bộ ngược lại cho Incident nếu có liên kết
         if (saved.getIncident() != null) {
             Incident incident = saved.getIncident();
@@ -215,6 +336,21 @@ public class AdminTicketService {
                 incident.setAssignee(newAssigneeEmail);
                 incidentRepository.save(incident);
                 log.info("Synchronized assignee from Ticket {} to Incident {}", saved.getCode(), incident.getCode());
+
+                // Ghi log hoạt động đồng bộ
+                activityLogService.log(
+                        null,
+                        ActivityArea.SYSTEM,
+                        "INCIDENT",
+                        ActivityAction.UPDATE_INCIDENT,
+                        ActivitySeverity.INFO,
+                        "Incident",
+                        incident.getId().toString(),
+                        incident.getCode(),
+                        "Hệ thống tự động phân công sự cố liên kết " + incident.getCode() + " cho " + (newAssigneeEmail == null ? "chưa phân công" : newAssigneeEmail),
+                        null
+                );
+
                 // Gửi websocket cập nhật incident
                 try {
                     IncidentResponseDto incDto = incidentMapper.toResponseDto(incident, null, saved.getCode());
@@ -225,7 +361,7 @@ public class AdminTicketService {
             }
         }
 
-        TicketResponseDto response = ticketMapper.toResponseDto(saved);
+        TicketResponseDto response = ticketMapper.toResponseDto(saved, getAffectedUserEmails(saved));
         try {
             messagingTemplate.convertAndSend("/topic/admin.tickets", response);
         } catch (Exception e) {

@@ -27,6 +27,7 @@ public class TicketResponseDto {
     private UUID createdById;
     private String createdByName;
     private String createdByEmail;
+    private java.util.List<String> affectedUserEmails;
     private Instant createdAt;
     private Instant resolvedAt;
 }

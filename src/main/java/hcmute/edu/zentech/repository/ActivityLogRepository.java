@@ -78,5 +78,19 @@ public interface ActivityLogRepository extends JpaRepository<ActivityLog, UUID> 
     java.util.List<hcmute.edu.zentech.model.ActivityAction> findDistinctActions();
 
     java.util.List<ActivityLog> findByUserOrderByCreatedAtDesc(hcmute.edu.zentech.model.AccountUser user);
+
+    java.util.List<ActivityLog> findByTargetTypeAndTargetId(String targetType, String targetId);
+
+    @Query("SELECT DISTINCT u.email FROM ActivityLog a " +
+           "JOIN a.user u " +
+           "WHERE a.targetType = :targetType " +
+           "AND a.targetId = :targetId " +
+           "AND a.area = hcmute.edu.zentech.model.ActivityArea.SYSTEM " +
+           "AND u.email IS NOT NULL " +
+           "AND u.role = hcmute.edu.zentech.model.Role.CUSTOMER")
+    java.util.List<String> findUserEmailsByTargetTypeAndTargetIdAndSystemArea(
+            @Param("targetType") String targetType,
+            @Param("targetId") String targetId
+    );
 }
 

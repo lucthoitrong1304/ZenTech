@@ -74,8 +74,29 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException ex) {
+    public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request) {
         log.warn("Access denied (403): {}", ex.getMessage());
+
+        String apiPath = request.getRequestURI();
+        if (apiPath != null && apiPath.startsWith("/api/admin/")) {
+            String traceId = MDC.get("traceId");
+            String httpMethod = request.getMethod();
+            java.util.UUID userId = null;
+            try {
+                userId = SecurityContextUtils.getCurrentUserId();
+            } catch (Exception e) {
+                // Unauthenticated
+            }
+            try {
+                // Chỉ tự sinh sự cố đối với lỗi 403 ở trang Admin, loại trừ các API liên quan đến chính incidents/tickets để tránh loop
+                if (!apiPath.startsWith("/api/admin/incidents") && !apiPath.startsWith("/api/admin/tickets")) {
+                    adminIncidentService.createIncidentFromException(ex, traceId, apiPath, httpMethod, 403, "backend", userId);
+                }
+            } catch (Exception e) {
+                log.error("Failed to automatically record 403 incident: {}", e.getMessage());
+            }
+        }
+
         return buildErrorResponse(HttpStatus.FORBIDDEN, "Forbidden", ex.getMessage());
     }
 
@@ -135,12 +156,28 @@ public class GlobalExceptionHandler {
             // Unauthenticated
         }
 
+        int statusCode = 500;
+        Throwable rootCause = ex;
+        while (rootCause != null) {
+            String className = rootCause.getClass().getName();
+            if (rootCause instanceof java.net.ConnectException 
+                || rootCause instanceof java.net.SocketTimeoutException 
+                || className.contains("ResourceAccessException")
+                || className.contains("WebClientResponseException")
+                || className.contains("HttpServerErrorException")
+                || className.contains("HttpClientErrorException")) {
+                statusCode = 502; // Bad Gateway / Integration Error
+                break;
+            }
+            rootCause = rootCause.getCause();
+        }
+
         try {
             // Ngăn chặn vòng lặp vô hạn (Infinite Loop): Không tự sinh sự cố đối với các lỗi phát sinh
             // từ chính các API quản lý sự cố và quản lý ticket ở trang quản trị (Admin Dashboard).
             // Đồng thời không tạo sự cố cho các lỗi ngắt kết nối từ phía client.
             if (!isClientAbort && apiPath != null && !apiPath.startsWith("/api/admin/incidents") && !apiPath.startsWith("/api/admin/tickets")) {
-                adminIncidentService.createIncidentFromException(ex, traceId, apiPath, httpMethod, 500, "backend", userId);
+                adminIncidentService.createIncidentFromException(ex, traceId, apiPath, httpMethod, statusCode, "backend", userId);
             }
         } catch (Exception e) {
             log.error("Failed to automatically record incident: {}", e.getMessage());

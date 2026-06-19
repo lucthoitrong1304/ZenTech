@@ -8,6 +8,10 @@ import org.springframework.stereotype.Component;
 public class TicketMapper {
 
     public TicketResponseDto toResponseDto(Ticket ticket) {
+        return toResponseDto(ticket, java.util.Collections.emptyList());
+    }
+
+    public TicketResponseDto toResponseDto(Ticket ticket, java.util.List<String> affectedUserEmails) {
         if (ticket == null) {
             return null;
         }
@@ -27,6 +31,7 @@ public class TicketMapper {
                 .createdById(ticket.getCreatedBy() != null ? ticket.getCreatedBy().getId() : null)
                 .createdByName(ticket.getCreatedBy() != null ? ticket.getCreatedBy().getEmail() : null)
                 .createdByEmail(ticket.getCreatedBy() != null ? ticket.getCreatedBy().getEmail() : null)
+                .affectedUserEmails(affectedUserEmails)
                 .createdAt(ticket.getCreatedAt())
                 .resolvedAt(ticket.getResolvedAt())
                 .build();

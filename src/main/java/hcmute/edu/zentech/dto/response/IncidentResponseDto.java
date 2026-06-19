@@ -30,6 +30,15 @@ public class IncidentResponseDto {
     private String assignee;
     private UUID userId;
     private String userEmail;
+    private java.util.List<String> affectedUserEmails;
     private AiAnalysisResponseDto aiAnalysis;
     private String ticketCode;
+    private java.util.List<OccurrenceDto> occurrences;
+
+    @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class OccurrenceDto {
+        private String traceId;
+        private Instant occurredAt;
+        private String userEmail;
+    }
 }
