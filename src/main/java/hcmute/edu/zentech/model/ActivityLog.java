@@ -62,6 +62,9 @@ public class ActivityLog {
     @Column(name = "user_agent")
     private String userAgent;
 
+    @Column(name = "trace_id", length = 64)
+    private String traceId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
