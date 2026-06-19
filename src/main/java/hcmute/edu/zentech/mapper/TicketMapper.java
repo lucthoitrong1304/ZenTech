@@ -2,10 +2,24 @@ package hcmute.edu.zentech.mapper;
 
 import hcmute.edu.zentech.dto.response.TicketResponseDto;
 import hcmute.edu.zentech.model.Ticket;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 @Component
+@RequiredArgsConstructor
 public class TicketMapper {
+    private final hcmute.edu.zentech.service.R2StorageService r2StorageService;
+
+    private String resolvePublicUrls(String imagesKeyStr) {
+        if (imagesKeyStr == null || imagesKeyStr.isBlank() || r2StorageService == null) {
+            return imagesKeyStr;
+        }
+        return java.util.Arrays.stream(imagesKeyStr.split(","))
+                .map(String::trim)
+                .map(r2StorageService::getPublicUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .collect(java.util.stream.Collectors.joining(","));
+    }
 
     public TicketResponseDto toResponseDto(Ticket ticket) {
         return toResponseDto(ticket, java.util.Collections.emptyList());
@@ -34,6 +48,7 @@ public class TicketMapper {
                 .affectedUserEmails(affectedUserEmails)
                 .createdAt(ticket.getCreatedAt())
                 .resolvedAt(ticket.getResolvedAt())
+                .images(resolvePublicUrls(ticket.getImages()))
                 .build();
     }
 }

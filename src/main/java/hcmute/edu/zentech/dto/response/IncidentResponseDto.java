@@ -34,6 +34,7 @@ public class IncidentResponseDto {
     private AiAnalysisResponseDto aiAnalysis;
     private String ticketCode;
     private java.util.List<OccurrenceDto> occurrences;
+    private String images;
 
     @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
     public static class OccurrenceDto {

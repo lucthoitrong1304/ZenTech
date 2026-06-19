@@ -48,6 +48,15 @@ public class UploadService {
             );
         }
 
+        if (request.getPurpose() == UploadPurpose.TICKET_ATTACHMENT) {
+            return r2StorageService.generateChatAttachmentPresignedUrl(
+                    currentUserId,
+                    request.getOriginalFilename(),
+                    request.getContentType(),
+                    request.getFileSize()
+            );
+        }
+
         if (request.getPurpose() == UploadPurpose.CUSTOMER_AVATAR || request.getPurpose() == UploadPurpose.EMPLOYEE_AVATAR) {
             return r2StorageService.generateCustomerAvatarPresignedUrl(
                     currentUserId,

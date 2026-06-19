@@ -26,4 +26,6 @@ public class TicketCreateRequest {
     private UUID assigneeId;
     
     private UUID incidentId;
+
+    private String images;
 }

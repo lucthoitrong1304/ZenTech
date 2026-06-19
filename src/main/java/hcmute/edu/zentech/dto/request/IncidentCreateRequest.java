@@ -32,4 +32,5 @@ public class IncidentCreateRequest {
     
     private String assignee;
     private UUID userId;
+    private String images;
 }

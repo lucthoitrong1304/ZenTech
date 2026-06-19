@@ -151,11 +151,16 @@ public class AdminIncidentService {
             seenTraceIds.add(incident.getTraceId());
         }
                 
-        // Add subsequent occurrences
+        // Add subsequent occurrences — only from CUSTOMER users to exclude admin/staff actions
         try {
             List<ActivityLog> logs = activityLogRepository.findByTargetTypeAndTargetId("Incident", incident.getId().toString());
             for (ActivityLog logItem : logs) {
                 if (logItem.getArea() == ActivityArea.SYSTEM && logItem.getTraceId() != null) {
+                    // Skip logs from non-customer users (admin, staff, etc.)
+                    if (logItem.getUser() != null && logItem.getUser().getRole() != null
+                            && logItem.getUser().getRole() != Role.CUSTOMER) {
+                        continue;
+                    }
                     String tId = logItem.getTraceId();
                     if (!seenTraceIds.contains(tId)) {
                         seenTraceIds.add(tId);
@@ -257,6 +262,7 @@ public class AdminIncidentService {
                 .severity(request.getSeverity())
                 .status(request.getStatus())
                 .assignee(request.getAssignee())
+                .images(request.getImages())
                 .occurredAt(Instant.now())
                 .build();
 

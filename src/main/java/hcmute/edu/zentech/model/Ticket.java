@@ -54,6 +54,9 @@ public class Ticket {
     @Column(name = "resolved_at")
     private Instant resolvedAt;
 
+    @Column(name = "images", length = 2000)
+    private String images;
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {

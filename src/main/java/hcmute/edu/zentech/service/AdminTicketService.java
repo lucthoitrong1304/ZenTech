@@ -114,6 +114,11 @@ public class AdminTicketService {
             }
         }
 
+        String images = request.getImages();
+        if ((images == null || images.isBlank()) && incident != null) {
+            images = incident.getImages();
+        }
+
         Ticket ticket = Ticket.builder()
                 .code(generateTicketCode())
                 .title(request.getTitle())
@@ -123,6 +128,7 @@ public class AdminTicketService {
                 .assignee(assignee)
                 .createdBy(createdBy)
                 .incident(incident)
+                .images(images)
                 .createdAt(Instant.now())
                 .build();
 

@@ -66,6 +66,9 @@ public class Incident {
 
     private String assignee;
 
+    @Column(name = "images", length = 2000)
+    private String images;
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {

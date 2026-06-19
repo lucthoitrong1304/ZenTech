@@ -30,4 +30,5 @@ public class TicketResponseDto {
     private java.util.List<String> affectedUserEmails;
     private Instant createdAt;
     private Instant resolvedAt;
+    private String images;
 }
