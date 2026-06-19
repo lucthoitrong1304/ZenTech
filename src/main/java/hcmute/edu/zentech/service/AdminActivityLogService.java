@@ -727,6 +727,7 @@ public class AdminActivityLogService {
             default -> authSummary;
         };
     }
+
     private String buildUserAuthSummary(String email, String summary, String fallbackAction) {
         String actionSummary = firstNonBlank(summary, fallbackAction);
         if (email == null || email.isBlank()) {
@@ -835,7 +836,12 @@ public class AdminActivityLogService {
             case UPLOAD_AI_DOCUMENT -> "Tải lên tài liệu AI";
             case DELETE_AI_DOCUMENT -> "Xóa tài liệu AI";
             case UPDATE_SYSTEM_SETTING -> "Cập nhật cấu hình hệ thống";
+            case REGISTER_FACE -> "Đăng ký khuôn mặt";
+            case DELETE_FACE -> "Xóa khuôn mặt";
+            case FACE_VERIFICATION_SUCCESS -> "Xác thực khuôn mặt thành công";
+            case FACE_VERIFICATION_FAILED -> "Xác thực khuôn mặt thất bại";
             default -> action.name().replace('_', ' ');
+
         };
     }
 
@@ -901,6 +907,8 @@ public class AdminActivityLogService {
         if (clean.equals("admin")) {
             return "ADMIN";
         }
+        
+        // Map Severity labels
         if (clean.contains("quan trọng") || clean.contains("quan trong")) {
             return "IMPORTANT";
         }
