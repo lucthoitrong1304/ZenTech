@@ -71,6 +71,9 @@ public class R2StorageService {
     @Value("${cloudflare.r2.presigned-url-expiration}")
     private long expirationMinutes;
 
+    @Value("${cloudflare.r2.public-url}")
+    private String publicUrl;
+
     public UploadPresignResponse generateReviewImagePresignedUrl(
             UUID userId,
             String originalFilename,
@@ -495,25 +498,44 @@ public class R2StorageService {
      * @param fileKey Đường dẫn chính xác tới file (VD: "Alpha65.../image.webp")
      * @return Presigned URL (có thời hạn) để FE hiển thị ảnh
      */
-    public String getPresignedGetUrl(String fileKey) {
-        try {
-            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(fileKey)
-                    .build();
-
-            GetObjectPresignRequest getObjectPresignRequest = GetObjectPresignRequest.builder()
-                    .signatureDuration(Duration.ofMinutes(expirationMinutes))
-                    .getObjectRequest(getObjectRequest)
-                    .build();
-
-            PresignedGetObjectRequest presignedGetObjectRequest = s3Presigner.presignGetObject(getObjectPresignRequest);
-
-            return presignedGetObjectRequest.url().toString();
-        } catch (Exception e) {
-            log.error("Lỗi khi tạo Presigned GET URL cho key [{}]: {}", fileKey, e.getMessage());
+    public String getPublicUrl(String fileKey) {
+        if (fileKey == null || fileKey.isBlank()) {
             return null;
         }
+        String baseUrl = publicUrl.endsWith("/") ? publicUrl : publicUrl + "/";
+        String cleanKey = fileKey.startsWith("/") ? fileKey.substring(1) : fileKey;
+        return baseUrl + cleanKey;
+    }
+
+    public String getPresignedGetUrl(String fileKey) {
+        if (fileKey == null || fileKey.isBlank()) {
+            return null;
+        }
+
+        // Keep chat messages private (using Presigned URLs)
+        if (fileKey.startsWith("uploads/chat/")) {
+            try {
+                GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(fileKey)
+                        .build();
+
+                GetObjectPresignRequest getObjectPresignRequest = GetObjectPresignRequest.builder()
+                        .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                        .getObjectRequest(getObjectRequest)
+                        .build();
+
+                PresignedGetObjectRequest presignedGetObjectRequest = s3Presigner.presignGetObject(getObjectPresignRequest);
+
+                return presignedGetObjectRequest.url().toString();
+            } catch (Exception e) {
+                log.error("Lỗi khi tạo Presigned GET URL cho key [{}]: {}", fileKey, e.getMessage());
+                return null;
+            }
+        }
+
+        // Product images, avatars, and reviews are public CDN URLs
+        return getPublicUrl(fileKey);
     }
 
     /**
