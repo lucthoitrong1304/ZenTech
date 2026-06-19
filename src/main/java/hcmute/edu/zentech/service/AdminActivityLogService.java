@@ -1,6 +1,10 @@
 package hcmute.edu.zentech.service;
 
+import hcmute.edu.zentech.dto.request.ActivityTimelineAiLogItem;
+import hcmute.edu.zentech.dto.request.ActivityTimelineAiSummaryRequest;
+import hcmute.edu.zentech.dto.request.ActivityTimelineSummaryRequest;
 import hcmute.edu.zentech.dto.response.ActivityLogResponseDto;
+import hcmute.edu.zentech.dto.response.ActivityTimelineSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.model.AccountUser;
 import hcmute.edu.zentech.model.ActivityAction;
@@ -23,8 +27,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -46,6 +52,11 @@ public class AdminActivityLogService {
     private final CustomerRepository customerRepository;
     private final R2StorageService r2StorageService;
     private final SimpMessagingTemplate messagingTemplate;
+
+    @Value("${app.ai.base-url:http://localhost:8000}")
+    private String aiBaseUrl;
+
+    private final RestTemplate restTemplate = new RestTemplate();
 
     private static final String ACTIVITY_LOG_TOPIC = "/topic/admin.activity-logs";
 
@@ -250,6 +261,127 @@ public class AdminActivityLogService {
         return PageResponse.from(logPage, dtoList);
     }
 
+    public ActivityTimelineSummaryResponse summarizeTimeline(ActivityTimelineSummaryRequest request) {
+        int requestedSize = request != null && request.getSize() != null ? request.getSize() : 50;
+        int size = Math.max(1, Math.min(requestedSize, 100));
+        UUID userId = request != null ? request.getUserId() : null;
+        String email = request != null ? request.getEmail() : "";
+        Instant from = request != null ? request.getFrom() : null;
+        Instant to = request != null ? request.getTo() : null;
+        ActivitySeverity severity = request != null ? request.getSeverity() : null;
+        String module = request != null ? request.getModule() : null;
+        ActivityAction action = request != null ? request.getAction() : null;
+
+        Page<ActivityLog> logPage = activityLogRepository.searchTimeline(
+                userId,
+                email,
+                from,
+                to,
+                severity,
+                module,
+                action,
+                PageRequest.of(0, size, Sort.by(Sort.Direction.ASC, "createdAt"))
+        );
+        List<ActivityLog> logs = logPage.getContent();
+        List<String> fallbackLines = buildTimelineFallbackSummary(logs, email);
+        if (logs.isEmpty()) {
+            return ActivityTimelineSummaryResponse.builder()
+                    .lines(fallbackLines)
+                    .fallback(true)
+                    .build();
+        }
+
+        Optional<ActivityTimelineSummaryResponse> aiSummary = requestActivityTimelineSummaryFromAi(
+                buildActivityTimelineAiRequest(request, logs, size)
+        );
+
+        if (aiSummary.isPresent() && aiSummary.get().getLines() != null && !aiSummary.get().getLines().isEmpty()) {
+            return ActivityTimelineSummaryResponse.builder()
+                    .lines(aiSummary.get().getLines())
+                    .fallback(false)
+                    .build();
+        }
+
+        return ActivityTimelineSummaryResponse.builder()
+                .lines(fallbackLines)
+                .fallback(true)
+                .build();
+    }
+
+    private ActivityTimelineAiSummaryRequest buildActivityTimelineAiRequest(
+            ActivityTimelineSummaryRequest request,
+            List<ActivityLog> logs,
+            int size
+    ) {
+        return ActivityTimelineAiSummaryRequest.builder()
+                .userId(request != null && request.getUserId() != null ? request.getUserId().toString() : null)
+                .email(request != null ? maskEmailForAi(request.getEmail()) : null)
+                .from(request != null ? request.getFrom() : null)
+                .to(request != null ? request.getTo() : null)
+                .severity(request != null && request.getSeverity() != null ? request.getSeverity().name() : null)
+                .module(request != null ? request.getModule() : null)
+                .action(request != null && request.getAction() != null ? request.getAction().name() : null)
+                .size(size)
+                .logs(logs.stream().map(this::toActivityTimelineAiLogItem).toList())
+                .build();
+    }
+
+    private ActivityTimelineAiLogItem toActivityTimelineAiLogItem(ActivityLog logItem) {
+        AccountUser user = logItem.getUser();
+        return ActivityTimelineAiLogItem.builder()
+                .timestamp(logItem.getCreatedAt() != null ? logItem.getCreatedAt().toString() : null)
+                .operatorEmail(user != null ? maskEmailForAi(user.getEmail()) : null)
+                .operatorRole(user != null && user.getRole() != null ? user.getRole().name() : null)
+                .area(logItem.getArea() != null ? logItem.getArea().name() : null)
+                .module(logItem.getModule())
+                .action(logItem.getAction() != null ? logItem.getAction().name() : null)
+                .actionLabel(toActionLabel(logItem.getAction()))
+                .severity(logItem.getSeverity() != null ? logItem.getSeverity().name() : null)
+                .targetType(logItem.getTargetType())
+                .targetId(redactForAi(logItem.getTargetId()))
+                .targetLabel(redactForAi(logItem.getTargetLabel()))
+                .summary(redactForAi(firstNonBlank(logItem.getSummary(), logItem.getDescription(), "N/A")))
+                .metadata(redactForAi(logItem.getMetadata()))
+                .ipAddress(classifyIpForAi(logItem.getIpAddress()))
+                .userAgent(summarizeUserAgentForAi(logItem.getUserAgent()))
+                .traceId(logItem.getTraceId() != null && !logItem.getTraceId().isBlank() ? "present" : null)
+                .build();
+    }
+
+    private Optional<ActivityTimelineSummaryResponse> requestActivityTimelineSummaryFromAi(
+            ActivityTimelineAiSummaryRequest requestPayload
+    ) {
+        String url = normalizeAiBaseUrl(aiBaseUrl) + "/admin/activity-timeline/summary";
+        try {
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+            String traceId = MDC.get("traceId");
+            if (traceId != null && !traceId.isBlank()) {
+                headers.set("X-Trace-Id", traceId.trim());
+            }
+
+            org.springframework.http.HttpEntity<ActivityTimelineAiSummaryRequest> entity =
+                    new org.springframework.http.HttpEntity<>(requestPayload, headers);
+            org.springframework.http.ResponseEntity<ActivityTimelineSummaryResponse> response = restTemplate.postForEntity(
+                    url,
+                    entity,
+                    ActivityTimelineSummaryResponse.class
+            );
+
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                return Optional.of(response.getBody());
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to summarize activity timeline using AI service: {}", ex.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    private String normalizeAiBaseUrl(String baseUrl) {
+        String normalized = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8000" : baseUrl.trim();
+        return normalized.endsWith("/") ? normalized.substring(0, normalized.length() - 1) : normalized;
+    }
+
     private HttpServletRequest getCurrentRequest() {
         try {
             ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
@@ -302,9 +434,11 @@ public class AdminActivityLogService {
         String email = "anonymous@zentech.local";
         String fullName = "Anonymous";
         String avatar = null;
+        Role operatorRole = null;
 
         if (activityLog.getUser() != null) {
             email = activityLog.getUser().getEmail();
+            operatorRole = activityLog.getUser().getRole();
             UUID accountId = activityLog.getUser().getId();
             
             if (activityLog.getArea() == hcmute.edu.zentech.model.ActivityArea.CUSTOMER) {
@@ -387,6 +521,7 @@ public class AdminActivityLogService {
                 .operatorEmail(email)
                 .operatorFullName(fullName)
                 .operatorAvatar(avatar)
+                .operatorRole(operatorRole)
                 .area(activityLog.getArea())
                 .module(activityLog.getModule())
                 .action(activityLog.getAction())
@@ -411,6 +546,50 @@ public class AdminActivityLogService {
 
     public List<hcmute.edu.zentech.model.ActivityAction> getDistinctActions() {
         return activityLogRepository.findDistinctActions();
+    }
+
+    private List<String> buildTimelineFallbackSummary(List<ActivityLog> logs, String email) {
+        if (logs.isEmpty()) {
+            return List.of("Chua co du lieu timeline de tom tat cho user nay.");
+        }
+        long riskCount = logs.stream()
+                .filter(log -> log.getSeverity() == ActivitySeverity.IMPORTANT
+                        || log.getSeverity() == ActivitySeverity.SECURITY
+                        || log.getSeverity() == ActivitySeverity.CRITICAL)
+                .count();
+        long diffCount = logs.stream().filter(this::hasDiffMetadata).count();
+        long uniqueIpCount = logs.stream()
+                .map(ActivityLog::getIpAddress)
+                .filter(ip -> ip != null && !ip.isBlank())
+                .distinct()
+                .count();
+        String modules = logs.stream()
+                .map(ActivityLog::getModule)
+                .filter(module -> module != null && !module.isBlank())
+                .collect(Collectors.groupingBy(module -> module, Collectors.counting()))
+                .entrySet()
+                .stream()
+                .sorted((left, right) -> Long.compare(right.getValue(), left.getValue()))
+                .limit(3)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.joining(", "));
+        ActivityLog first = logs.get(0);
+        ActivityLog last = logs.get(logs.size() - 1);
+        String userLabel = firstNonBlank(email, first.getUser() != null ? first.getUser().getEmail() : null, "user nay");
+        return List.of(
+                userLabel + " co " + logs.size() + " hanh dong trong timeline, tu " + first.getCreatedAt() + " den " + last.getCreatedAt() + ".",
+                "Module noi bat: " + firstNonBlank(modules, "chua ro") + ".",
+                "Co " + riskCount + " hanh dong can chu y, " + uniqueIpCount + " IP khac nhau va " + diffCount + " buoc co du lieu so sanh thay doi.",
+                diffCount > 0 ? "Nen kiem tra cac buoc co before/after de doi chieu thay doi quan trong." : "Chua co before/after trong cac buoc timeline hien tai."
+        );
+    }
+
+    private boolean hasDiffMetadata(ActivityLog log) {
+        String metadata = log.getMetadata();
+        return metadata != null
+                && metadata.contains("\"before\"")
+                && metadata.contains("\"after\"")
+                && metadata.contains("\"changedFields\"");
     }
 
     private void publishRealtimeActivityLog(ActivityLog activityLog) {
@@ -441,6 +620,67 @@ public class AdminActivityLogService {
         );
     }
 
+    private String maskEmailForAi(String email) {
+        if (email == null || email.isBlank()) {
+            return null;
+        }
+        String trimmedEmail = email.trim();
+        int atIndex = trimmedEmail.indexOf('@');
+        if (atIndex <= 0 || atIndex >= trimmedEmail.length() - 1) {
+            return "[EMAIL]";
+        }
+        return trimmedEmail.charAt(0) + "***@" + trimmedEmail.substring(atIndex + 1).toLowerCase();
+    }
+
+    private String classifyIpForAi(String ipAddress) {
+        if (ipAddress == null || ipAddress.isBlank()) {
+            return null;
+        }
+        String ip = ipAddress.trim();
+        if (ip.equals("127.0.0.1") || ip.equals("0:0:0:0:0:0:0:1") || ip.equals("::1")) {
+            return "localhost";
+        }
+        if (ip.startsWith("10.") || ip.startsWith("192.168.") || ip.matches("^172\\.(1[6-9]|2[0-9]|3[0-1])\\..*")) {
+            return "private-network";
+        }
+        return "public-ip";
+    }
+
+    private String summarizeUserAgentForAi(String userAgent) {
+        if (userAgent == null || userAgent.isBlank() || "unknown".equalsIgnoreCase(userAgent)) {
+            return null;
+        }
+        String ua = userAgent.toLowerCase();
+        String browser = ua.contains("edg/") ? "Edge"
+                : ua.contains("chrome/") ? "Chrome"
+                : ua.contains("firefox/") ? "Firefox"
+                : ua.contains("safari/") ? "Safari"
+                : "Other browser";
+        String os = ua.contains("windows") ? "Windows"
+                : ua.contains("mac os") ? "macOS"
+                : ua.contains("android") ? "Android"
+                : ua.contains("iphone") || ua.contains("ipad") ? "iOS"
+                : ua.contains("linux") ? "Linux"
+                : "Other OS";
+        String device = ua.contains("mobile") || ua.contains("iphone") || ua.contains("android") ? "Mobile" : "Desktop";
+        return browser + " / " + os + " / " + device;
+    }
+
+    private String redactForAi(String value) {
+        if (value == null) {
+            return null;
+        }
+        String redacted = sanitizeText(value);
+        redacted = redacted.replaceAll(
+                "(?i)(\\\"(?:address|shippingAddress|billingAddress|phone|phoneNumber|customerName|fullName|email)\\\"\\s*:\\s*\\\")[^\\\"]*(\\\")",
+                "$1[REDACTED]$2"
+        );
+        redacted = redacted.replaceAll("(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", "[EMAIL]");
+        redacted = redacted.replaceAll("\\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\b", "[ID]");
+        redacted = redacted.replaceAll("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b", "[IP]");
+        redacted = redacted.replaceAll("(?<!\\d)(?:\\+?84|0)\\d{8,10}(?!\\d)", "[PHONE]");
+        return trim(redacted, 1500);
+    }
     private ActivityArea resolveArea(ActivityArea area, String module, AccountUser user) {
         if (area != null && area != ActivityArea.SYSTEM) {
             return area;

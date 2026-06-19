@@ -1,7 +1,9 @@
 package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.request.ActivityLogRecordRequest;
+import hcmute.edu.zentech.dto.request.ActivityTimelineSummaryRequest;
 import hcmute.edu.zentech.dto.response.ActivityLogResponseDto;
+import hcmute.edu.zentech.dto.response.ActivityTimelineSummaryResponse;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.security.SecurityContextUtils;
@@ -76,6 +78,13 @@ public class AdminActivityLogController {
     @GetMapping("/actions")
     public ResponseEntity<ApiResponse<java.util.List<ActivityAction>>> getDistinctActions() {
         return ResponseEntity.ok(ApiResponse.success(activityLogService.getDistinctActions()));
+    }
+
+    @PostMapping("/timeline/summary")
+    public ResponseEntity<ApiResponse<ActivityTimelineSummaryResponse>> summarizeTimeline(
+            @RequestBody ActivityTimelineSummaryRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(activityLogService.summarizeTimeline(request)));
     }
 
     @PostMapping("/record")
