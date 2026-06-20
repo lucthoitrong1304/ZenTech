@@ -30,4 +30,7 @@ public class Shift {
 
     @Enumerated(EnumType.STRING)
     private ShiftType type;
+
+    private Integer gracePeriodMinutes = 15;
 }
+

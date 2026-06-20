@@ -2,13 +2,10 @@ package hcmute.edu.zentech.service;
 
 import hcmute.edu.zentech.dto.shift.*;
 import hcmute.edu.zentech.mapper.ShiftMapper;
-import hcmute.edu.zentech.model.Employee;
-import hcmute.edu.zentech.model.EmployeeShift;
-import hcmute.edu.zentech.model.Shift;
-import hcmute.edu.zentech.repository.EmployeeRepository;
-import hcmute.edu.zentech.repository.EmployeeShiftRepository;
-import hcmute.edu.zentech.repository.ShiftRepository;
+import hcmute.edu.zentech.model.*;
+import hcmute.edu.zentech.repository.*;
 import hcmute.edu.zentech.repository.projection.EmployeeWeeklyScheduleProjection;
+import hcmute.edu.zentech.security.SecurityContextUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -17,6 +14,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -27,6 +26,11 @@ public class ShiftService {
     private final EmployeeShiftRepository employeeShiftRepository;
     private final EmployeeRepository employeeRepository;
     private final ShiftMapper shiftMapper;
+    private final PayPeriodRepository payPeriodRepository;
+    private final AttendanceEventRepository attendanceEventRepository;
+    private final ScheduleAdjustmentRepository scheduleAdjustmentRepository;
+    private final AccountUserRepository accountUserRepository;
+
 
     @Transactional
     public ShiftDto createShift(ShiftCreateDto dto) {
@@ -98,15 +102,66 @@ public class ShiftService {
         return new PageImpl<>(dtos, pageable, employeePage.getTotalElements());
     }
 
+    private void validateAndApplyScheduleAdjustment(Employee employee, LocalDate workDate, Shift newShift, String reason) {
+        Optional<PayPeriod> periodOpt = payPeriodRepository.findPeriodActiveAt(workDate);
+        if (periodOpt.isPresent() && periodOpt.get().isLocked()) {
+            throw new RuntimeException("Kỳ công chứa ngày " + workDate + " đã bị khóa. Không thể điều chỉnh lịch.");
+        }
+
+        UUID adjusterId = SecurityContextUtils.getCurrentUserId();
+        AccountUser adjuster = adjusterId != null ? accountUserRepository.findById(adjusterId).orElse(null) : null;
+
+        LocalDate today = LocalDate.now();
+
+        boolean isToday = workDate.equals(today);
+        boolean hasEvents = false;
+
+        if (isToday || workDate.isBefore(today)) {
+            LocalDateTime start = workDate.atStartOfDay();
+            LocalDateTime end = workDate.atTime(LocalTime.MAX);
+            List<AttendanceEvent> events = attendanceEventRepository
+                    .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), start, end);
+            hasEvents = !events.isEmpty();
+        }
+
+        boolean requireAdjustment = (isToday && hasEvents) || workDate.isBefore(today);
+
+        if (requireAdjustment) {
+            if (reason == null || reason.trim().isEmpty()) {
+                throw new RuntimeException("Cần lý do điều chỉnh lịch cho ngày " + workDate + " vì đã phát sinh sự kiện chấm công hoặc là ngày trong quá khứ.");
+            }
+            if (adjuster == null) {
+                throw new RuntimeException("Không tìm thấy thông tin người điều chỉnh lịch.");
+            }
+
+            Shift originalShift = employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate)
+                    .map(EmployeeShift::getShift)
+                    .orElse(null);
+
+            ScheduleAdjustment sa = new ScheduleAdjustment();
+            sa.setEmployee(employee);
+            sa.setWorkDate(workDate);
+            sa.setOriginalShift(originalShift);
+            sa.setAdjustedShift(newShift);
+            sa.setAdjustedBy(adjuster);
+            sa.setAdjustedAt(LocalDateTime.now());
+            sa.setReason(reason);
+            sa.setStatus(ApprovalStatus.APPROVED);
+            scheduleAdjustmentRepository.save(sa);
+        }
+    }
+
     @Transactional
     public void assignSingleShift(EmployeeShiftDto dto) {
-        employeeShiftRepository.deleteByEmployeeIdAndWorkDate(dto.getEmployeeId(), dto.getWorkDate());
-        
         Employee employee = employeeRepository.findById(dto.getEmployeeId())
                 .orElseThrow(() -> new RuntimeException("Employee not found"));
         Shift shift = shiftRepository.findById(dto.getShiftId())
                 .orElseThrow(() -> new RuntimeException("Shift not found"));
-                
+
+        validateAndApplyScheduleAdjustment(employee, dto.getWorkDate(), shift, dto.getReason());
+
+        employeeShiftRepository.deleteByEmployeeIdAndWorkDate(dto.getEmployeeId(), dto.getWorkDate());
+        
         EmployeeShift es = new EmployeeShift();
         es.setEmployee(employee);
         es.setShift(shift);
@@ -126,16 +181,23 @@ public class ShiftService {
         
         if (targetEmployeeIds == null || targetEmployeeIds.isEmpty()) return;
         
-        // Remove old shifts in range for these employees
-        employeeShiftRepository.deleteByEmployeeIdInAndWorkDateBetween(targetEmployeeIds, dto.getStartDate(), dto.getEndDate());
-        
         Shift shift = shiftRepository.findById(dto.getShiftId())
                 .orElseThrow(() -> new RuntimeException("Shift not found"));
                 
         List<Employee> employees = employeeRepository.findAllById(targetEmployeeIds);
-        List<EmployeeShift> newShifts = new ArrayList<>();
-        
+
         LocalDate currentDate = dto.getStartDate();
+        while (!currentDate.isAfter(dto.getEndDate())) {
+            for (Employee emp : employees) {
+                validateAndApplyScheduleAdjustment(emp, currentDate, shift, dto.getReason());
+            }
+            currentDate = currentDate.plusDays(1);
+        }
+        
+        employeeShiftRepository.deleteByEmployeeIdInAndWorkDateBetween(targetEmployeeIds, dto.getStartDate(), dto.getEndDate());
+        
+        List<EmployeeShift> newShifts = new ArrayList<>();
+        currentDate = dto.getStartDate();
         while (!currentDate.isAfter(dto.getEndDate())) {
             for (Employee emp : employees) {
                 EmployeeShift es = new EmployeeShift();
@@ -158,12 +220,17 @@ public class ShiftService {
                 
         List<UUID> employeeIdsToCopy = prevShifts.stream().map(es -> es.getEmployee().getId()).distinct().collect(Collectors.toList());
         if (employeeIdsToCopy.isEmpty()) return;
+
+        long daysDiff = java.time.temporal.ChronoUnit.DAYS.between(dto.getFromWeekStartDate(), dto.getToWeekStartDate());
+
+        for (EmployeeShift prevEs : prevShifts) {
+            LocalDate destDate = prevEs.getWorkDate().plusDays(daysDiff);
+            validateAndApplyScheduleAdjustment(prevEs.getEmployee(), destDate, prevEs.getShift(), dto.getReason());
+        }
         
         employeeShiftRepository.deleteByEmployeeIdInAndWorkDateBetween(employeeIdsToCopy, dto.getToWeekStartDate(), dto.getToWeekEndDate());
         
         List<EmployeeShift> newShifts = new ArrayList<>();
-        long daysDiff = java.time.temporal.ChronoUnit.DAYS.between(dto.getFromWeekStartDate(), dto.getToWeekStartDate());
-        
         for (EmployeeShift prevEs : prevShifts) {
             EmployeeShift newEs = new EmployeeShift();
             newEs.setEmployee(prevEs.getEmployee());

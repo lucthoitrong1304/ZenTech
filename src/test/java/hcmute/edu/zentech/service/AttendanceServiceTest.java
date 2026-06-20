@@ -4,9 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import hcmute.edu.zentech.dto.request.CheckInRequest;
 import hcmute.edu.zentech.dto.response.EmployeeProfileResponse;
 import hcmute.edu.zentech.model.*;
-import hcmute.edu.zentech.repository.AccountUserRepository;
-import hcmute.edu.zentech.repository.AttendanceRepository;
-import hcmute.edu.zentech.repository.EmployeeRepository;
+import hcmute.edu.zentech.repository.*;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import hcmute.edu.zentech.utils.FaceEncryptionUtils;
 import org.junit.jupiter.api.AfterEach;
@@ -47,6 +45,10 @@ class AttendanceServiceTest {
     private FaceEncryptionUtils faceEncryptionUtils;
     @Mock
     private AdminActivityLogService adminActivityLogService;
+    @Mock
+    private PayPeriodRepository payPeriodRepository;
+    @Mock
+    private AttendanceEventRepository attendanceEventRepository;
 
     @InjectMocks
     private AttendanceService attendanceService;
@@ -75,6 +77,11 @@ class AttendanceServiceTest {
 
         // Mock static SecurityContextUtils
         securityContextUtilsMock = Mockito.mockStatic(SecurityContextUtils.class);
+
+        // Setup default mocks for PayPeriod and AttendanceEvent
+        lenient().when(payPeriodRepository.findPeriodActiveAt(any())).thenReturn(Optional.empty());
+        lenient().when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
+                .thenReturn(new ArrayList<>());
     }
 
     @AfterEach
@@ -107,7 +114,7 @@ class AttendanceServiceTest {
         // Assert
         assertNotNull(response);
         assertEquals(mockEmployee.getFullName(), response.getFullName());
-        verify(attendanceRepository, times(1)).save(any(Attendance.class));
+        verify(attendanceEventRepository, times(1)).save(any(AttendanceEvent.class));
         verify(adminActivityLogService, times(1)).log(
                 eq(mockAccountId),
                 eq(ActivityArea.MANAGEMENT),
@@ -147,7 +154,7 @@ class AttendanceServiceTest {
         });
 
         assertEquals("Không nhận diện được khuôn mặt. Vui lòng thử lại.", exception.getMessage());
-        verify(attendanceRepository, never()).save(any(Attendance.class));
+        verify(attendanceEventRepository, never()).save(any(AttendanceEvent.class));
         verify(adminActivityLogService, times(1)).log(
                 eq(mockAccountId),
                 eq(ActivityArea.MANAGEMENT),

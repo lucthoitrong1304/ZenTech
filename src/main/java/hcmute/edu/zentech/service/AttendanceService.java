@@ -6,16 +6,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import hcmute.edu.zentech.dto.request.CheckInRequest;
 import hcmute.edu.zentech.dto.response.*;
 import hcmute.edu.zentech.model.*;
-import hcmute.edu.zentech.repository.AccountUserRepository;
-import hcmute.edu.zentech.repository.AttendanceRepository;
-import hcmute.edu.zentech.repository.EmployeeRepository;
-import hcmute.edu.zentech.repository.projection.AttendanceRecordProjection;
-import hcmute.edu.zentech.repository.projection.AttendanceStatisticsProjection;
+import hcmute.edu.zentech.repository.*;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import hcmute.edu.zentech.utils.FaceEncryptionUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -24,8 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -35,10 +31,14 @@ public class AttendanceService {
     private final EmployeeRepository employeeRepository;
     private final AttendanceRepository attendanceRepository;
     private final AccountUserRepository accountUserRepository;
+    private final AttendanceEventRepository attendanceEventRepository;
+    private final PayPeriodRepository payPeriodRepository;
+    private final AttendanceCalculator attendanceCalculator;
     private final R2StorageService r2StorageService;
     private final ObjectMapper objectMapper;
     private final FaceEncryptionUtils faceEncryptionUtils;
     private final AdminActivityLogService adminActivityLogService;
+
 
     @Value("${zentech.attendance.face-match-threshold:0.5}")
     private double faceMatchThreshold;
@@ -60,6 +60,12 @@ public class AttendanceService {
         UUID accountId = SecurityContextUtils.getCurrentUserId();
         if (accountId == null) {
             throw new RuntimeException("Không tìm thấy thông tin đăng nhập.");
+        }
+
+        // Kiểm tra kỳ công có bị khóa không
+        Optional<PayPeriod> periodOpt = payPeriodRepository.findPeriodActiveAt(LocalDate.now());
+        if (periodOpt.isPresent() && periodOpt.get().isLocked()) {
+            throw new RuntimeException("Kỳ công đã bị khóa. Không thể thực hiện chấm công.");
         }
 
         // 1. Kiểm tra Rate Limit
@@ -121,27 +127,29 @@ public class AttendanceService {
         // Thành công: Reset rate limit
         resetFailedCheckIn(accountId);
 
-        // Determine Attendance Status
         LocalDateTime now = LocalDateTime.now();
-        LocalTime time = now.toLocalTime();
-        AttendanceStatus status;
         
-        LocalTime startWork = LocalTime.of(8, 0);
-        LocalTime lateThreshold = LocalTime.of(8, 15);
+        // Xác định loại sự kiện CHECK_IN hay CHECK_OUT dựa trên lịch sử hôm nay
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime endOfDay = LocalDate.now().atTime(LocalTime.MAX);
+        List<AttendanceEvent> todayEvents = attendanceEventRepository
+                .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
         
-        if (time.isBefore(startWork)) {
-            status = AttendanceStatus.EARLY;
-        } else if (time.isBefore(lateThreshold)) {
-            status = AttendanceStatus.ON_TIME;
-        } else {
-            status = AttendanceStatus.LATE;
+        AttendanceEventType type = AttendanceEventType.CHECK_IN;
+        if (!todayEvents.isEmpty()) {
+            AttendanceEvent lastEvent = todayEvents.get(todayEvents.size() - 1);
+            if (lastEvent.getEventType() == AttendanceEventType.CHECK_IN) {
+                type = AttendanceEventType.CHECK_OUT;
+            }
         }
 
-        Attendance attendance = new Attendance();
-        attendance.setEmployee(employee);
-        attendance.setCheckInTime(now);
-        attendance.setStatus(status);
-        attendanceRepository.save(attendance);
+        AttendanceEvent event = new AttendanceEvent();
+        event.setEmployee(employee);
+        event.setTimestamp(now);
+        event.setEventType(type);
+        event.setSource("FACE");
+        event.setDetails("Xác thực khuôn mặt thành công. (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
+        attendanceEventRepository.save(event);
 
         // Ghi audit log thành công
         adminActivityLogService.log(
@@ -153,7 +161,7 @@ public class AttendanceService {
                 "Employee",
                 employee.getId().toString(),
                 employee.getFullName(),
-                "Xác thực khuôn mặt thành công. Trạng thái: " + status,
+                "Xác thực khuôn mặt thành công. Sự kiện: " + type,
                 null
         );
 
@@ -236,42 +244,110 @@ public class AttendanceService {
         AccountUser accountUser = accountUserRepository.findById(accountId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy người dùng."));
 
-        LocalDateTime startDateTime = startDate.atStartOfDay();
-        LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
-        Pageable pageable = PageRequest.of(page, size);
+        List<Employee> targetEmployees = new ArrayList<>();
+        boolean isManager = accountUser.getRole() == Role.OWNER || accountUser.getRole() == Role.MANAGER || accountUser.getRole() == Role.ADMIN;
 
-        Page<AttendanceRecordProjection> records;
-        AttendanceStatisticsProjection stats;
-
-        if (accountUser.getRole() == Role.OWNER || accountUser.getRole() == Role.MANAGER || accountUser.getRole() == Role.ADMIN) {
-            records = attendanceRepository.findAllRecordsBetweenDates(startDateTime, endDateTime, pageable);
-            stats = attendanceRepository.getStatisticsBetweenDates(startDateTime, endDateTime);
+        if (isManager) {
+            targetEmployees = employeeRepository.findAll();
         } else if (accountUser.getRole() == Role.EMPLOYEE) {
             Employee employee = employeeRepository.findByUserInfo_Id(accountId)
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
-            records = attendanceRepository.findRecordsByEmployeeIdAndDates(employee.getId(), startDateTime, endDateTime, pageable);
-            stats = attendanceRepository.getStatisticsByEmployeeIdAndDates(employee.getId(), startDateTime, endDateTime);
+            targetEmployees.add(employee);
         } else {
             throw new RuntimeException("Bạn không có quyền truy cập báo cáo này.");
         }
 
-        List<AttendanceRecordResponse> recordResponses = records.getContent().stream()
-                .map(r -> AttendanceRecordResponse.builder()
-                        .id(r.getId())
-                        .employeeId(r.getEmployeeId())
-                        .employeeName(r.getEmployeeName())
-                        .checkInTime(r.getCheckInTime())
-                        .status(r.getStatus())
-                        .build())
-                .collect(Collectors.toList());
+        List<LocalDate> allDates = new ArrayList<>();
+        LocalDate curr = startDate;
+        while (!curr.isAfter(endDate)) {
+            allDates.add(curr);
+            curr = curr.plusDays(1);
+        }
 
-        PageResponse<AttendanceRecordResponse> pageResponse = PageResponse.from(records, recordResponses);
+        long totalRecords = 0;
+        long totalOnTime = 0;
+        long totalLate = 0;
+        long totalEarly = 0;
+        double totalWorkingHours = 0.0;
+        long totalMissingCheckIn = 0;
+        long totalMissingCheckOut = 0;
+        long totalAbsent = 0;
+        long totalLeave = 0;
+
+        List<AttendanceRecordResponse> allCalculatedRecords = new ArrayList<>();
+
+        for (Employee emp : targetEmployees) {
+            for (LocalDate date : allDates) {
+                AttendanceRecordResponse rec = attendanceCalculator.calculateDayAttendance(emp, date);
+                boolean isOff = "OFF".equals(rec.getStatus());
+                if (!isOff || rec.getCheckInTime() != null || rec.getCheckOutTime() != null) {
+                    allCalculatedRecords.add(rec);
+
+                    totalRecords++;
+                    totalWorkingHours += rec.getWorkingHours();
+                    
+                    switch (rec.getStatus()) {
+                        case "ON_TIME":
+                            totalOnTime++;
+                            break;
+                        case "LATE":
+                            totalLate++;
+                            break;
+                        case "EARLY_CHECKOUT":
+                            totalEarly++;
+                            break;
+                        case "LATE_AND_EARLY":
+                            totalLate++;
+                            totalEarly++;
+                            break;
+                        case "MISSING_CHECK_IN":
+                            totalMissingCheckIn++;
+                            break;
+                        case "MISSING_CHECK_OUT":
+                            totalMissingCheckOut++;
+                            break;
+                        case "ABSENT_UNEXCUSED":
+                            totalAbsent++;
+                            break;
+                        case "ABSENT_EXCUSED":
+                            totalLeave++;
+                            break;
+                    }
+                }
+            }
+        }
+
+        // Sort by work date descending and employee name ascending
+        allCalculatedRecords.sort((r1, r2) -> {
+            int dateComp = r2.getWorkDate().compareTo(r1.getWorkDate());
+            if (dateComp != 0) return dateComp;
+            return r1.getEmployeeName().compareTo(r2.getEmployeeName());
+        });
+
+        int totalElements = allCalculatedRecords.size();
+        int fromIndex = page * size;
+        int toIndex = Math.min(fromIndex + size, totalElements);
+
+        List<AttendanceRecordResponse> paginatedList = new ArrayList<>();
+        if (fromIndex < totalElements) {
+            paginatedList = allCalculatedRecords.subList(fromIndex, toIndex);
+        }
+
+        Page<AttendanceRecordResponse> pageResult = 
+                new PageImpl<>(paginatedList, PageRequest.of(page, size), totalElements);
+
+        PageResponse<AttendanceRecordResponse> pageResponse = PageResponse.from(pageResult, paginatedList);
 
         AttendanceStatisticsResponse statisticsResponse = AttendanceStatisticsResponse.builder()
-                .totalRecords(stats.getTotalRecords())
-                .totalOnTime(stats.getTotalOnTime())
-                .totalLate(stats.getTotalLate())
-                .totalEarly(stats.getTotalEarly())
+                .totalRecords(totalRecords)
+                .totalOnTime(totalOnTime)
+                .totalLate(totalLate)
+                .totalEarly(totalEarly)
+                .totalWorkingHours(totalWorkingHours)
+                .totalMissingCheckIn(totalMissingCheckIn)
+                .totalMissingCheckOut(totalMissingCheckOut)
+                .totalAbsent(totalAbsent)
+                .totalLeave(totalLeave)
                 .build();
 
         return AttendanceReportResponse.builder()
