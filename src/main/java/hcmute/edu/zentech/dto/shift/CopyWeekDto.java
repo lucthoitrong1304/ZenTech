@@ -17,4 +17,7 @@ public class CopyWeekDto {
     
     @NotNull
     private LocalDate toWeekEndDate;
+
+    private String reason;
 }
+

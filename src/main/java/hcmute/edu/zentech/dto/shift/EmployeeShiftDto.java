@@ -15,4 +15,7 @@ public class EmployeeShiftDto {
     
     @NotNull
     private LocalDate workDate;
+
+    private String reason;
 }
+

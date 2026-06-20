@@ -19,4 +19,7 @@ public class BulkShiftUpdateDto {
     
     @NotNull
     private LocalDate endDate;
+
+    private String reason;
 }
+
