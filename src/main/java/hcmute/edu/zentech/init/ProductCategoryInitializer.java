@@ -9,4 +9,8 @@ public interface ProductCategoryInitializer {
 
     // Hàm thực thi việc tạo data
     void initialize() throws Exception;
+
+    default void synchronizeExistingData() throws Exception {
+        // Optional hook for non-destructive seed data backfills.
+    }
 }

@@ -26,6 +26,7 @@ public class ChatMessageResponse {
     private ChatMessageType messageType;
     private String content;
     private List<ChatAttachmentResponse> attachments;
+    private List<ChatRecommendedProductResponse> recommendedProducts;
     private Instant createdAt;
     private Instant deletedAt;
 }

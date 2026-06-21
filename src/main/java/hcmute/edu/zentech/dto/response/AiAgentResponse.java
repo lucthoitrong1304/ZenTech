@@ -18,9 +18,8 @@ public class AiAgentResponse {
     private String name;
     private String description;
     private AiAgentStatus status;
-    private Set<Role> assignedRoles;
+    private Role assignedRole;
     private int priority;
-    private boolean defaultForRole;
     private String systemPrompt;
     private String guardrails;
     private BigDecimal temperature;

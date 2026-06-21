@@ -2,6 +2,7 @@ package hcmute.edu.zentech.mapper;
 
 import hcmute.edu.zentech.dto.response.ChatAttachmentResponse;
 import hcmute.edu.zentech.dto.response.ChatMessageResponse;
+import hcmute.edu.zentech.dto.response.ChatRecommendedProductResponse;
 import hcmute.edu.zentech.dto.response.ConversationResponse;
 import hcmute.edu.zentech.dto.response.ParticipantResponse;
 import hcmute.edu.zentech.dto.response.TransferRequestResponse;
@@ -17,6 +18,7 @@ import hcmute.edu.zentech.model.ParticipantType;
 import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.EmployeeRepository;
+import hcmute.edu.zentech.service.R2StorageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +30,7 @@ public class ChatMapper {
     private final CustomerRepository customerRepository;
     private final EmployeeRepository employeeRepository;
     private final AccountUserRepository accountUserRepository;
+    private final R2StorageService r2StorageService;
 
     public ConversationResponse toConversationResponse(
             Conversation conversation,
@@ -104,6 +107,17 @@ public class ChatMapper {
                 .content(message.getContent())
                 .attachments(message.getAttachments() == null ? List.of() : message.getAttachments().stream()
                         .map(this::toChatAttachmentResponse)
+                        .toList())
+                .recommendedProducts(message.getRecommendedProducts() == null ? List.of() : message.getRecommendedProducts().stream()
+                        .map(item -> ChatRecommendedProductResponse.builder()
+                                .productId(item.getProductId())
+                                .variantId(item.getVariantId())
+                                .name(item.getName())
+                                .imageUrl(r2StorageService.getPublicUrl(item.getImageKey()))
+                                .price(item.getPrice())
+                                .stock(item.getStock())
+                                .productUrl("/products/" + item.getProductId())
+                                .build())
                         .toList())
                 .createdAt(message.getCreatedAt())
                 .deletedAt(message.getDeletedAt())

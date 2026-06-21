@@ -17,8 +17,10 @@ import hcmute.edu.zentech.model.ProductGroup;
 import hcmute.edu.zentech.model.ProductVariant;
 import hcmute.edu.zentech.repository.ProductCategoryRepository;
 import hcmute.edu.zentech.repository.ProductGroupRepository;
+import hcmute.edu.zentech.event.ProductSyncEvent;
 import hcmute.edu.zentech.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -53,6 +55,7 @@ public class ProductManagementService {
     private final ProductGroupRepository productGroupRepository;
     private final ProductMapper productMapper;
     private final R2StorageService r2StorageService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public PageResponse<ProductManagementSummaryResponse> getProducts(
             int page,
@@ -97,6 +100,7 @@ public class ProductManagementService {
         product.setVariants(new HashSet<>(buildNewVariants(product, request.getVariants())));
 
         Product savedProduct = productRepository.save(product);
+        eventPublisher.publishEvent(new ProductSyncEvent(this, savedProduct.getId(), "CREATE"));
         return toDetailResponse(savedProduct);
     }
 
@@ -140,6 +144,7 @@ public class ProductManagementService {
             upsertVariants(product, request.getVariants());
         }
 
+        eventPublisher.publishEvent(new ProductSyncEvent(this, product.getId(), "UPDATE"));
         return toDetailResponse(product);
     }
 
@@ -156,6 +161,7 @@ public class ProductManagementService {
                         .filter(variant -> !variant.isDeleted())
                         .forEach(variant -> softDeleteVariant(variant, now));
             }
+            eventPublisher.publishEvent(new ProductSyncEvent(this, product.getId(), "DELETE"));
         }
         return toDetailResponse(product);
     }

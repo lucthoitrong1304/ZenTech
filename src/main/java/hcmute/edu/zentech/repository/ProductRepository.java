@@ -87,6 +87,8 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     boolean existsByProductNameAndDeletedFalse(String productName);
 
+    Optional<Product> findFirstByProductNameIgnoreCaseAndDeletedFalse(String productName);
+
     boolean existsByIdAndDeletedFalse(UUID productId);
 
     @Query("""

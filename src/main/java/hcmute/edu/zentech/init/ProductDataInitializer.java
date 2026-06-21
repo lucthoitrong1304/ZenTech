@@ -23,6 +23,7 @@ public class ProductDataInitializer implements CommandLineRunner {
         for (ProductCategoryInitializer initializer : categoryInitializers) {
             try {
                 if (initializer.hasData()) {
+                    initializer.synchronizeExistingData();
                     log.info("Dữ liệu cho category [{}] đã tồn tại. Bỏ qua khởi tạo.", initializer.getCategoryName());
                     continue;
                 }

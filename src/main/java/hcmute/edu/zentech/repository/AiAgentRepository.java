@@ -38,8 +38,8 @@ public interface AiAgentRepository extends JpaRepository<AiAgent, UUID> {
             left join fetch a.datasets
             where a.deleted = false
             and a.status = :status
-            and :role member of a.assignedRoles
-            order by a.defaultForRole desc, a.priority desc, a.updatedAt desc
+            and a.assignedRole = :role
+            order by a.priority desc, a.updatedAt desc
             """)
     List<AiAgent> findRuntimeCandidates(
             @Param("role") Role role,
@@ -51,11 +51,10 @@ public interface AiAgentRepository extends JpaRepository<AiAgent, UUID> {
             from AiAgent a
             where a.deleted = false
             and a.status = :status
-            and a.defaultForRole = true
-            and :role member of a.assignedRoles
+            and a.assignedRole = :role
             and (:agentId is null or a.id <> :agentId)
             """)
-    boolean existsOtherActiveDefaultForRole(
+    boolean existsOtherActiveAgentForRole(
             @Param("role") Role role,
             @Param("agentId") UUID agentId,
             @Param("status") AiAgentStatus status

@@ -67,6 +67,11 @@ public class ChatMessage {
     @OrderBy("sortOrder ASC")
     private List<ChatMessageAttachment> attachments = new ArrayList<>();
 
+    @Builder.Default
+    @OneToMany(mappedBy = "message", cascade = jakarta.persistence.CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("sortOrder ASC")
+    private List<ChatMessageRecommendation> recommendedProducts = new ArrayList<>();
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
