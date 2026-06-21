@@ -34,7 +34,7 @@ public class AdminIncidentService {
     private final IncidentRepository incidentRepository;
     private final TicketRepository ticketRepository;
     private final ActivityLogRepository activityLogRepository;
-    private final AiAnalysisRepository aiAnalysisRepository;
+
     private final AccountUserRepository accountUserRepository;
     private final IncidentMapper incidentMapper;
     private final TicketMapper ticketMapper;
@@ -66,28 +66,26 @@ public class AdminIncidentService {
                 status, severity, assignee, startDate, endDate, search, pageable
         );
         return incidents.map(incident -> {
-            AiAnalysis analysis = aiAnalysisRepository.findByIncidentId(incident.getId()).orElse(null);
             String ticketCode = ticketRepository.findByIncidentId(incident.getId())
                     .map(Ticket::getCode)
                     .orElse(null);
             String firstEmail = incident.getUser() != null ? incident.getUser().getEmail() : null;
             List<String> affectedEmails = getAffectedUserEmails(incident.getId(), firstEmail);
             List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(incident);
-            return incidentMapper.toResponseDto(incident, analysis, ticketCode, affectedEmails, occurrences);
+            return incidentMapper.toResponseDto(incident, (AiAnalysisResponseDto) null, ticketCode, affectedEmails, occurrences);
         });
     }
 
     public IncidentResponseDto getIncidentById(UUID id) {
         Incident incident = incidentRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự cố với ID: " + id));
-        AiAnalysis analysis = aiAnalysisRepository.findByIncidentId(incident.getId()).orElse(null);
         String ticketCode = ticketRepository.findByIncidentId(incident.getId())
                 .map(Ticket::getCode)
                 .orElse(null);
         String firstEmail = incident.getUser() != null ? incident.getUser().getEmail() : null;
         List<String> affectedEmails = getAffectedUserEmails(incident.getId(), firstEmail);
         List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(incident);
-        return incidentMapper.toResponseDto(incident, analysis, ticketCode, affectedEmails, occurrences);
+        return incidentMapper.toResponseDto(incident, (AiAnalysisResponseDto) null, ticketCode, affectedEmails, occurrences);
     }
 
     private String normalizeErrorMessage(String errorMsg) {
@@ -145,7 +143,7 @@ public class AdminIncidentService {
         if (incident.getTraceId() != null) {
             occurrences.add(IncidentResponseDto.OccurrenceDto.builder()
                     .traceId(incident.getTraceId())
-                    .occurredAt(incident.getCreatedAt() != null ? incident.getCreatedAt() : incident.getOccurredAt())
+                    .occurredAt(incident.getFirstOccurredAt() != null ? incident.getFirstOccurredAt() : (incident.getCreatedAt() != null ? incident.getCreatedAt() : incident.getOccurredAt()))
                     .userEmail(incident.getUser() != null ? incident.getUser().getEmail() : null)
                     .build());
             seenTraceIds.add(incident.getTraceId());
@@ -233,14 +231,13 @@ public class AdminIncidentService {
                 }
             }
 
-            AiAnalysis analysis = aiAnalysisRepository.findByIncidentId(saved.getId()).orElse(null);
             String ticketCode = ticketRepository.findByIncidentId(saved.getId())
                     .map(Ticket::getCode)
                     .orElse(null);
             String firstEmail = saved.getUser() != null ? saved.getUser().getEmail() : null;
             List<String> affectedEmails = getAffectedUserEmails(saved.getId(), firstEmail);
             List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(saved);
-            IncidentResponseDto response = incidentMapper.toResponseDto(saved, analysis, ticketCode, affectedEmails, occurrences);
+            IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysisResponseDto) null, ticketCode, affectedEmails, occurrences);
             try {
                 messagingTemplate.convertAndSend("/topic/admin.incidents", response);
             } catch (Exception e) {
@@ -284,7 +281,7 @@ public class AdminIncidentService {
         String firstEmail = saved.getUser() != null ? saved.getUser().getEmail() : null;
         List<String> affectedEmails = getAffectedUserEmails(saved.getId(), firstEmail);
         List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(saved);
-        IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysis) null, null, affectedEmails, occurrences);
+        IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysisResponseDto) null, null, affectedEmails, occurrences);
         try {
             messagingTemplate.convertAndSend("/topic/admin.incidents", response);
             messagingTemplate.convertAndSend("/topic/admin.incidents.new", response);
@@ -449,14 +446,13 @@ public class AdminIncidentService {
             }
         }
 
-        AiAnalysis analysis = aiAnalysisRepository.findByIncidentId(saved.getId()).orElse(null);
         String ticketCode = ticketRepository.findByIncidentId(saved.getId())
                 .map(Ticket::getCode)
                 .orElse(null);
         String firstEmail = saved.getUser() != null ? saved.getUser().getEmail() : null;
         List<String> affectedEmails = getAffectedUserEmails(saved.getId(), firstEmail);
         List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(saved);
-        IncidentResponseDto response = incidentMapper.toResponseDto(saved, analysis, ticketCode, affectedEmails, occurrences);
+        IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysisResponseDto) null, ticketCode, affectedEmails, occurrences);
         try {
             messagingTemplate.convertAndSend("/topic/admin.incidents", response);
         } catch (Exception e) {
@@ -508,7 +504,7 @@ public class AdminIncidentService {
                 String firstEmail = saved.getUser() != null ? saved.getUser().getEmail() : null;
                 List<String> affectedEmails = getAffectedUserEmails(saved.getId(), firstEmail);
                 List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(saved);
-                IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysis) null, ticketCode, affectedEmails, occurrences);
+                IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysisResponseDto) null, ticketCode, affectedEmails, occurrences);
                 messagingTemplate.convertAndSend("/topic/admin.incidents", response);
             } catch (Exception e) {
                 log.error("Failed to send websocket notification for duplicate incident: {}", saved.getCode(), e);
@@ -552,7 +548,7 @@ public class AdminIncidentService {
             String firstEmail = saved.getUser() != null ? saved.getUser().getEmail() : null;
             List<String> affectedEmails = getAffectedUserEmails(saved.getId(), firstEmail);
             List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(saved);
-            IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysis) null, null, affectedEmails, occurrences);
+            IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysisResponseDto) null, null, affectedEmails, occurrences);
             messagingTemplate.convertAndSend("/topic/admin.incidents", response);
             messagingTemplate.convertAndSend("/topic/admin.incidents.new", response);
         } catch (Exception e) {

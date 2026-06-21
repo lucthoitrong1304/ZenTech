@@ -58,6 +58,14 @@ public class Incident {
     @Column(name = "occurred_at")
     private Instant occurredAt;
 
+    /**
+     * Thời điểm sự cố xảy ra LẦN ĐẦU TIÊN.
+     * Không bao giờ bị ghi đè khi có occurrence mới.
+     * Dùng làm mốc bắt đầu cho cửa sổ tính toán business impact.
+     */
+    @Column(name = "first_occurred_at")
+    private Instant firstOccurredAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -76,6 +84,10 @@ public class Incident {
         }
         if (occurredAt == null) {
             occurredAt = Instant.now();
+        }
+        // firstOccurredAt chỉ set một lần khi tạo mới
+        if (firstOccurredAt == null) {
+            firstOccurredAt = occurredAt;
         }
         if (status == null) {
             status = IncidentStatus.OPEN;

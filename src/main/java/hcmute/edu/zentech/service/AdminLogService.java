@@ -31,7 +31,11 @@ public class AdminLogService {
      * Lấy log hệ thống từ Loki
      */
     public List<Map<String, Object>> getLogs(String level, String search, String traceId, int limit) {
-        return lokiService.queryLogs(level, search, traceId, limit);
+        return getLogs(level, search, traceId, limit, null, null);
+    }
+
+    public List<Map<String, Object>> getLogs(String level, String search, String traceId, int limit, Long startTimeMs, Long endTimeMs) {
+        return lokiService.queryLogs(level, search, traceId, limit, startTimeMs, endTimeMs);
     }
 
     /**

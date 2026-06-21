@@ -48,7 +48,10 @@ public class BusinessImpactManagementService {
         Incident incident = incidentRepository.findById(incidentId)
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy sự cố với ID: " + incidentId));
 
-        Instant start = incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt();
+        // Dùng firstOccurredAt làm điểm bắt đầu — không bị ghi đè khi có occurrence mới
+        Instant start = incident.getFirstOccurredAt() != null
+                ? incident.getFirstOccurredAt()
+                : (incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt());
         Instant end = incident.getResolvedAt() != null ? incident.getResolvedAt() : Instant.now();
         
         long durationMs = Duration.between(start, end).toMillis();
@@ -64,6 +67,21 @@ public class BusinessImpactManagementService {
         boolean isMomoDemo = (incident.getApiPath() != null && incident.getApiPath().contains("/payments/momo/ipn"))
                 || (incident.getCode() != null && incident.getCode().equals("INC-DEMO"));
 
+        // Dùng buffer 5 phút trước incident: FE gửi CHECKOUT_START trước khi BE tạo incident vài giây
+        // Cần giới hạn bởi thời điểm RESOLVED của incident trước đó cùng API để tránh tính lặp số liệu
+        Instant eventStart = start.minus(Duration.ofMinutes(5));
+        if (!isMomoDemo) {
+            Optional<Incident> lastResolvedOpt = incidentRepository.findFirstByApiPathAndHttpMethodAndStatusOrderByResolvedAtDesc(
+                    incident.getApiPath(), incident.getHttpMethod(), IncidentStatus.RESOLVED
+            );
+            if (lastResolvedOpt.isPresent()) {
+                Instant lastResolvedAt = lastResolvedOpt.get().getResolvedAt();
+                if (lastResolvedAt != null && lastResolvedAt.isAfter(eventStart) && lastResolvedAt.isBefore(start)) {
+                    eventStart = lastResolvedAt;
+                }
+            }
+        }
+
         if (isMomoDemo) {
             affectedUsers = 4000;
             expectedOrders = 200;
@@ -72,12 +90,12 @@ public class BusinessImpactManagementService {
             actualRevenue = 0.0;
         } else {
             // 1. Tính toán actual orders và revenue
-            List<Order> orders = orderRepository.findSuccessfulOrdersBetween(start, end, OrderStatus.CANCELLED);
+            List<Order> orders = orderRepository.findSuccessfulOrdersBetween(start, end, OrderStatus.COMPLETED);
             actualOrders = orders.size();
             actualRevenue = orders.stream().mapToDouble(Order::getFinalPrice).sum();
 
             // 2. Tính số lượng affected users từ business_events
-            long affectedCount = businessEventRepository.countAffectedUsersBetween(start, end);
+            long affectedCount = businessEventRepository.countAffectedUsersBetween(eventStart, end);
             if (affectedCount == 0) {
                 // fallback to distinct traceIds of occurrences of this incident
                 try {
@@ -85,9 +103,6 @@ public class BusinessImpactManagementService {
                     affectedCount = emails != null ? emails.size() : 0;
                 } catch (Exception e) {
                     log.error("Failed to query affected user emails from activity log: {}", e.getMessage());
-                }
-                if (affectedCount == 0) {
-                    affectedCount = 15; // default fallback
                 }
             }
             affectedUsers = (int) affectedCount;
@@ -100,7 +115,7 @@ public class BusinessImpactManagementService {
             for (int i = 1; i <= 3; i++) {
                 Instant histStart = start.minus(Duration.ofDays(i));
                 Instant histEnd = end.minus(Duration.ofDays(i));
-                List<Order> histOrders = orderRepository.findSuccessfulOrdersBetween(histStart, histEnd, OrderStatus.CANCELLED);
+                List<Order> histOrders = orderRepository.findSuccessfulOrdersBetween(histStart, histEnd, OrderStatus.COMPLETED);
                 if (!histOrders.isEmpty()) {
                     totalHistoricalOrders += histOrders.size();
                     totalHistoricalRevenue += histOrders.stream().mapToDouble(Order::getFinalPrice).sum();
@@ -121,13 +136,21 @@ public class BusinessImpactManagementService {
             }
         }
         if (!isMomoDemo) {
-            // Đảm bảo số đơn hàng kỳ vọng tối thiểu bằng số đơn hàng thực tế cộng với số khách hàng bị ảnh hưởng trực tiếp (các checkout attempts bị lỗi)
-            expectedOrders = Math.max(expectedOrders, actualOrders + affectedUsers);
-            
-            // Đảm bảo doanh thu kỳ vọng tối thiểu bằng doanh thu thực tế cộng với tổng số tiền giao dịch checkout thất bại được ghi nhận
+            expectedOrders = Math.max(expectedOrders, actualOrders);
+            // Dùng cùng eventStart (đã hiệu chỉnh ở trên) để bắt CHECKOUT_START xảy ra trước incident
+
+            // Mỗi CHECKOUT_START = 1 lần cố đặt hàng thực tế → dùng làm minimum cho expectedOrders
+            long checkoutAttempts = businessEventRepository.countByEventTypeAndCreatedAtBetween(
+                    BusinessEventType.CHECKOUT_START, eventStart, end);
+            if (checkoutAttempts > 0) {
+                expectedOrders = Math.max(expectedOrders, actualOrders + (int) checkoutAttempts);
+            }
+
             double attemptedRevenue = businessEventRepository.sumAmountByEventTypeAndCreatedAtBetween(
-                    BusinessEventType.CHECKOUT_START, start, end);
-            expectedRevenue = Math.max(expectedRevenue, actualRevenue + attemptedRevenue);
+                    BusinessEventType.CHECKOUT_START, eventStart, end);
+            if (attemptedRevenue > 0) {
+                expectedRevenue = Math.max(expectedRevenue, actualRevenue + attemptedRevenue);
+            }
         }
 
         double revenueLoss = Math.max(0.0, expectedRevenue - actualRevenue);
@@ -161,8 +184,21 @@ public class BusinessImpactManagementService {
         return mapToDto(savedResult, durationMinutes);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ManagementImpactDashboardDto getDashboardStats(Instant startDate, Instant endDate) {
+        try {
+            List<Incident> openIncidents = incidentRepository.findByStatusOrderByCreatedAtDesc(IncidentStatus.OPEN);
+            for (Incident inc : openIncidents) {
+                calculateAndSaveImpact(inc.getId());
+            }
+            List<Incident> investigatingIncidents = incidentRepository.findByStatusOrderByCreatedAtDesc(IncidentStatus.INVESTIGATING);
+            for (Incident inc : investigatingIncidents) {
+                calculateAndSaveImpact(inc.getId());
+            }
+        } catch (Exception e) {
+            log.error("Failed to pre-calculate active incidents for dashboard stats: {}", e.getMessage());
+        }
+
         List<ImpactAnalysisResult> results = impactAnalysisResultRepository.findByIncidentDateRange(startDate, endDate);
         
         double totalLostRevenue = results.stream().mapToDouble(ImpactAnalysisResult::getRevenueLoss).sum();
@@ -200,13 +236,18 @@ public class BusinessImpactManagementService {
                     ImpactAnalysisResult result = impactAnalysisResultRepository.findByIncidentId(incident.getId())
                             .orElse(null);
                     
-                    Instant start = incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt();
+                    Instant start = incident.getFirstOccurredAt() != null ? incident.getFirstOccurredAt() : (incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt());
                     Instant end = incident.getResolvedAt() != null ? incident.getResolvedAt() : Instant.now();
                     long durationMs = Duration.between(start, end).toMillis();
                     long durationMinutes = Math.max(1, durationMs / 60000);
 
                     if (result == null) {
                         // Tự động tính toán và lưu cache nếu chưa có dữ liệu tác động
+                        return calculateAndSaveImpact(incident.getId());
+                    }
+                    // OPEN incident: tính lại để lấy data mới nhất từ business_events
+                    boolean isOpen = incident.getResolvedAt() == null;
+                    if (isOpen) {
                         return calculateAndSaveImpact(incident.getId());
                     }
                     return mapToDto(result, durationMinutes);
@@ -221,18 +262,17 @@ public class BusinessImpactManagementService {
         Incident incident = incidentRepository.findById(incidentId)
                 .orElseThrow(() -> new IllegalArgumentException("Không tìm thấy sự cố với ID: " + incidentId));
 
-        ImpactAnalysisResult result = impactAnalysisResultRepository.findByIncidentId(incidentId)
-                .orElseGet(() -> {
-                    // Tính toán tác động ngay nếu chưa được cache
-                    return null;
-                });
-        
-        Instant start = incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt();
+        ImpactAnalysisResult result = impactAnalysisResultRepository.findByIncidentId(incidentId).orElse(null);
+
+        Instant start = incident.getFirstOccurredAt() != null ? incident.getFirstOccurredAt() : (incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt());
         Instant end = incident.getResolvedAt() != null ? incident.getResolvedAt() : Instant.now();
         long durationMs = Duration.between(start, end).toMillis();
         long durationMinutes = Math.max(1, durationMs / 60000);
 
-        if (result == null) {
+        // Incident đang OPEN: luôn tính lại vì end = Instant.now() và business_events có thể tăng thêm
+        // Incident đã RESOLVED: dùng cache vì cửa sổ thời gian cố định
+        boolean isOpen = incident.getResolvedAt() == null;
+        if (result == null || isOpen) {
             return calculateAndSaveImpact(incidentId);
         }
         return mapToDto(result, durationMinutes);
@@ -290,6 +330,9 @@ public class BusinessImpactManagementService {
                 .httpMethod(inc.getHttpMethod())
                 .statusCode(inc.getStatusCode())
                 .occurredAt(inc.getOccurredAt())
+                .firstOccurredAt(inc.getFirstOccurredAt() != null
+                        ? inc.getFirstOccurredAt()
+                        : inc.getOccurredAt())
                 .resolvedAt(inc.getResolvedAt())
                 .status(inc.getStatus())
                 .durationMinutes(durationMinutes)
@@ -339,7 +382,7 @@ public class BusinessImpactManagementService {
                     .email(email)
                     .fullName(fullName)
                     .traceId(incident.getTraceId())
-                    .lastEventAt(incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt())
+                    .lastEventAt(incident.getFirstOccurredAt() != null ? incident.getFirstOccurredAt() : (incident.getCreatedAt() != null ? incident.getCreatedAt() : incident.getOccurredAt()))
                     .lastEventUrl(incident.getApiPath())
                     .avatarUrl(avatarUrl)
                     .build());
@@ -399,7 +442,7 @@ public class BusinessImpactManagementService {
 
         // 3. Fallback: Nếu không có occurrences trong logs hệ thống, truy vấn bảng business_events
         if (list.isEmpty()) {
-            Instant start = incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt();
+            Instant start = incident.getFirstOccurredAt() != null ? incident.getFirstOccurredAt() : (incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt());
             Instant end = incident.getResolvedAt() != null ? incident.getResolvedAt() : Instant.now();
             
             List<BusinessEvent> events = businessEventRepository.findByEventTypeAndCreatedAtBetween(
@@ -451,27 +494,6 @@ public class BusinessImpactManagementService {
                         .lastEventAt(latestEvent.getCreatedAt())
                         .lastEventUrl(incident.getApiPath())
                         .avatarUrl(avatarUrl)
-                        .build());
-            }
-        }
-
-        // 4. Fallback cuối cùng: Sinh dữ liệu mô phỏng nếu cơ sở dữ liệu hoàn toàn trống
-        if (list.isEmpty()) {
-            Instant start = incident.getOccurredAt() != null ? incident.getOccurredAt() : incident.getCreatedAt();
-            int count = 15;
-            ImpactAnalysisResult result = impactAnalysisResultRepository.findByIncidentId(incidentId).orElse(null);
-            if (result != null) {
-                count = result.getAffectedUsers();
-            }
-            for (int i = 1; i <= Math.min(count, 5); i++) {
-                list.add(AffectedUserDetailDto.builder()
-                        .userId(UUID.randomUUID().toString())
-                        .email("user" + i + "@zentech.vn")
-                        .fullName("Khách hàng Test " + i)
-                        .traceId("TR-GUEST-00" + i)
-                        .lastEventAt(start.plusSeconds(i * 120))
-                        .lastEventUrl(incident.getApiPath())
-                        .avatarUrl(null)
                         .build());
             }
         }

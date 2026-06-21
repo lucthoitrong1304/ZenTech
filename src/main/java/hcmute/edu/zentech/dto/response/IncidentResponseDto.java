@@ -25,6 +25,7 @@ public class IncidentResponseDto {
     private IncidentSeverity severity;
     private IncidentStatus status;
     private Instant occurredAt;
+    private Instant firstOccurredAt;
     private Instant createdAt;
     private Instant resolvedAt;
     private String assignee;

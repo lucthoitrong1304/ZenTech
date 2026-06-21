@@ -110,11 +110,11 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             FROM Order o
             WHERE o.createdAt >= :startDate
               AND o.createdAt < :endDate
-              AND o.orderStatus <> :cancelledStatus
+              AND o.orderStatus = :completedStatus
             """)
     List<Order> findSuccessfulOrdersBetween(
             @Param("startDate") Instant startDate,
             @Param("endDate") Instant endDate,
-            @Param("cancelledStatus") OrderStatus cancelledStatus
+            @Param("completedStatus") OrderStatus completedStatus
     );
 }
