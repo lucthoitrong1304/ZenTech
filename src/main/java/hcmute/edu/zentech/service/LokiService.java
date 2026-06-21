@@ -35,6 +35,10 @@ public class LokiService {
     private static final Pattern TRACE_ID_PATTERN = Pattern.compile("(?<=\\[|\\s|^)(ZT-[A-Fa-f0-9a-zA-Z]{8})(?=\\]|\\s|$)");
 
     public List<Map<String, Object>> queryLogs(String level, String search, String traceId, int limit) {
+        return queryLogs(level, search, traceId, limit, null, null);
+    }
+
+    public List<Map<String, Object>> queryLogs(String level, String search, String traceId, int limit, Long startTimeMs, Long endTimeMs) {
         try {
             // 1. Xây dựng câu truy vấn LogQL
             // Truy vấn cả 3 nguồn: backend, frontend, ai-service
@@ -55,13 +59,23 @@ public class LokiService {
                 logql.append(" |= \"").append(search.trim()).append("\"");
             }
 
-            java.net.URI queryUri = UriComponentsBuilder.fromHttpUrl(lokiUrl)
+            UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(lokiUrl)
                     .path("/loki/api/v1/query_range")
                     .queryParam("query", logql.toString())
                     .queryParam("limit", limit)
-                    .queryParam("direction", "BACKWARD")
-                    .build()
-                    .toUri();
+                    .queryParam("direction", "BACKWARD");
+
+            if (startTimeMs != null) {
+                long startNanos = startTimeMs * 1_000_000L;
+                uriBuilder.queryParam("start", startNanos);
+            }
+
+            if (endTimeMs != null) {
+                long endNanos = endTimeMs * 1_000_000L;
+                uriBuilder.queryParam("end", endNanos);
+            }
+
+            java.net.URI queryUri = uriBuilder.build().toUri();
 
             log.info("Querying Loki URI: {}", queryUri);
 

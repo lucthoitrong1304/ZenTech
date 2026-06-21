@@ -27,10 +27,12 @@ public class AdminLogController {
             @RequestParam(value = "level", required = false, defaultValue = "ALL") String level,
             @RequestParam(value = "search", required = false, defaultValue = "") String search,
             @RequestParam(value = "traceId", required = false, defaultValue = "") String traceId,
-            @RequestParam(value = "limit", required = false, defaultValue = "100") int limit
+            @RequestParam(value = "limit", required = false, defaultValue = "100") int limit,
+            @RequestParam(value = "startTime", required = false) Long startTime,
+            @RequestParam(value = "endTime", required = false) Long endTime
     ) {
-        log.info("Request query logs received. level={}, search={}, traceId={}", level, search, traceId);
-        List<Map<String, Object>> logs = adminLogService.getLogs(level, search, traceId, limit);
+        log.info("Request query logs received. level={}, search={}, traceId={}, startTime={}, endTime={}", level, search, traceId, startTime, endTime);
+        List<Map<String, Object>> logs = adminLogService.getLogs(level, search, traceId, limit, startTime, endTime);
         return ResponseEntity.ok(logs);
     }
 
