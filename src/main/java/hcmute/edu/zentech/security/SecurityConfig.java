@@ -70,6 +70,7 @@ public class SecurityConfig {
                         .requestMatchers("/internal/ai/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/payments/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/business-events").permitAll()
                         .requestMatchers("/api/management/ai/**").hasAnyRole("EMPLOYEE", "MANAGER", "OWNER", "ADMIN")
                         .requestMatchers("/api/chat/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/uploads/presign").authenticated()
@@ -90,6 +91,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/management/employees/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/customers/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/reports/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
+                        .requestMatchers("/api/management/impact-analysis/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
 
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
