@@ -1,4 +1,8 @@
 package hcmute.edu.zentech.controller;
+import hcmute.edu.zentech.dto.response.ProductDetailResponse;
+import hcmute.edu.zentech.dto.response.ProductGroupItemResponse;
+import hcmute.edu.zentech.dto.response.CategoryProductListItemResponse;
+import hcmute.edu.zentech.service.ProductService;
 
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.model.*;
@@ -31,6 +35,7 @@ public class InternalAiController {
     private final OrderDetailRepository orderDetailRepository;
     private final CustomerRepository customerRepository;
     private final CustomerVoucherRepository customerVoucherRepository;
+    private final ProductService productService;
 
     @Value("${app.ai.internal-token:zentech_internal_secret_token_123!@}")
     private String internalToken;
@@ -115,6 +120,73 @@ public class InternalAiController {
             reviewCount = product.getReviewList().size();
         }
 
+        // Build related products description
+        StringBuilder relatedBuilder = new StringBuilder();
+        List<RelatedProductSummaryDto> relatedList = new ArrayList<>();
+        try {
+            ProductDetailResponse details = productService.getProductDetail(product.getId());
+            
+            // 1. Group products
+            if (details.getGroupProducts() != null && !details.getGroupProducts().isEmpty()) {
+                relatedBuilder.append("Sản phẩm cùng nhóm (Group Products):\n");
+                for (ProductGroupItemResponse gp : details.getGroupProducts()) {
+                    relatedBuilder.append(String.format("- %s (ID: %s)\n", gp.getProductName(), gp.getId()));
+                    
+                    productRepository.findById(gp.getId()).ifPresent(p -> {
+                        Optional<ProductVariant> repVarOpt = p.getVariants().stream()
+                                .filter(v -> !v.isDeleted())
+                                .min(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+                        
+                        repVarOpt.ifPresent(v -> {
+                            double pPrice = v.getOriginalPrice();
+                            if (v.getSalePrice() != null && v.getSaleStartAt() != null && v.getSaleEndAt() != null
+                                    && now.isAfter(v.getSaleStartAt()) && now.isBefore(v.getSaleEndAt())) {
+                                pPrice = v.getSalePrice();
+                            }
+                            relatedList.add(RelatedProductSummaryDto.builder()
+                                    .productId(p.getId())
+                                    .variantId(v.getId())
+                                    .name(p.getProductName())
+                                    .variantName(v.getName())
+                                    .price(BigDecimal.valueOf(pPrice))
+                                    .stock(v.getStockQuantity())
+                                    .imageKey(resolveRepresentativeImageKey(p))
+                                    .build());
+                        });
+                    });
+                }
+            }
+            
+            // 2. Similar products
+            if (details.getSimilarProducts() != null && !details.getSimilarProducts().isEmpty()) {
+                if (relatedBuilder.length() > 0) {
+                    relatedBuilder.append("\n");
+                }
+                relatedBuilder.append("Sản phẩm tương tự (Similar Products):\n");
+                for (CategoryProductListItemResponse sp : details.getSimilarProducts()) {
+                    String priceStr = String.format("%,.0f VND", sp.getSalePrice() != null ? sp.getSalePrice() : sp.getOriginalPrice());
+                    relatedBuilder.append(String.format("- %s - Giá: %s - Tồn kho: %d sản phẩm (ID: %s)\n", 
+                            sp.getProductName(), priceStr, sp.getStockQuantity(), sp.getId()));
+                    
+                    productRepository.findById(sp.getId()).ifPresent(p -> {
+                        relatedList.add(RelatedProductSummaryDto.builder()
+                                .productId(sp.getId())
+                                .variantId(null)
+                                .name(sp.getProductName())
+                                .variantName(null)
+                                .price(BigDecimal.valueOf(sp.getSalePrice() != null ? sp.getSalePrice() : sp.getOriginalPrice()))
+                                .stock(sp.getStockQuantity())
+                                .imageKey(resolveRepresentativeImageKey(p))
+                                .build());
+                    });
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error fetching related products for product UUID " + product.getId() + ": " + e.getMessage());
+        }
+        
+        String relatedProductsStr = relatedBuilder.length() > 0 ? relatedBuilder.toString() : "Không có sản phẩm liên quan nào.";
+
         return ResolvedProductDto.builder()
                 .productId(product.getId())
                 .variantId(variant.getId())
@@ -132,6 +204,8 @@ public class InternalAiController {
                 .compatibility(product.getCompatibility())
                 .boxContents(product.getBoxContents())
                 .supportInfo(product.getSupportInfo())
+                .relatedProducts(relatedProductsStr)
+                .relatedProductList(relatedList)
                 .build();
     }
 
@@ -369,6 +443,20 @@ public class InternalAiController {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RelatedProductSummaryDto {
+        private UUID productId;
+        private UUID variantId;
+        private String name;
+        private String variantName;
+        private BigDecimal price;
+        private Integer stock;
+        private String imageKey;
+    }
+
+    @Data
+    @Builder
     public static class ResolvedProductDto {
         private UUID productId;
         private UUID variantId;
@@ -386,6 +474,8 @@ public class InternalAiController {
         private String compatibility;
         private String boxContents;
         private String supportInfo;
+        private String relatedProducts;
+        private List<RelatedProductSummaryDto> relatedProductList;
     }
 
     @Data
