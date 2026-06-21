@@ -32,6 +32,10 @@ public interface IncidentRepository extends JpaRepository<Incident, UUID> {
             String apiPath, String httpMethod, List<IncidentStatus> statuses
     );
 
+    Optional<Incident> findFirstByApiPathAndHttpMethodAndStatusOrderByResolvedAtDesc(
+            String apiPath, String httpMethod, IncidentStatus status
+    );
+
     @Query("SELECT i FROM Incident i " +
            "LEFT JOIN i.user u " +
            "WHERE " +

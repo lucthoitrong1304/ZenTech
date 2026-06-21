@@ -50,6 +50,7 @@ public class IncidentMapper {
                 .severity(incident.getSeverity())
                 .status(incident.getStatus())
                 .occurredAt(incident.getOccurredAt())
+                .firstOccurredAt(incident.getFirstOccurredAt() != null ? incident.getFirstOccurredAt() : incident.getOccurredAt())
                 .createdAt(incident.getCreatedAt())
                 .resolvedAt(incident.getResolvedAt())
                 .assignee(incident.getAssignee())

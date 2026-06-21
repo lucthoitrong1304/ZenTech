@@ -143,7 +143,7 @@ public class AdminIncidentService {
         if (incident.getTraceId() != null) {
             occurrences.add(IncidentResponseDto.OccurrenceDto.builder()
                     .traceId(incident.getTraceId())
-                    .occurredAt(incident.getCreatedAt() != null ? incident.getCreatedAt() : incident.getOccurredAt())
+                    .occurredAt(incident.getFirstOccurredAt() != null ? incident.getFirstOccurredAt() : (incident.getCreatedAt() != null ? incident.getCreatedAt() : incident.getOccurredAt()))
                     .userEmail(incident.getUser() != null ? incident.getUser().getEmail() : null)
                     .build());
             seenTraceIds.add(incident.getTraceId());

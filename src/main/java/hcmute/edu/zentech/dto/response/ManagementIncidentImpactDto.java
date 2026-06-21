@@ -22,6 +22,7 @@ public class ManagementIncidentImpactDto {
     private String httpMethod;
     private Integer statusCode;
     private Instant occurredAt;
+    private Instant firstOccurredAt; // Thời điểm sự cố xảy ra lần đầu tiên
     private Instant resolvedAt;
     private IncidentStatus status;
     private Long durationMinutes;
