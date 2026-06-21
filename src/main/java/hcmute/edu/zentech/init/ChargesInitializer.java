@@ -40,6 +40,15 @@ public class ChargesInitializer implements ProductCategoryInitializer {
     }
 
     @Override
+    public void synchronizeExistingData() {
+        productService.setSeedDescriptionIfMissing(
+                "Alpha65 & Power Strip Bundle",
+                buildBundleDescription()
+        );
+        productService.setSeedDescriptionIfMissing("Power Strip", buildPowerStripDescription());
+    }
+
+    @Override
     public void initialize() throws Exception {
         log.info("Bắt đầu tiến trình khởi tạo dữ liệu cho: {}", CATEGORY_NAME);
 
@@ -99,7 +108,7 @@ public class ChargesInitializer implements ProductCategoryInitializer {
                 2_200_000.0,
                 30,
                 "Alpha65 & Power Strip Bundle - Image/",
-                null
+                buildBundleDescription()
         );
 
         // 5. Power Strip (KHÔNG thuộc Group, KHÔNG có Description)
@@ -113,7 +122,7 @@ public class ChargesInitializer implements ProductCategoryInitializer {
                 990_000.0,
                 50,
                 "Power Strip - Image/", // Map đúng folder R2 trên ảnh
-                null
+                buildPowerStripDescription()
         );
 
         // Lưu tất cả vào Database
@@ -316,6 +325,53 @@ public class ChargesInitializer implements ProductCategoryInitializer {
                 * Exclusive War-Damaged Sticker Pack
                 
                 Ready to wield legendary charging power? **Join the elite warriors who've chosen handcrafted quality over mass production.** Your war-damaged charger will be the envy of every tech enthusiast who sees it.
+                """;
+    }
+
+    private String buildBundleDescription() {
+        return """
+                ## Alpha65 & Power Strip Bundle
+
+                Bộ sản phẩm kết hợp **Alpha65 GaN 65W Wall Charger** và **Power Strip**, phù hợp cho góc làm việc, khu vực giải trí hoặc nhu cầu sử dụng nhiều thiết bị.
+
+                ## Điểm nổi bật
+                * Sạc GaN công suất tối đa 65W cho laptop, máy tính bảng và điện thoại tương thích USB-C PD
+                * Power Strip giúp tập trung nguồn điện cho nhiều thiết bị tại cùng một vị trí
+                * Thiết kế đồng bộ theo phong cách cơ khí đặc trưng của dòng Alpha65
+                * Phù hợp cho bàn làm việc, gaming setup và không gian giải trí
+
+                ## Thành phần bộ sản phẩm
+                * Alpha65 GaN 65W Wall Charger
+                * Power Strip
+                * Tài liệu hướng dẫn sử dụng và thông tin an toàn
+
+                ## Lưu ý sử dụng
+                Sử dụng thiết bị và cáp phù hợp với công suất định mức. Không đặt sản phẩm tại nơi ẩm ướt hoặc khu vực bị che kín làm cản trở tản nhiệt.
+                """;
+    }
+
+    private String buildPowerStripDescription() {
+        return """
+                ## Power Strip
+
+                **Power Strip** là giải pháp phân phối nguồn điện dành cho góc làm việc và khu vực giải trí, mang phong cách cơ khí đồng bộ với hệ sinh thái Alpha65.
+
+                ## Điểm nổi bật
+                * Giúp cấp nguồn tập trung cho nhiều thiết bị trong cùng một khu vực
+                * Thiết kế phù hợp với bàn làm việc, gaming setup và hệ thống giải trí
+                * Phiên bản phích cắm US Plug
+                * Kết cấu gọn gàng, thuận tiện bố trí trên bàn hoặc kệ thiết bị
+
+                ## Khả năng tương thích
+                Phù hợp với các thiết bị sử dụng nguồn điện và chuẩn phích cắm tương thích với phiên bản US Plug. Cần kiểm tra điện áp, công suất định mức của thiết bị trước khi kết nối.
+
+                ## Trong hộp
+                * Power Strip
+                * Tài liệu hướng dẫn sử dụng
+                * Thông tin an toàn
+
+                ## Hướng dẫn an toàn
+                Không sử dụng ở nơi ẩm ướt, không che kín khi vận hành và không kết nối thiết bị vượt quá công suất định mức của sản phẩm.
                 """;
     }
 }

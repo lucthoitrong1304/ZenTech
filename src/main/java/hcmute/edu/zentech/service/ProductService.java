@@ -82,6 +82,16 @@ public class ProductService {
         return productRepository.save(product);
     }
 
+    @Transactional
+    public void setSeedDescriptionIfMissing(String productName, String description) {
+        productRepository.findFirstByProductNameIgnoreCaseAndDeletedFalse(productName)
+                .filter(product -> product.getDescription() == null || product.getDescription().isBlank())
+                .ifPresent(product -> {
+                    product.setDescription(description);
+                    productRepository.save(product);
+                });
+    }
+
     @Transactional(readOnly = true)
     public ProductDetailResponse getProductDetail(UUID productId) {
         // Lấy chi tiết 1 sản phẩm

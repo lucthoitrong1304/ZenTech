@@ -126,7 +126,23 @@ public class InternalAiController {
                 .promotionInfo(promoInfo)
                 .rating(avgRating)
                 .reviewCount(reviewCount)
+                .imageKey(resolveRepresentativeImageKey(product))
+                .description(product.getDescription())
+                .specifications(product.getSpecifications())
+                .compatibility(product.getCompatibility())
+                .boxContents(product.getBoxContents())
+                .supportInfo(product.getSupportInfo())
                 .build();
+    }
+
+    private String resolveRepresentativeImageKey(Product product) {
+        if (product.getRepresentativeImageKey() != null && !product.getRepresentativeImageKey().isBlank()) {
+            return product.getRepresentativeImageKey();
+        }
+        return product.getImageKeys() == null ? null : product.getImageKeys().stream()
+                .filter(key -> key != null && !key.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 
     @PostMapping("/orders/resolve")
@@ -364,6 +380,12 @@ public class InternalAiController {
         private String promotionInfo;
         private Double rating;
         private Integer reviewCount;
+        private String imageKey;
+        private String description;
+        private String specifications;
+        private String compatibility;
+        private String boxContents;
+        private String supportInfo;
     }
 
     @Data

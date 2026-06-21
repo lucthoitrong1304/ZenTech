@@ -1,10 +1,13 @@
 package hcmute.edu.zentech.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import hcmute.edu.zentech.dto.request.AiAgentRuntimeRequest;
 import hcmute.edu.zentech.dto.response.ChatAttachmentResponse;
 import hcmute.edu.zentech.dto.response.ChatMessageResponse;
 import hcmute.edu.zentech.mapper.ChatMapper;
 import hcmute.edu.zentech.model.ChatMessage;
+import hcmute.edu.zentech.model.ChatMessageRecommendation;
 import hcmute.edu.zentech.model.ChatAttachmentType;
 import hcmute.edu.zentech.model.ChatMessageType;
 import hcmute.edu.zentech.model.Conversation;
@@ -23,6 +26,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -48,6 +54,7 @@ public class ChatBotService {
     private final AiManagementService aiManagementService;
     private final TransactionTemplate transactionTemplate;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ObjectMapper objectMapper;
 
     @Async
     public void handleCustomerMessage(UUID conversationId, ChatMessageResponse message) {
@@ -123,23 +130,35 @@ public class ChatBotService {
 
         java.io.InputStream inputStream = streamResponseOpt.get().body();
         StringBuilder accumulatedContent = new StringBuilder();
-        try (inputStream) {
-            byte[] buffer = new byte[1024];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                String chunk = new String(buffer, 0, bytesRead, java.nio.charset.StandardCharsets.UTF_8);
-                accumulatedContent.append(chunk);
-
-                // Broadcast chunk
-                ChatMessageResponse chunkResponse = ChatMessageResponse.builder()
-                        .conversationId(conversationId)
-                        .participantId(botParticipant.get().getId())
-                        .senderType(ParticipantType.BOT)
-                        .messageType(ChatMessageType.TEXT_STREAM_CHUNK)
-                        .content(chunk)
-                        .createdAt(Instant.now())
-                        .build();
-                messagingTemplate.convertAndSend("/topic/conversations." + conversationId, chunkResponse);
+        List<RecommendationPayload> recommendations = new ArrayList<>();
+        try (inputStream; BufferedReader reader = new BufferedReader(
+                new InputStreamReader(inputStream, java.nio.charset.StandardCharsets.UTF_8))) {
+            String event = null;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("event:")) {
+                    event = line.substring("event:".length()).trim();
+                } else if (line.startsWith("data:")) {
+                    JsonNode data = objectMapper.readTree(line.substring("data:".length()).trim());
+                    if ("chunk".equals(event)) {
+                        String chunk = data.path("content").asText("");
+                        if (!chunk.isEmpty()) {
+                            accumulatedContent.append(chunk);
+                            broadcastChunk(conversationId, botParticipant.get().getId(), chunk);
+                        }
+                    } else if ("complete".equals(event)) {
+                        for (JsonNode product : data.path("recommendedProducts")) {
+                            RecommendationPayload payload = RecommendationPayload.from(product);
+                            if (payload != null) {
+                                recommendations.add(payload);
+                            }
+                        }
+                    }
+                } else if (!line.isBlank() && event == null) {
+                    // Compatibility with older AI deployments that stream plain text.
+                    accumulatedContent.append(line);
+                    broadcastChunk(conversationId, botParticipant.get().getId(), line);
+                }
             }
         } catch (Exception ex) {
             log.error("Error reading AI stream for conversation: {}", conversationId, ex);
@@ -154,8 +173,22 @@ public class ChatBotService {
         transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                 conversation.getId(),
                 botParticipant.get().getId(),
-                replyToSave
+                replyToSave,
+                recommendations
         ));
+    }
+
+    private void broadcastChunk(UUID conversationId, UUID botParticipantId, String chunk) {
+        ChatMessageResponse chunkResponse = ChatMessageResponse.builder()
+                .conversationId(conversationId)
+                .participantId(botParticipantId)
+                .senderType(ParticipantType.BOT)
+                .messageType(ChatMessageType.TEXT_STREAM_CHUNK)
+                .content(chunk)
+                .recommendedProducts(List.of())
+                .createdAt(Instant.now())
+                .build();
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, chunkResponse);
     }
 
     private Optional<ChatMessageResponse> saveAndBroadcastBotMessage(
@@ -163,7 +196,17 @@ public class ChatBotService {
             UUID botParticipantId,
             String replyContent
     ) {
-        Optional<ChatMessageResponse> responseOpt = saveBotMessage(conversationId, botParticipantId, replyContent);
+        return saveAndBroadcastBotMessage(conversationId, botParticipantId, replyContent, List.of());
+    }
+
+    private Optional<ChatMessageResponse> saveAndBroadcastBotMessage(
+            UUID conversationId,
+            UUID botParticipantId,
+            String replyContent,
+            List<RecommendationPayload> recommendations
+    ) {
+        Optional<ChatMessageResponse> responseOpt = saveBotMessage(
+                conversationId, botParticipantId, replyContent, recommendations);
         responseOpt.ifPresent(response -> messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response));
         return responseOpt;
     }
@@ -171,7 +214,8 @@ public class ChatBotService {
     private Optional<ChatMessageResponse> saveBotMessage(
             UUID conversationId,
             UUID botParticipantId,
-            String replyContent
+            String replyContent,
+            List<RecommendationPayload> recommendations
     ) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElse(null);
@@ -193,6 +237,22 @@ public class ChatBotService {
                 .messageType(ChatMessageType.TEXT)
                 .content(limitContent(replyContent))
                 .build();
+
+        List<ChatMessageRecommendation> recommendationEntities = new ArrayList<>();
+        for (int index = 0; index < recommendations.size(); index++) {
+            RecommendationPayload item = recommendations.get(index);
+            recommendationEntities.add(ChatMessageRecommendation.builder()
+                    .message(botMessage)
+                    .productId(item.productId())
+                    .variantId(item.variantId())
+                    .name(item.name())
+                    .imageKey(item.imageKey())
+                    .price(item.price())
+                    .stock(item.stock())
+                    .sortOrder(index)
+                    .build());
+        }
+        botMessage.setRecommendedProducts(recommendationEntities);
 
         ChatMessage savedMessage = chatMessageRepository.saveAndFlush(botMessage);
         conversation.setUpdatedAt(Instant.now());
@@ -370,5 +430,34 @@ public class ChatBotService {
             return content;
         }
         return content.substring(0, MAX_BOT_REPLY_LENGTH);
+    }
+
+    private record RecommendationPayload(
+            UUID productId,
+            UUID variantId,
+            String name,
+            String imageKey,
+            BigDecimal price,
+            int stock
+    ) {
+        private static RecommendationPayload from(JsonNode node) {
+            try {
+                String imageKey = node.path("imageKey").asText("").trim();
+                if (imageKey.isEmpty()) {
+                    return null;
+                }
+                String variantId = node.path("variantId").asText("").trim();
+                return new RecommendationPayload(
+                        UUID.fromString(node.path("productId").asText()),
+                        variantId.isEmpty() ? null : UUID.fromString(variantId),
+                        node.path("name").asText(""),
+                        imageKey,
+                        node.path("price").decimalValue(),
+                        node.path("stock").asInt(0)
+                );
+            } catch (RuntimeException ignored) {
+                return null;
+            }
+        }
     }
 }
