@@ -25,11 +25,10 @@ public class AiAgentRequest {
 
     private AiAgentStatus status = AiAgentStatus.INACTIVE;
 
-    @NotEmpty
-    private Set<Role> assignedRoles;
+    @jakarta.validation.constraints.NotNull
+    private Role assignedRole;
 
     private int priority = 0;
-    private boolean defaultForRole = false;
 
     @NotBlank
     private String systemPrompt;

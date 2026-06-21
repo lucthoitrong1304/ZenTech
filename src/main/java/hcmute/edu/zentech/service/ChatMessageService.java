@@ -130,10 +130,9 @@ public class ChatMessageService {
 
         if (persistedMessage.shouldTriggerBot()) {
             try {
-                chatBotService.handleCustomerMessage(conversationId, persistedMessage.message())
-                        .ifPresent(botResponse -> broadcastMessage(conversationId, botResponse));
+                chatBotService.handleCustomerMessage(conversationId, persistedMessage.message());
             } catch (RuntimeException ex) {
-                log.warn("Failed to generate or save bot response for conversation {}", conversationId, ex);
+                log.warn("Failed to trigger bot response for conversation {}", conversationId, ex);
             }
         }
 

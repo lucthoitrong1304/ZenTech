@@ -22,10 +22,14 @@ import hcmute.edu.zentech.model.AiDatasetStatus;
 import hcmute.edu.zentech.model.AiDocument;
 import hcmute.edu.zentech.model.AiDocumentStatus;
 import hcmute.edu.zentech.model.Role;
+import hcmute.edu.zentech.model.Product;
+import hcmute.edu.zentech.model.ProductVariant;
 import hcmute.edu.zentech.repository.AiAgentRepository;
 import hcmute.edu.zentech.repository.AiDatasetRepository;
 import hcmute.edu.zentech.repository.AiDocumentRepository;
+import hcmute.edu.zentech.repository.ProductRepository;
 import hcmute.edu.zentech.security.CustomUserDetails;
+import java.util.HashMap;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -66,6 +70,7 @@ public class AiManagementService {
     private final AiAgentRepository aiAgentRepository;
     private final AiDatasetRepository aiDatasetRepository;
     private final AiDocumentRepository aiDocumentRepository;
+    private final ProductRepository productRepository;
     private final ObjectMapper objectMapper;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
@@ -88,7 +93,7 @@ public class AiManagementService {
     public AiAgentResponse createAgent(AiAgentRequest request) {
         AiAgent agent = AiAgent.builder().build();
         applyAgentRequest(agent, request);
-        validateDefaultRoles(agent, null);
+        validateActiveAgentForRole(agent, null);
         return toAgentResponse(aiAgentRepository.save(agent));
     }
 
@@ -96,7 +101,7 @@ public class AiManagementService {
     public AiAgentResponse updateAgent(UUID agentId, AiAgentRequest request) {
         AiAgent agent = getAgentEntity(agentId);
         applyAgentRequest(agent, request);
-        validateDefaultRoles(agent, agentId);
+        validateActiveAgentForRole(agent, agentId);
         return toAgentResponse(agent);
     }
 
@@ -112,10 +117,9 @@ public class AiManagementService {
     @Transactional
     public AiAgentResponse updateAgentRoles(UUID agentId, AiAgentRolesRequest request) {
         AiAgent agent = getAgentEntity(agentId);
-        agent.setAssignedRoles(new HashSet<>(request.getAssignedRoles()));
-        agent.setDefaultForRole(request.isDefaultForRole());
+        agent.setAssignedRole(request.getAssignedRole());
         agent.setPriority(request.getPriority());
-        validateDefaultRoles(agent, agentId);
+        validateActiveAgentForRole(agent, agentId);
         return toAgentResponse(agent);
     }
 
@@ -229,6 +233,51 @@ public class AiManagementService {
                         .map(this::normalizeText));
     }
 
+    public Optional<java.net.http.HttpResponse<java.io.InputStream>> requestAiReplyStream(
+            Role role,
+            String message,
+            List<AiAgentRuntimeRequest.HistoryMessage> history,
+            List<AiAgentRuntimeRequest.Attachment> attachments,
+            Map<String, Object> businessContext
+    ) {
+        AiAgent agent = findAgentForRole(role).orElse(null);
+        if (agent == null) {
+            return Optional.empty();
+        }
+
+        try {
+            AiAgentRuntimeRequest runtimeRequest = AiAgentRuntimeRequest.builder()
+                    .agent(toRuntimeAgent(agent))
+                    .role(role)
+                    .message(message)
+                    .history(history == null ? List.of() : history)
+                    .attachments(attachments == null ? List.of() : attachments)
+                    .datasetIds(agent.getDatasets().stream().map(AiDataset::getId).toList())
+                    .businessContext(businessContext == null ? Map.of() : businessContext)
+                    .build();
+
+            java.net.http.HttpRequest httpRequest = java.net.http.HttpRequest.newBuilder()
+                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/agents/respond/stream"))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(runtimeRequest)))
+                    .build();
+
+            java.net.http.HttpResponse<java.io.InputStream> response = java.net.http.HttpClient.newBuilder()
+                    .build()
+                    .send(httpRequest, java.net.http.HttpResponse.BodyHandlers.ofInputStream());
+
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                log.warn("AI agent stream service returned status {} for agent {}", response.statusCode(), agent.getId());
+                return Optional.empty();
+            }
+
+            return Optional.of(response);
+        } catch (Exception ex) {
+            log.warn("AI agent stream service failed for agent {}", agent.getId(), ex);
+            return Optional.empty();
+        }
+    }
+
     public AiAgentDemoResponse demoAgent(UUID agentId, AiAgentDemoRequest request) {
         AiAgent agent = getAgentEntity(agentId);
         Role role = resolvePrimaryRole(agent);
@@ -272,9 +321,8 @@ public class AiManagementService {
         agent.setName(requireText(request.getName(), "Agent name is required"));
         agent.setDescription(normalizeText(request.getDescription()));
         agent.setStatus(request.getStatus() == null ? AiAgentStatus.INACTIVE : request.getStatus());
-        agent.setAssignedRoles(new HashSet<>(request.getAssignedRoles()));
+        agent.setAssignedRole(request.getAssignedRole());
         agent.setPriority(request.getPriority());
-        agent.setDefaultForRole(request.isDefaultForRole());
         agent.setSystemPrompt(requireText(request.getSystemPrompt(), "System prompt is required"));
         agent.setGuardrails(normalizeText(request.getGuardrails()));
         agent.setTemperature(request.getTemperature());
@@ -287,15 +335,13 @@ public class AiManagementService {
         agent.setDatasets(new HashSet<>(aiDatasetRepository.findAllById(request.getDatasetIds())));
     }
 
-    private void validateDefaultRoles(AiAgent agent, UUID agentId) {
-        if (agent.getStatus() != AiAgentStatus.ACTIVE || !agent.isDefaultForRole()) {
+    private void validateActiveAgentForRole(AiAgent agent, UUID agentId) {
+        if (agent.getStatus() != AiAgentStatus.ACTIVE) {
             return;
         }
 
-        for (Role role : agent.getAssignedRoles()) {
-            if (aiAgentRepository.existsOtherActiveDefaultForRole(role, agentId, AiAgentStatus.ACTIVE)) {
-                throw new RuntimeException("Only one active default AI agent is allowed for role " + role);
-            }
+        if (aiAgentRepository.existsOtherActiveAgentForRole(agent.getAssignedRole(), agentId, AiAgentStatus.ACTIVE)) {
+            throw new RuntimeException("Only one active AI agent is allowed for role " + agent.getAssignedRole());
         }
     }
 
@@ -435,9 +481,7 @@ public class AiManagementService {
     }
 
     private Role resolvePrimaryRole(AiAgent agent) {
-        return agent.getAssignedRoles().stream()
-                .min(Comparator.comparingInt(Role::ordinal))
-                .orElse(Role.CUSTOMER);
+        return agent.getAssignedRole();
     }
 
     private AiAgent getAgentEntity(UUID agentId) {
@@ -464,9 +508,8 @@ public class AiManagementService {
                 .name(agent.getName())
                 .description(agent.getDescription())
                 .status(agent.getStatus())
-                .assignedRoles(agent.getAssignedRoles())
+                .assignedRole(agent.getAssignedRole())
                 .priority(agent.getPriority())
-                .defaultForRole(agent.isDefaultForRole())
                 .systemPrompt(agent.getSystemPrompt())
                 .guardrails(agent.getGuardrails())
                 .temperature(agent.getTemperature())
@@ -533,6 +576,109 @@ public class AiManagementService {
     private String resolveContentType(MultipartFile file) {
         String contentType = file.getContentType();
         return contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType;
+    }
+
+    @Transactional
+    public void syncProductToAi(UUID productId) {
+        Product product = productRepository.findProductDetailById(productId).orElse(null);
+        if (product == null) {
+            return;
+        }
+
+        List<Map<String, Object>> variantsPayload = new ArrayList<>();
+        for (ProductVariant variant : product.getVariants()) {
+            if (variant.isDeleted()) {
+                continue;
+            }
+
+            StringBuilder searchTextBuilder = new StringBuilder();
+            searchTextBuilder.append("Tên sản phẩm: ").append(product.getProductName()).append("\n");
+            if (variant.getName() != null && !variant.getName().isBlank()) {
+                searchTextBuilder.append("Phiên bản/Màu: ").append(variant.getName()).append("\n");
+            }
+            if (product.getDescription() != null) {
+                searchTextBuilder.append("Mô tả: ").append(product.getDescription()).append("\n");
+            }
+            if (product.getSpecifications() != null) {
+                searchTextBuilder.append("Thông số kỹ thuật: ").append(product.getSpecifications()).append("\n");
+            }
+            if (product.getProductGroup() != null) {
+                searchTextBuilder.append("Nhóm sản phẩm: ").append(product.getProductGroup().getGroupName()).append("\n");
+            }
+            if (product.getCategories() != null && !product.getCategories().isEmpty()) {
+                searchTextBuilder.append("Danh mục: ");
+                product.getCategories().forEach(c -> searchTextBuilder.append(c.getCategoryName()).append(", "));
+                searchTextBuilder.append("\n");
+            }
+
+            Map<String, Object> varMap = new HashMap<>();
+            varMap.put("productId", product.getId().toString());
+            varMap.put("variantId", variant.getId().toString());
+            varMap.put("sku", "");
+            varMap.put("name", product.getProductName());
+            varMap.put("searchText", searchTextBuilder.toString());
+            varMap.put("categoryId", product.getCategories() != null && !product.getCategories().isEmpty() ? product.getCategories().iterator().next().getId().toString() : null);
+            varMap.put("categoryName", product.getCategories() != null && !product.getCategories().isEmpty() ? product.getCategories().iterator().next().getCategoryName() : null);
+            varMap.put("colors", variant.getNameColor() != null ? List.of(variant.getNameColor()) : List.of());
+            varMap.put("sizes", List.of());
+            varMap.put("tags", List.of());
+            varMap.put("imageKeys", product.getImageKeys() != null ? product.getImageKeys() : List.of());
+            varMap.put("status", product.isDeleted() ? "INACTIVE" : "ACTIVE");
+            varMap.put("updatedAt", Instant.now().toString());
+
+            variantsPayload.add(varMap);
+        }
+
+        if (variantsPayload.isEmpty()) {
+            return;
+        }
+
+        try {
+            Map<String, Object> payload = Map.of("variants", variantsPayload);
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/api/internal/products/sync"))
+                    .timeout(Duration.ofMillis(aiTimeoutMs))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)))
+                    .build();
+
+            HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofMillis(aiTimeoutMs))
+                    .build()
+                    .send(httpRequest, HttpResponse.BodyHandlers.discarding());
+        } catch (Exception ex) {
+            log.error("Could not sync product {} to AI service", productId, ex);
+        }
+    }
+
+    @Transactional
+    public void reindexProductsToAi() {
+        try {
+            HttpRequest reindexRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/api/internal/products/reindex"))
+                    .timeout(Duration.ofMillis(aiTimeoutMs))
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            HttpResponse<String> response = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofMillis(aiTimeoutMs))
+                    .build()
+                    .send(reindexRequest, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                log.error("Failed to clear product vectors collection, status: {}", response.statusCode());
+                return;
+            }
+
+            List<Product> products = productRepository.findAll();
+            for (Product product : products) {
+                if (!product.isDeleted()) {
+                    syncProductToAi(product.getId());
+                }
+            }
+        } catch (Exception ex) {
+            log.error("Failed to reindex products to AI service", ex);
+        }
     }
 
     private String resolveFallback(AiAgent agent) {

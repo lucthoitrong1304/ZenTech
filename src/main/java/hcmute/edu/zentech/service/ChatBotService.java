@@ -17,6 +17,8 @@ import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -45,16 +47,18 @@ public class ChatBotService {
     private final R2StorageService r2StorageService;
     private final AiManagementService aiManagementService;
     private final TransactionTemplate transactionTemplate;
+    private final SimpMessagingTemplate messagingTemplate;
 
-    public Optional<ChatMessageResponse> handleCustomerMessage(UUID conversationId, ChatMessageResponse message) {
-        log.info("Starting handleCustomerMessage for conversation: {}, messageId: {}", conversationId, message.getId());
+    @Async
+    public void handleCustomerMessage(UUID conversationId, ChatMessageResponse message) {
+        log.info("Starting async handleCustomerMessage for conversation: {}, messageId: {}", conversationId, message.getId());
         String customerContent = normalizeContent(message.getContent());
         List<AiAgentRuntimeRequest.Attachment> attachments = buildAnalyzableAttachments(message);
         boolean hasAttachments = message.getAttachments() != null && !message.getAttachments().isEmpty();
 
         if (!isBotSupportedMessageType(message.getMessageType())) {
             log.warn("Unsupported customer message type {} for conversation: {}", message.getMessageType(), conversationId);
-            return Optional.empty();
+            return;
         }
 
         Optional<ConversationParticipant> botParticipant = participantRepository
@@ -63,46 +67,105 @@ public class ChatBotService {
 
         if (botParticipant.isEmpty()) {
             log.info("No active bot participant found for conversation: {}", conversationId);
-            return Optional.empty();
+            return;
         }
 
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElse(null);
         if (conversation == null) {
-            return Optional.empty();
+            return;
         }
 
         if (customerContent == null && attachments.isEmpty()) {
             log.warn("Customer message has no readable content for conversation: {}", conversationId);
             if (hasAttachments) {
-                return transactionTemplate.execute(status -> saveBotMessage(
+                transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                         conversation.getId(),
                         botParticipant.get().getId(),
                         UNSUPPORTED_ATTACHMENT_REPLY
                 ));
             }
-            return Optional.empty();
+            return;
         }
 
         if (hasAttachments && attachments.isEmpty()) {
-            return transactionTemplate.execute(status -> saveBotMessage(
+            transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                     conversation.getId(),
                     botParticipant.get().getId(),
                     UNSUPPORTED_ATTACHMENT_REPLY
             ));
+            return;
         }
 
         String prompt = buildCustomerPrompt(message, customerContent);
-        log.info("Requesting AI reply for conversation: {}", conversationId);
-        String replyContent = requestAiReply(conversationId, message, prompt, attachments)
-                .orElse(FALLBACK_REPLY);
-        log.info("Received reply content for conversation: {}", conversationId);
+        log.info("Requesting AI reply stream for conversation: {}", conversationId);
 
-        return transactionTemplate.execute(status -> saveBotMessage(
+        List<AiAgentRuntimeRequest.HistoryMessage> history = loadHistory(conversationId, message.getId());
+        Role role = determineRole(message.getSenderType());
+
+        Optional<java.net.http.HttpResponse<java.io.InputStream>> streamResponseOpt = aiManagementService.requestAiReplyStream(
+                role,
+                prompt,
+                history,
+                attachments,
+                java.util.Map.of("conversationId", conversationId.toString())
+        );
+
+        if (streamResponseOpt.isEmpty()) {
+            log.warn("Failed to get stream response, falling back for conversation: {}", conversationId);
+            transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
+                    conversation.getId(),
+                    botParticipant.get().getId(),
+                    FALLBACK_REPLY
+            ));
+            return;
+        }
+
+        java.io.InputStream inputStream = streamResponseOpt.get().body();
+        StringBuilder accumulatedContent = new StringBuilder();
+        try (inputStream) {
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                String chunk = new String(buffer, 0, bytesRead, java.nio.charset.StandardCharsets.UTF_8);
+                accumulatedContent.append(chunk);
+
+                // Broadcast chunk
+                ChatMessageResponse chunkResponse = ChatMessageResponse.builder()
+                        .conversationId(conversationId)
+                        .participantId(botParticipant.get().getId())
+                        .senderType(ParticipantType.BOT)
+                        .messageType(ChatMessageType.TEXT_STREAM_CHUNK)
+                        .content(chunk)
+                        .createdAt(Instant.now())
+                        .build();
+                messagingTemplate.convertAndSend("/topic/conversations." + conversationId, chunkResponse);
+            }
+        } catch (Exception ex) {
+            log.error("Error reading AI stream for conversation: {}", conversationId, ex);
+        }
+
+        String finalReply = accumulatedContent.toString().trim();
+        if (finalReply.isEmpty()) {
+            finalReply = FALLBACK_REPLY;
+        }
+
+        final String replyToSave = finalReply;
+        transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                 conversation.getId(),
                 botParticipant.get().getId(),
-                replyContent
+                replyToSave
         ));
+    }
+
+    private Optional<ChatMessageResponse> saveAndBroadcastBotMessage(
+            UUID conversationId,
+            UUID botParticipantId,
+            String replyContent
+    ) {
+        Optional<ChatMessageResponse> responseOpt = saveBotMessage(conversationId, botParticipantId, replyContent);
+        responseOpt.ifPresent(response -> messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response));
+        return responseOpt;
     }
 
     private Optional<ChatMessageResponse> saveBotMessage(

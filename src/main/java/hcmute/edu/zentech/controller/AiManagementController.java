@@ -149,4 +149,10 @@ public class AiManagementController {
     public ResponseEntity<ApiResponse<AiDocumentResponse>> reingestDocument(@PathVariable UUID documentId) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.reingestDocument(documentId)));
     }
+
+    @PostMapping("/products/reindex")
+    public ResponseEntity<ApiResponse<String>> reindexProducts() {
+        aiManagementService.reindexProductsToAi();
+        return ResponseEntity.ok(ApiResponse.success("Reindex started"));
+    }
 }

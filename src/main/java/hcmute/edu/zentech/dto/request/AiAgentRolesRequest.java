@@ -10,8 +10,7 @@ import java.util.Set;
 @Getter
 @Setter
 public class AiAgentRolesRequest {
-    @NotEmpty
-    private Set<Role> assignedRoles;
-    private boolean defaultForRole;
+    @jakarta.validation.constraints.NotNull
+    private Role assignedRole;
     private int priority;
 }

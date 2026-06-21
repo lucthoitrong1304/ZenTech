@@ -59,20 +59,14 @@ public class AiAgent {
     @Builder.Default
     private AiAgentStatus status = AiAgentStatus.INACTIVE;
 
-    @Builder.Default
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "ai_agent_roles", joinColumns = @JoinColumn(name = "agent_id"))
     @Enumerated(EnumType.STRING)
-    @Column(name = "role", nullable = false, length = 30)
-    private Set<Role> assignedRoles = new HashSet<>();
+    @Column(name = "assigned_role", nullable = false, length = 30)
+    @Builder.Default
+    private Role assignedRole = Role.CUSTOMER;
 
     @Column(nullable = false)
     @Builder.Default
     private int priority = 0;
-
-    @Column(name = "default_for_role", nullable = false)
-    @Builder.Default
-    private boolean defaultForRole = false;
 
     @Column(nullable = false, columnDefinition = "TEXT")
     private String systemPrompt;
