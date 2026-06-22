@@ -24,9 +24,11 @@ public class TicketResponseDto {
     private UUID assigneeId;
     private String assigneeName;
     private String assigneeEmail;
+    private String assigneeImageUrl;
     private UUID createdById;
     private String createdByName;
     private String createdByEmail;
+    private String createdByImageUrl;
     private java.util.List<String> affectedUserEmails;
     private Instant createdAt;
     private Instant resolvedAt;

@@ -70,6 +70,13 @@ public class ChatMessageService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<ChatMessageResponse> getMessagesForManagement(UUID conversationId, int page, int size) {
+        getConversation(conversationId);
+        chatParticipantService.getCurrentStaffIdentity();
+        return getMessages(conversationId, page, size);
+    }
+
+    @Transactional(readOnly = true)
     public PageResponse<ChatMessageResponse> searchMessagesForCurrentUser(UUID conversationId, String keyword, int page, int size) {
         Conversation conversation = getConversation(conversationId);
         chatParticipantService.findCurrentCustomer()
