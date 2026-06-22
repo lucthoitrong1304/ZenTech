@@ -83,6 +83,7 @@ public class OrderManagementMapper {
                 .customerId(customer.getId())
                 .fullName(customer.getFullName())
                 .email(customer.getUserInfo() != null ? customer.getUserInfo().getEmail() : null)
+                .imageUrl(customer.getImageUrl())
                 .build();
     }
 

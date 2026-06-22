@@ -30,6 +30,7 @@ public class TicketResponseDto {
     private String createdByEmail;
     private String createdByImageUrl;
     private java.util.List<String> affectedUserEmails;
+    private java.util.List<AffectedUserDetailDto> affectedUsers;
     private Instant createdAt;
     private Instant resolvedAt;
     private String images;
