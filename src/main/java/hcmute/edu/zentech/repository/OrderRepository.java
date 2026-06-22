@@ -117,4 +117,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             @Param("endDate") Instant endDate,
             @Param("completedStatus") OrderStatus completedStatus
     );
+
+    @Query("""
+            SELECT o
+            FROM Order o
+            WHERE o.createdAt >= :startDate
+              AND o.createdAt < :endDate
+            """)
+    List<Order> findAllOrdersBetween(
+            @Param("startDate") Instant startDate,
+            @Param("endDate") Instant endDate
+    );
 }

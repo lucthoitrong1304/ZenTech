@@ -65,13 +65,15 @@ public class ReportManagementService {
         // Calculate average order value (AOV)
         double averageOrderValue = currentOrderCount > 0 ? (currentRevenue / currentOrderCount) : 0.0;
 
-        // Dynamic tech metrics
-        double aiOpsScore = 100.0;
-        if (currentOrderCount > 0) {
-            long completedCount = currentOrders.stream()
+        // Calculate completion rate based on all orders in this period
+        List<Order> allOrders = orderRepository.findAllOrdersBetween(start, end);
+        long totalOrdersCount = allOrders.size();
+        double aiOpsScore = 0.0;
+        if (totalOrdersCount > 0) {
+            long completedCount = allOrders.stream()
                     .filter(o -> o.getOrderStatus() == OrderStatus.COMPLETED)
                     .count();
-            aiOpsScore = ((double) completedCount / currentOrderCount) * 100.0;
+            aiOpsScore = ((double) completedCount / totalOrdersCount) * 100.0;
         }
 
         double autoFulfillmentRate = aiOpsScore;
@@ -315,7 +317,7 @@ public class ReportManagementService {
                     return ReportManagementCustomerSegmentResponse.builder()
                             .customerName(customer.getFullName())
                             .email(email)
-                            .imageUrl(customer.getImageUrl())
+                            .imageUrl(resolveImageUrl(customer.getImageUrl()))
                             .joinDate(joinDate)
                             .address(addressStr)
                             .orderCount(entry.getValue())
@@ -646,7 +648,7 @@ public class ReportManagementService {
     }
 
     private List<Order> getSuccessfulOrdersBetween(Instant start, Instant end) {
-        return orderRepository.findSuccessfulOrdersBetween(start, end, OrderStatus.CANCELLED);
+        return orderRepository.findSuccessfulOrdersBetween(start, end, OrderStatus.COMPLETED);
     }
 
     private Instant[] normalizeDates(Instant startDate, Instant endDate) {
@@ -659,5 +661,12 @@ public class ReportManagementService {
             start = end.atZone(zone).minusDays(30).toLocalDate().atStartOfDay(zone).toInstant();
         }
         return new Instant[]{start, end};
+    }
+
+    private String resolveImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank() || imageUrl.startsWith("http")) {
+            return imageUrl;
+        }
+        return r2StorageService.getPresignedGetUrl(imageUrl);
     }
 }

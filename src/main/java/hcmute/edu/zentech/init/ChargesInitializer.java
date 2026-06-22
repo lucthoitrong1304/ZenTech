@@ -35,8 +35,7 @@ public class ChargesInitializer implements ProductCategoryInitializer {
 
     @Override
     public boolean hasData() {
-        // Kiểm tra Group Alpha65 để quyết định có chạy initializer hay không
-        return productGroupService.existsByGroupName(GROUP_NAME);
+        return productService.existsByProductName("Alpha65 & Power Strip Bundle");
     }
 
     @Override
