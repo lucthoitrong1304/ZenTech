@@ -10,6 +10,8 @@ import hcmute.edu.zentech.model.Customer;
 import hcmute.edu.zentech.model.Order;
 import hcmute.edu.zentech.model.OrderDetail;
 import hcmute.edu.zentech.repository.projection.CustomerOrderAggregateProjection;
+import hcmute.edu.zentech.service.R2StorageService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -20,7 +22,9 @@ import java.util.Map;
 import java.util.UUID;
 
 @Component
+@RequiredArgsConstructor
 public class CustomerManagementMapper {
+    private final R2StorageService r2StorageService;
 
     public CustomerSummaryResponse toCustomerSummaryResponse(Customer customer, CustomerOrderAggregateProjection aggregate) {
         return CustomerSummaryResponse.builder()
@@ -32,7 +36,7 @@ public class CustomerManagementMapper {
                 .totalOrders(getTotalOrders(aggregate))
                 .totalSpent(getTotalSpent(aggregate))
                 .lastOrderAt(getLastOrderAt(aggregate))
-                .imageUrl(customer.getImageUrl())
+                .imageUrl(resolveImageUrl(customer.getImageUrl()))
                 .build();
     }
 
@@ -55,7 +59,7 @@ public class CustomerManagementMapper {
                 .totalOrders(getTotalOrders(aggregate))
                 .totalSpent(getTotalSpent(aggregate))
                 .lastOrderAt(getLastOrderAt(aggregate))
-                .imageUrl(customer.getImageUrl())
+                .imageUrl(resolveImageUrl(customer.getImageUrl()))
                 .build();
     }
 
@@ -130,5 +134,12 @@ public class CustomerManagementMapper {
 
     private Instant getLastOrderAt(CustomerOrderAggregateProjection aggregate) {
         return aggregate != null ? aggregate.getLastOrderAt() : null;
+    }
+
+    private String resolveImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank() || imageUrl.startsWith("http")) {
+            return imageUrl;
+        }
+        return r2StorageService.getPresignedGetUrl(imageUrl);
     }
 }

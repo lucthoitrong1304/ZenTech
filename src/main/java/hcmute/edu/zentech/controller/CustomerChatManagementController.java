@@ -6,10 +6,12 @@ import hcmute.edu.zentech.dto.request.TransferRequestUpdateRequest;
 import hcmute.edu.zentech.dto.request.ChatConversationTransferRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.ChatStaffResponse;
+import hcmute.edu.zentech.dto.response.ChatMessageResponse;
 import hcmute.edu.zentech.dto.response.ConversationResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.dto.response.TransferRequestResponse;
 import hcmute.edu.zentech.service.ChatConversationService;
+import hcmute.edu.zentech.service.ChatMessageService;
 import hcmute.edu.zentech.service.TransferRequestService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CustomerChatManagementController {
     private final ChatConversationService chatConversationService;
+    private final ChatMessageService chatMessageService;
     private final TransferRequestService transferRequestService;
 
     // Lấy danh sách hội thoại (flow riêng cho nhân viên)
@@ -42,6 +45,15 @@ public class CustomerChatManagementController {
     }
 
     // Logic tiếp nhận yêu cầu
+    @GetMapping("/conversations/{conversationId}/messages")
+    public ResponseEntity<ApiResponse<PageResponse<ChatMessageResponse>>> getConversationMessages(
+            @PathVariable UUID conversationId,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0") int page,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "50") int size
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(chatMessageService.getMessagesForManagement(conversationId, page, size)));
+    }
+
     @PostMapping("/conversations/{conversationId}/claim")
     public ResponseEntity<ApiResponse<ConversationResponse>> claimConversation(@PathVariable UUID conversationId) {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.claimConversation(conversationId)));
