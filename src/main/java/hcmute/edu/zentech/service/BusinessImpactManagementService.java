@@ -322,6 +322,11 @@ public class BusinessImpactManagementService {
 
     private ManagementIncidentImpactDto mapToDto(ImpactAnalysisResult result, long durationMinutes) {
         Incident inc = result.getIncident();
+        List<AffectedUserDetailDto> allAffected = getAffectedUserDetails(inc.getId());
+        List<AffectedUserDetailDto> topAffected = allAffected != null ? allAffected.stream()
+                .limit(3)
+                .collect(Collectors.toList()) : Collections.emptyList();
+
         return ManagementIncidentImpactDto.builder()
                 .incidentId(inc.getId())
                 .incidentCode(inc.getCode())
@@ -344,6 +349,7 @@ public class BusinessImpactManagementService {
                 .lostOrders(result.getLostOrders())
                 .affectedUsers(result.getAffectedUsers())
                 .severity(result.getSeverity())
+                .topAffectedUsers(topAffected)
                 .aiSummary(null)
                 .build();
     }
