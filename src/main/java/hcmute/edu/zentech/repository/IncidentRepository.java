@@ -65,4 +65,8 @@ public interface IncidentRepository extends JpaRepository<Incident, UUID> {
 
     @Query("SELECT COUNT(i) FROM Incident i")
     long countAllIncidents();
+
+    List<Incident> findByStatusNot(IncidentStatus status);
+    List<Incident> findByCreatedAtBetween(Instant startDate, Instant endDate);
+    List<Incident> findByResolvedAtBetween(Instant startDate, Instant endDate);
 }
