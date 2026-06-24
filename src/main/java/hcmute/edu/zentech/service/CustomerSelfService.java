@@ -10,6 +10,7 @@ import hcmute.edu.zentech.dto.response.CustomerVoucherResponse;
 import hcmute.edu.zentech.dto.response.MyProfileResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.dto.response.ReturnRequestResponse;
+import hcmute.edu.zentech.event.ReturnEvidenceCleanupEvent;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.CustomerSelfMapper;
 import hcmute.edu.zentech.mapper.ReturnRequestMapper;
@@ -30,6 +31,7 @@ import hcmute.edu.zentech.repository.OrderRepository;
 import hcmute.edu.zentech.repository.ReturnRequestRepository;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -65,6 +67,7 @@ public class CustomerSelfService {
     private final CustomerVoucherRepository customerVoucherRepository;
     private final ReturnRequestRepository returnRequestRepository;
     private final R2StorageService r2StorageService;
+    private final ApplicationEventPublisher eventPublisher;
     private final CustomerSelfMapper customerSelfMapper;
     private final ReturnRequestMapper returnRequestMapper;
 
@@ -444,8 +447,12 @@ public class CustomerSelfService {
 
     @Transactional
     public ReturnRequestResponse createReturnRequest(UUID orderId, ReturnRequestCreateRequest request) {
+        UUID currentAccountId = SecurityContextUtils.getCurrentUserId();
+        if (currentAccountId == null) {
+            throw new AccessDeniedException("Authentication is required");
+        }
         Customer currentCustomer = getCurrentCustomer();
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
 
         if (!order.getCustomer().getId().equals(currentCustomer.getId())) {
@@ -456,7 +463,7 @@ public class CustomerSelfService {
             throw new RuntimeException("Chỉ đơn hàng đã hoàn thành mới có thể yêu cầu trả hàng.");
         }
 
-        if (returnRequestRepository.findByOrderId(orderId).isPresent()) {
+        if (returnRequestRepository.existsByOrder_IdAndStatus(orderId, ReturnRequestStatus.PENDING)) {
             throw new RuntimeException("Yêu cầu trả hàng cho đơn hàng này đã tồn tại.");
         }
 
@@ -467,29 +474,29 @@ public class CustomerSelfService {
         returnRequest.setStatus(ReturnRequestStatus.PENDING);
         returnRequest.setResellable(false);
 
-        // Process proof file keys: move from temp/returns/ to evidence/returns/
+        // Copy proof files to permanent storage. Temp files are deleted only after DB commit.
         String tempKeys = request.getProofFileKeys();
         String permanentKeys = "";
+        List<String> tempKeysToCleanup = new java.util.ArrayList<>();
         if (tempKeys != null && !tempKeys.isBlank()) {
             List<String> movedKeys = new java.util.ArrayList<>();
             for (String key : tempKeys.split(",")) {
                 String trimmedKey = key.trim();
-                if (trimmedKey.startsWith("temp/returns/")) {
-                    String permanentKey = trimmedKey.replace("temp/returns/", "evidence/returns/");
-                    r2StorageService.moveObject(trimmedKey, permanentKey);
-                    movedKeys.add(permanentKey);
-                } else {
-                    movedKeys.add(trimmedKey);
-                }
+                String permanentKey = r2StorageService.promoteReturnEvidence(trimmedKey, currentAccountId);
+                movedKeys.add(permanentKey);
+                tempKeysToCleanup.add(trimmedKey);
             }
             permanentKeys = String.join(",", movedKeys);
         }
         returnRequest.setProofFileKeys(permanentKeys);
 
         order.setOrderStatus(OrderStatus.RETURN_REQUESTED);
-        orderRepository.save(order);
+        orderRepository.saveAndFlush(order);
 
-        ReturnRequest saved = returnRequestRepository.save(returnRequest);
+        ReturnRequest saved = returnRequestRepository.saveAndFlush(returnRequest);
+        if (!tempKeysToCleanup.isEmpty()) {
+            eventPublisher.publishEvent(new ReturnEvidenceCleanupEvent(this, tempKeysToCleanup));
+        }
         return returnRequestMapper.toResponse(saved);
     }
 

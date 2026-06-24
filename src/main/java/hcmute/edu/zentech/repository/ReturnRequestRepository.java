@@ -1,6 +1,7 @@
 package hcmute.edu.zentech.repository;
 
 import hcmute.edu.zentech.model.ReturnRequest;
+import hcmute.edu.zentech.model.ReturnRequestStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
@@ -18,5 +19,5 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, UU
     @Query("SELECT r FROM ReturnRequest r JOIN FETCH r.order o JOIN FETCH o.customer c ORDER BY r.createdAt DESC")
     List<ReturnRequest> findAllWithDetails();
 
-    Optional<ReturnRequest> findByOrderId(UUID orderId);
+    boolean existsByOrder_IdAndStatus(UUID orderId, ReturnRequestStatus status);
 }

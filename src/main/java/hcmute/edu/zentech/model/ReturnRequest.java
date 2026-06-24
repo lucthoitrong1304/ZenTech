@@ -20,7 +20,7 @@ public class ReturnRequest {
     @Column(name = "return_request_id")
     private UUID id;
 
-    @OneToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_id", nullable = false)
     private Order order;
 

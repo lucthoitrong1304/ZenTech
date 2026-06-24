@@ -534,11 +534,60 @@ public class R2StorageService {
     }
 
     /**
-     * Di chuyển (Copy + Delete) file trên R2
-     * @param sourceKey : file key nguồn
-     * @param destinationKey : file key đích
+     * Copies return evidence to its permanent key without deleting the temporary
+     * object. Deletion is deliberately deferred until the database transaction
+     * commits so a failed request can be retried safely.
      */
-    public void moveObject(String sourceKey, String destinationKey) {
+    public String promoteReturnEvidence(String tempKey, UUID accountId) {
+        if (tempKey == null || tempKey.isBlank()) {
+            throw new IllegalArgumentException("Return evidence key is required");
+        }
+        if (accountId == null) {
+            throw new IllegalArgumentException("Return evidence owner is required");
+        }
+
+        String tempPrefix = getReturnEvidenceTempPrefix(accountId);
+        if (!tempKey.startsWith(tempPrefix)) {
+            throw new IllegalArgumentException("Invalid return evidence key owner");
+        }
+
+        String filename = tempKey.substring(tempPrefix.length());
+        if (filename.isBlank() || filename.contains("/")) {
+            throw new IllegalArgumentException("Invalid return evidence key");
+        }
+
+        String permanentKey = "evidence/returns/" + accountId + "/" + filename;
+        if (objectExists(tempKey)) {
+            copyObject(tempKey, permanentKey);
+            return permanentKey;
+        }
+
+        if (objectExists(permanentKey)) {
+            log.info("Return evidence already promoted to {}; treating request as a retry", permanentKey);
+            return permanentKey;
+        }
+
+        throw new IllegalArgumentException("Uploaded return evidence does not exist: " + tempKey);
+    }
+
+    private boolean objectExists(String fileKey) {
+        try {
+            s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileKey)
+                    .build());
+            return true;
+        } catch (NoSuchKeyException e) {
+            return false;
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    private void copyObject(String sourceKey, String destinationKey) {
         try {
             String encodedSourceKey = java.net.URLEncoder.encode(sourceKey, java.nio.charset.StandardCharsets.UTF_8)
                     .replace("+", "%20");
@@ -548,16 +597,11 @@ public class R2StorageService {
                     .destinationKey(destinationKey)
                     .build();
             s3Client.copyObject(copyObjectRequest);
-
-            DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
-                    .bucket(bucketName)
-                    .key(sourceKey)
-                    .build();
-            s3Client.deleteObject(deleteObjectRequest);
-            log.info("Successfully moved R2 object from {} to {}", sourceKey, destinationKey);
+            log.info("Successfully copied R2 return evidence from {} to {}", sourceKey, destinationKey);
         } catch (Exception e) {
-            log.error("Lỗi khi di chuyển file trên R2 từ {} sang {}: {}", sourceKey, destinationKey, e.getMessage(), e);
-            throw new RuntimeException("Lỗi di chuyển file trên R2: " + e.getMessage(), e);
+            log.error("Failed to copy R2 return evidence from {} to {}: {}",
+                    sourceKey, destinationKey, e.getMessage(), e);
+            throw new RuntimeException("Failed to promote return evidence: " + e.getMessage(), e);
         }
     }
 
