@@ -65,6 +65,19 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     @Query("""
             select distinct p
             from Product p
+            left join fetch p.variants v
+            left join fetch p.reviewList r
+            left join p.productGroup pg
+            where p.deleted = false
+            and (:keyword is null
+                 or lower(p.productName) like lower(concat('%', :keyword, '%'))
+                 or lower(pg.groupName) like lower(concat('%', :keyword, '%')))
+            """)
+    List<Product> searchActiveProductsWithVariantsAndReviews(@Param("keyword") String keyword);
+
+    @Query("""
+            select distinct p
+            from Product p
             join fetch p.categories c
             left join fetch p.reviewList
             left join fetch p.variants

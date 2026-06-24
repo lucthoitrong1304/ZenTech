@@ -2,6 +2,8 @@ package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.request.ProductReviewListQueryRequest;
 import hcmute.edu.zentech.dto.request.ProductReviewRequest;
+import hcmute.edu.zentech.dto.request.ProductSearchQueryRequest;
+import hcmute.edu.zentech.dto.response.CategoryProductListItemResponse;
 import hcmute.edu.zentech.dto.response.PagedResponse;
 import hcmute.edu.zentech.dto.response.ProductDetailResponse;
 import hcmute.edu.zentech.dto.response.ProductReviewItemResponse;
@@ -28,6 +30,13 @@ import java.util.UUID;
 public class ProductController {
     private final ProductService productService;
     private final ProductReviewService productReviewService;
+
+    @GetMapping
+    public ResponseEntity<PagedResponse<CategoryProductListItemResponse>> getProducts(
+            @Valid @ModelAttribute ProductSearchQueryRequest request
+    ) {
+        return ResponseEntity.ok(productService.getProducts(request));
+    }
 
     @GetMapping("/{productId}")
     public ResponseEntity<ProductDetailResponse> getProductDetail(@PathVariable UUID productId) {

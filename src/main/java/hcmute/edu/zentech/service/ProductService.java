@@ -1,12 +1,15 @@
 package hcmute.edu.zentech.service;
 
+import hcmute.edu.zentech.dto.request.ProductSearchQueryRequest;
 import hcmute.edu.zentech.dto.request.VariantRequestDTO;
 import hcmute.edu.zentech.dto.response.CategoryProductListItemResponse;
 import hcmute.edu.zentech.dto.response.ProductDetailResponse;
 import hcmute.edu.zentech.dto.response.ProductGroupItemResponse;
 import hcmute.edu.zentech.dto.response.ProductVariantDetailResponse;
+import hcmute.edu.zentech.dto.response.PagedResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.ProductMapper;
+import hcmute.edu.zentech.model.CategoryProductSortOption;
 import hcmute.edu.zentech.model.Product;
 import hcmute.edu.zentech.model.ProductCategory;
 import hcmute.edu.zentech.model.ProductReview;
@@ -350,5 +353,133 @@ public class ProductService {
             return false;
         }
         return productRepository.existsByProductName(productName);
+    }
+
+    @Transactional(readOnly = true)
+    public PagedResponse<CategoryProductListItemResponse> getProducts(ProductSearchQueryRequest request) {
+        String keyword = request.getSearch() != null ? request.getSearch().trim() : null;
+        if (keyword != null && keyword.isEmpty()) {
+            keyword = null;
+        }
+
+        List<Product> products = productRepository.searchActiveProductsWithVariantsAndReviews(keyword);
+
+        List<ProductListingView> listingViews = products.stream()
+                .filter(Objects::nonNull)
+                .map(this::buildListingView)
+                .filter(view -> matchesMinRating(view, request.getMinRating()))
+                .sorted(buildComparator(resolveSortOption(request.getSort())))
+                .toList();
+
+        return buildPagedResponse(listingViews, request.getPage(), request.getSize());
+    }
+
+    private ProductListingView buildListingView(Product product) {
+        Optional<ProductVariant> representativeVariant = getRepresentativeVariant(product);
+        Double originalPrice = representativeVariant.map(ProductVariant::getOriginalPrice).orElse(null);
+        Double salePrice = representativeVariant.map(ProductVariant::getSalePrice).orElse(null);
+        Double effectivePrice = salePrice != null ? salePrice : originalPrice;
+        Integer stockQuantity = product.getVariants() != null ? product.getVariants().stream()
+                .filter(Objects::nonNull)
+                .filter(variant -> !variant.isDeleted())
+                .mapToInt(ProductVariant::getStockQuantity)
+                .sum() : 0;
+
+        return new ProductListingView(
+                product,
+                getRepresentativeImageUrl(product),
+                originalPrice,
+                salePrice,
+                effectivePrice,
+                getAverageRating(product),
+                stockQuantity
+        );
+    }
+
+    private boolean matchesMinRating(ProductListingView view, Integer minRating) {
+        if (minRating == null) {
+            return true;
+        }
+        return view.averageRating() != null && view.averageRating() >= minRating;
+    }
+
+    private CategoryProductSortOption resolveSortOption(CategoryProductSortOption sortOption) {
+        return sortOption == null ? CategoryProductSortOption.NEWEST : sortOption;
+    }
+
+    private Comparator<ProductListingView> buildComparator(CategoryProductSortOption sortOption) {
+        Comparator<ProductListingView> productIdComparator =
+                Comparator.comparing(ProductListingView::productId, Comparator.nullsLast(Comparator.naturalOrder()));
+
+        return switch (sortOption) {
+            case PRICE_ASC -> Comparator
+                    .comparing(ProductListingView::effectivePrice, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(productIdComparator);
+            case PRICE_DESC -> Comparator
+                    .comparing(ProductListingView::effectivePrice, Comparator.nullsLast(Comparator.reverseOrder()))
+                    .thenComparing(productIdComparator);
+            case RATING_ASC -> Comparator
+                    .comparing(ProductListingView::averageRating, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(productIdComparator);
+            case RATING_DESC -> Comparator
+                    .comparing(ProductListingView::averageRating, Comparator.nullsLast(Comparator.reverseOrder()))
+                    .thenComparing(productIdComparator);
+            case OLDEST -> Comparator
+                    .comparing(ProductListingView::createdAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(productIdComparator);
+            case NEWEST -> Comparator
+                    .comparing(ProductListingView::createdAt, Comparator.nullsLast(Comparator.reverseOrder()))
+                    .thenComparing(productIdComparator);
+        };
+    }
+
+    private PagedResponse<CategoryProductListItemResponse> buildPagedResponse(
+            List<ProductListingView> listingViews,
+            int page,
+            int size) {
+        int totalItems = listingViews.size();
+        int totalPages = totalItems == 0 ? 0 : (int) Math.ceil((double) totalItems / size);
+
+        long offset = (long) page * size;
+        int fromIndex = offset >= totalItems ? totalItems : (int) offset;
+        int toIndex = Math.min(fromIndex + size, totalItems);
+
+        List<CategoryProductListItemResponse> items = listingViews.subList(fromIndex, toIndex).stream()
+                .map(view -> productMapper.toCategoryProductListItemResponse(
+                        view.product(),
+                        view.imageUrl(),
+                        view.originalPrice(),
+                        view.salePrice(),
+                        view.averageRating(),
+                        view.stockQuantity()
+                ))
+                .toList();
+
+        return PagedResponse.<CategoryProductListItemResponse>builder()
+                .items(items)
+                .page(page)
+                .size(size)
+                .totalItems(totalItems)
+                .totalPages(totalPages)
+                .hasNext(toIndex < totalItems)
+                .hasPrevious(page > 0)
+                .build();
+    }
+
+    private record ProductListingView(
+            Product product,
+            String imageUrl,
+            Double originalPrice,
+            Double salePrice,
+            Double effectivePrice,
+            Double averageRating,
+            Integer stockQuantity) {
+        private UUID productId() {
+            return product.getId();
+        }
+
+        private Instant createdAt() {
+            return product.getCreatedAt();
+        }
     }
 }
