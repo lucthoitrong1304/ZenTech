@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -15,4 +16,5 @@ public class IssueVoucherRequest {
     private UUID couponId;
 
     private UUID customerId; // Null means issue to all customers
+    private List<UUID> customerIds;
 }

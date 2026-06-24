@@ -11,6 +11,8 @@ import hcmute.edu.zentech.model.Customer;
 import hcmute.edu.zentech.model.Order;
 import hcmute.edu.zentech.model.OrderCoupon;
 import hcmute.edu.zentech.model.OrderDetail;
+import hcmute.edu.zentech.service.R2StorageService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
@@ -20,7 +22,9 @@ import java.util.Map;
 import java.util.UUID;
 
 @Component
+@RequiredArgsConstructor
 public class OrderManagementMapper {
+    private final R2StorageService r2StorageService;
 
     public OrderManagementSummaryResponse toSummaryResponse(
             Order order,
@@ -83,8 +87,15 @@ public class OrderManagementMapper {
                 .customerId(customer.getId())
                 .fullName(customer.getFullName())
                 .email(customer.getUserInfo() != null ? customer.getUserInfo().getEmail() : null)
-                .imageUrl(customer.getImageUrl())
+                .imageUrl(resolveImageUrl(customer.getImageUrl()))
                 .build();
+    }
+
+    private String resolveImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank() || imageUrl.startsWith("http")) {
+            return imageUrl;
+        }
+        return r2StorageService.getPresignedGetUrl(imageUrl);
     }
 
     private CustomerAddressResponse toAddressResponse(Address address) {
