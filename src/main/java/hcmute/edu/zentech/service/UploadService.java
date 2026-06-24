@@ -66,6 +66,15 @@ public class UploadService {
             );
         }
 
+        if (request.getPurpose() == UploadPurpose.RETURN_EVIDENCE) {
+            return r2StorageService.generateReturnEvidencePresignedUrl(
+                    currentUserId,
+                    request.getOriginalFilename(),
+                    request.getContentType(),
+                    request.getFileSize()
+            );
+        }
+
         throw new IllegalArgumentException("Unsupported upload purpose");
     }
 }

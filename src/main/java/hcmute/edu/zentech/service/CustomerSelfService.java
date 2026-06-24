@@ -2,14 +2,17 @@ package hcmute.edu.zentech.service;
 
 import hcmute.edu.zentech.dto.request.CustomerAddressRequest;
 import hcmute.edu.zentech.dto.request.UpdateMyProfileRequest;
+import hcmute.edu.zentech.dto.request.ReturnRequestCreateRequest;
 import hcmute.edu.zentech.dto.response.CustomerAddressResponse;
 import hcmute.edu.zentech.dto.response.CustomerOrderDetailResponse;
 import hcmute.edu.zentech.dto.response.CustomerOrderHistoryResponse;
 import hcmute.edu.zentech.dto.response.CustomerVoucherResponse;
 import hcmute.edu.zentech.dto.response.MyProfileResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
+import hcmute.edu.zentech.dto.response.ReturnRequestResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.CustomerSelfMapper;
+import hcmute.edu.zentech.mapper.ReturnRequestMapper;
 import hcmute.edu.zentech.model.Address;
 import hcmute.edu.zentech.model.Coupon;
 import hcmute.edu.zentech.model.Customer;
@@ -18,10 +21,13 @@ import hcmute.edu.zentech.model.CustomerVoucherStatus;
 import hcmute.edu.zentech.model.Order;
 import hcmute.edu.zentech.model.OrderDetail;
 import hcmute.edu.zentech.model.OrderStatus;
+import hcmute.edu.zentech.model.ReturnRequest;
+import hcmute.edu.zentech.model.ReturnRequestStatus;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.CustomerVoucherRepository;
 import hcmute.edu.zentech.repository.OrderDetailRepository;
 import hcmute.edu.zentech.repository.OrderRepository;
+import hcmute.edu.zentech.repository.ReturnRequestRepository;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -57,8 +63,10 @@ public class CustomerSelfService {
     private final OrderRepository orderRepository;
     private final OrderDetailRepository orderDetailRepository;
     private final CustomerVoucherRepository customerVoucherRepository;
+    private final ReturnRequestRepository returnRequestRepository;
     private final R2StorageService r2StorageService;
     private final CustomerSelfMapper customerSelfMapper;
+    private final ReturnRequestMapper returnRequestMapper;
 
     public MyProfileResponse getMyProfile() {
         MyProfileResponse response = customerSelfMapper.toMyProfileResponse(getCurrentCustomer());
@@ -432,6 +440,57 @@ public class CustomerSelfService {
                 new Sort.Order(direction, mappedField),
                 new Sort.Order(Sort.Direction.ASC, "id")
         );
+    }
+
+    @Transactional
+    public ReturnRequestResponse createReturnRequest(UUID orderId, ReturnRequestCreateRequest request) {
+        Customer currentCustomer = getCurrentCustomer();
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
+
+        if (!order.getCustomer().getId().equals(currentCustomer.getId())) {
+            throw new AccessDeniedException("You do not have permission to return this order");
+        }
+
+        if (order.getOrderStatus() != OrderStatus.COMPLETED) {
+            throw new RuntimeException("Chỉ đơn hàng đã hoàn thành mới có thể yêu cầu trả hàng.");
+        }
+
+        if (returnRequestRepository.findByOrderId(orderId).isPresent()) {
+            throw new RuntimeException("Yêu cầu trả hàng cho đơn hàng này đã tồn tại.");
+        }
+
+        ReturnRequest returnRequest = new ReturnRequest();
+        returnRequest.setOrder(order);
+        returnRequest.setReason(request.getReason());
+        returnRequest.setDetails(request.getDetails());
+        returnRequest.setStatus(ReturnRequestStatus.PENDING);
+        returnRequest.setResellable(false);
+
+        // Process proof file keys: move from temp/returns/ to evidence/returns/
+        String tempKeys = request.getProofFileKeys();
+        String permanentKeys = "";
+        if (tempKeys != null && !tempKeys.isBlank()) {
+            List<String> movedKeys = new java.util.ArrayList<>();
+            for (String key : tempKeys.split(",")) {
+                String trimmedKey = key.trim();
+                if (trimmedKey.startsWith("temp/returns/")) {
+                    String permanentKey = trimmedKey.replace("temp/returns/", "evidence/returns/");
+                    r2StorageService.moveObject(trimmedKey, permanentKey);
+                    movedKeys.add(permanentKey);
+                } else {
+                    movedKeys.add(trimmedKey);
+                }
+            }
+            permanentKeys = String.join(",", movedKeys);
+        }
+        returnRequest.setProofFileKeys(permanentKeys);
+
+        order.setOrderStatus(OrderStatus.RETURN_REQUESTED);
+        orderRepository.save(order);
+
+        ReturnRequest saved = returnRequestRepository.save(returnRequest);
+        return returnRequestMapper.toResponse(saved);
     }
 
     private record OrderDetailImage(OrderDetail orderDetail, String imageUrl) {

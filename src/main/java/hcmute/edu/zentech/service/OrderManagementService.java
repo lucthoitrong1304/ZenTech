@@ -396,6 +396,9 @@ public class OrderManagementService {
         }
 
         String trimmedKeyword = keyword.trim();
+        if (trimmedKeyword.startsWith("#")) {
+            trimmedKeyword = trimmedKeyword.substring(1).trim();
+        }
         return trimmedKeyword.isEmpty() ? null : trimmedKeyword;
     }
 

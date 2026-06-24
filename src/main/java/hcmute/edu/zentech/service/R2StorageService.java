@@ -202,6 +202,38 @@ public class R2StorageService {
                 .build();
     }
 
+    public UploadPresignResponse generateReturnEvidencePresignedUrl(
+            UUID userId,
+            String originalFilename,
+            String contentType,
+            long fileSize
+    ) {
+        validateChatAttachmentRequest(contentType, fileSize);
+
+        String fileKey = buildReturnEvidenceTempKey(userId, originalFilename);
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest putObjectPresignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
+
+        log.info("Generated return evidence presigned URL for key: {}", fileKey);
+        return UploadPresignResponse.builder()
+                .presignedUrl(presignedPutObjectRequest.url().toString())
+                .fileKey(fileKey)
+                .method("PUT")
+                .expiresInMinutes(expirationMinutes)
+                .requiredHeaders(Map.of("Content-Type", contentType))
+                .build();
+    }
+
     public void validateUploadedReviewImage(String fileKey, UUID userId) {
         if (fileKey == null || fileKey.isBlank()) {
             throw new IllegalArgumentException("imageKey is required");
@@ -406,6 +438,14 @@ public class R2StorageService {
         return getCustomerAvatarPrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
     }
 
+    private String buildReturnEvidenceTempKey(UUID userId, String originalFilename) {
+        return getReturnEvidenceTempPrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
+    }
+
+    private String getReturnEvidenceTempPrefix(UUID userId) {
+        return "temp/returns/" + userId + "/";
+    }
+
     private String getReviewVideoPrefix(UUID userId) {
         return "uploads/reviews/" + userId + "/videos/";
     }
@@ -490,6 +530,34 @@ public class R2StorageService {
             log.info("Đã dọn dẹp thành công file cũ trên R2: {}", fileKey);
         } catch (Exception e) {
             log.error("Lỗi khi xóa file trên R2 với key [{}]: {}", fileKey, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Di chuyển (Copy + Delete) file trên R2
+     * @param sourceKey : file key nguồn
+     * @param destinationKey : file key đích
+     */
+    public void moveObject(String sourceKey, String destinationKey) {
+        try {
+            String encodedSourceKey = java.net.URLEncoder.encode(sourceKey, java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("+", "%20");
+            CopyObjectRequest copyObjectRequest = CopyObjectRequest.builder()
+                    .copySource("/" + bucketName + "/" + encodedSourceKey)
+                    .destinationBucket(bucketName)
+                    .destinationKey(destinationKey)
+                    .build();
+            s3Client.copyObject(copyObjectRequest);
+
+            DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(sourceKey)
+                    .build();
+            s3Client.deleteObject(deleteObjectRequest);
+            log.info("Successfully moved R2 object from {} to {}", sourceKey, destinationKey);
+        } catch (Exception e) {
+            log.error("Lỗi khi di chuyển file trên R2 từ {} sang {}: {}", sourceKey, destinationKey, e.getMessage(), e);
+            throw new RuntimeException("Lỗi di chuyển file trên R2: " + e.getMessage(), e);
         }
     }
 
