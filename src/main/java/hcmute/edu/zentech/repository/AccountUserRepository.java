@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.List;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -19,6 +20,7 @@ public interface AccountUserRepository extends JpaRepository<AccountUser, UUID> 
     Optional<AccountUser> findByEmailIgnoreCase(String email);
     boolean existsByEmail(String email);
     boolean existsByEmailIgnoreCase(String email);
+    List<AccountUser> findByRoleInAndIsActiveTrue(List<Role> roles);
 
     @Query("SELECT a.id as id, a.email as email, a.role as role, a.isActive as isActive, a.createdAt as createdAt, " +
             "CASE WHEN a.role = hcmute.edu.zentech.model.Role.CUSTOMER THEN COALESCE(c.fullName, a.email) " +

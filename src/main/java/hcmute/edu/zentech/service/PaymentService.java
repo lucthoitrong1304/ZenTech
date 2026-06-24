@@ -7,10 +7,16 @@ import hcmute.edu.zentech.model.PaymentGateway;
 import hcmute.edu.zentech.model.PaymentStatus;
 import hcmute.edu.zentech.model.PaymentTransaction;
 import hcmute.edu.zentech.model.PaymentTransactionStatus;
+import hcmute.edu.zentech.model.Role;
+import hcmute.edu.zentech.model.AccountUser;
+import hcmute.edu.zentech.model.NotificationType;
+import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.PaymentTransactionRepository;
 import hcmute.edu.zentech.service.payment.MomoGatewayClient;
 import hcmute.edu.zentech.service.payment.VnpayGatewayClient;
+import hcmute.edu.zentech.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +32,8 @@ public class PaymentService {
     private final VnpayGatewayClient vnpayGatewayClient;
     private final MomoGatewayClient momoGatewayClient;
     private final ObjectMapper objectMapper;
+    private final AccountUserRepository accountUserRepository;
+    private final NotificationService notificationService;
 
     @Value("${app.frontend-base-url:${APP_FRONTEND_BASE_URL:http://localhost:4200}}")
     private String frontendBaseUrl;
@@ -122,6 +130,38 @@ public class PaymentService {
         if (success) {
             transaction.setPaidAt(Instant.now());
             transaction.getOrder().setPaymentStatus(PaymentStatus.SUCCESS);
+
+            Order order = transaction.getOrder();
+            // Notify Customer
+            if (order.getCustomer() != null && order.getCustomer().getUserInfo() != null) {
+                String title = "Thanh toán thành công";
+                String content = String.format("Đơn hàng #%s của bạn đã được thanh toán thành công qua cổng %s.",
+                        order.getId(), transaction.getGateway());
+                notificationService.createNotification(
+                        order.getCustomer().getUserInfo().getId(),
+                        title,
+                        content,
+                        NotificationType.ORDER_STATUS,
+                        order.getId()
+                );
+            }
+
+            // Notify Managers
+            List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
+                    List.of(Role.ADMIN, Role.MANAGER, Role.OWNER)
+            );
+            String mgrTitle = "Đơn hàng thanh toán thành công";
+            String mgrContent = String.format("Đơn hàng #%s đã được thanh toán thành công qua cổng %s.",
+                    order.getId(), transaction.getGateway());
+            for (AccountUser mgr : managers) {
+                notificationService.createNotification(
+                        mgr.getId(),
+                        mgrTitle,
+                        mgrContent,
+                        NotificationType.ORDER_STATUS,
+                        order.getId()
+                );
+            }
         }
     }
 

@@ -15,11 +15,13 @@ import hcmute.edu.zentech.model.OrderStatus;
 import hcmute.edu.zentech.model.PaymentStatus;
 import hcmute.edu.zentech.model.ProductVariant;
 import hcmute.edu.zentech.model.Role;
+import hcmute.edu.zentech.model.NotificationType;
 import hcmute.edu.zentech.repository.AddressRepository;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.OrderDetailRepository;
 import hcmute.edu.zentech.repository.OrderRepository;
 import hcmute.edu.zentech.repository.ProductVariantRepository;
+import hcmute.edu.zentech.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -52,6 +54,7 @@ public class OrderManagementService {
     private final AddressRepository addressRepository;
     private final R2StorageService r2StorageService;
     private final OrderManagementMapper orderManagementMapper;
+    private final NotificationService notificationService;
 
     public PageResponse<OrderManagementSummaryResponse> getOrders(
             int page,
@@ -296,7 +299,22 @@ public class OrderManagementService {
             throw new RuntimeException("Cancelled order cannot be reopened");
         }
 
+        OrderStatus prevStatus = order.getOrderStatus();
         order.setOrderStatus(nextStatus);
+
+        // Notify customer when status changes
+        if (prevStatus != nextStatus && order.getCustomer() != null && order.getCustomer().getUserInfo() != null) {
+            String title = "Cập nhật trạng thái đơn hàng";
+            String content = String.format("Đơn hàng #%s của bạn đã được cập nhật trạng thái thành: %s.", 
+                    order.getId(), nextStatus);
+            notificationService.createNotification(
+                    order.getCustomer().getUserInfo().getId(),
+                    title,
+                    content,
+                    NotificationType.ORDER_STATUS,
+                    order.getId()
+            );
+        }
     }
 
     private void cancelOrder(Order order, List<OrderDetail> orderDetails) {
@@ -307,6 +325,19 @@ public class OrderManagementService {
         if (order.getOrderStatus() != OrderStatus.CANCELLED) {
             restoreStock(orderDetails);
             order.setOrderStatus(OrderStatus.CANCELLED);
+
+            // Notify customer about cancellation
+            if (order.getCustomer() != null && order.getCustomer().getUserInfo() != null) {
+                String title = "Đơn hàng đã bị hủy";
+                String content = String.format("Đơn hàng #%s của bạn đã bị hủy.", order.getId());
+                notificationService.createNotification(
+                        order.getCustomer().getUserInfo().getId(),
+                        title,
+                        content,
+                        NotificationType.ORDER_STATUS,
+                        order.getId()
+                );
+            }
         }
     }
 
