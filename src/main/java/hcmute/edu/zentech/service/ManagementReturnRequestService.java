@@ -79,6 +79,7 @@ public class ManagementReturnRequestService {
                         .reason(resellable ? InventoryTransactionReason.RETURN : InventoryTransactionReason.DAMAGED)
                         .note("Hoàn trả từ đơn hàng: " + order.getId() + (resellable ? " (Bán lại được)" : " (Hàng lỗi/hỏng)"))
                         .createdBy(employeeId)
+                        .targetWarehouse(resellable ? "MAIN" : "FAULTY")
                         .build();
                 inventoryTransactionRepository.save(transaction);
             }

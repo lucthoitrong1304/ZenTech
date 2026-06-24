@@ -15,4 +15,7 @@ public class InventoryStatsResponse {
     private long totalItems;
     private long lowStockCount;
     private long outOfStockCount;
+    private long totalFaultyVariants;
+    private long totalFaultyQuantity;
+    private long highFaultyAlertCount;
 }

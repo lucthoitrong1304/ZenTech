@@ -177,41 +177,66 @@ public class InventoryManagementService {
         }
 
         int adjustmentQty = request.getQuantity();
-        int newQty;
+        String targetWarehouse = request.getTargetWarehouse() != null ? request.getTargetWarehouse().toUpperCase() : "MAIN";
 
-        if (request.getType() == InventoryTransactionType.IMPORT) {
-            newQty = variant.getStockQuantity() + adjustmentQty;
-            
-            // Validate reason matches type
-            if (request.getReason() == InventoryTransactionReason.DAMAGED || 
-                request.getReason() == InventoryTransactionReason.ADJUSTMENT_SUB || 
-                request.getReason() == InventoryTransactionReason.CUSTOMER_ORDER) {
-                throw new IllegalArgumentException("Invalid reason for IMPORT transaction");
+        if ("FAULTY".equals(targetWarehouse)) {
+            if (request.getType() == InventoryTransactionType.IMPORT) {
+                variant.setFaultyQuantity(variant.getFaultyQuantity() + adjustmentQty);
+                if (request.getReason() == InventoryTransactionReason.DAMAGED || 
+                    request.getReason() == InventoryTransactionReason.ADJUSTMENT_SUB || 
+                    request.getReason() == InventoryTransactionReason.CUSTOMER_ORDER) {
+                    throw new IllegalArgumentException("Invalid reason for IMPORT transaction");
+                }
+            } else {
+                int newFaulty = variant.getFaultyQuantity() - adjustmentQty;
+                if (newFaulty < 0) {
+                    throw new IllegalArgumentException("Insufficient faulty stock. Current faulty stock is " + variant.getFaultyQuantity());
+                }
+                variant.setFaultyQuantity(newFaulty);
+                if (request.getReason() == InventoryTransactionReason.NEW_STOCK || 
+                    request.getReason() == InventoryTransactionReason.ADJUSTMENT_ADD || 
+                    request.getReason() == InventoryTransactionReason.RETURN) {
+                    throw new IllegalArgumentException("Invalid reason for EXPORT transaction");
+                }
             }
         } else {
-            newQty = variant.getStockQuantity() - adjustmentQty;
-            if (newQty < 0) {
-                throw new IllegalArgumentException("Insufficient stock. Current stock is " + variant.getStockQuantity());
-            }
-
-            // Validate reason matches type
-            if (request.getReason() == InventoryTransactionReason.NEW_STOCK || 
-                request.getReason() == InventoryTransactionReason.ADJUSTMENT_ADD || 
-                request.getReason() == InventoryTransactionReason.RETURN) {
-                throw new IllegalArgumentException("Invalid reason for EXPORT transaction");
+            if (request.getType() == InventoryTransactionType.IMPORT) {
+                variant.setStockQuantity(variant.getStockQuantity() + adjustmentQty);
+                if (request.getReason() == InventoryTransactionReason.DAMAGED || 
+                    request.getReason() == InventoryTransactionReason.ADJUSTMENT_SUB || 
+                    request.getReason() == InventoryTransactionReason.CUSTOMER_ORDER) {
+                    throw new IllegalArgumentException("Invalid reason for IMPORT transaction");
+                }
+            } else {
+                int newStock = variant.getStockQuantity() - adjustmentQty;
+                if (newStock < 0) {
+                    throw new IllegalArgumentException("Insufficient stock. Current stock is " + variant.getStockQuantity());
+                }
+                variant.setStockQuantity(newStock);
+                if (request.getReason() == InventoryTransactionReason.NEW_STOCK || 
+                    request.getReason() == InventoryTransactionReason.ADJUSTMENT_ADD || 
+                    request.getReason() == InventoryTransactionReason.RETURN) {
+                    throw new IllegalArgumentException("Invalid reason for EXPORT transaction");
+                }
+                if (request.getReason() == InventoryTransactionReason.DAMAGED) {
+                    variant.setFaultyQuantity(variant.getFaultyQuantity() + adjustmentQty);
+                }
             }
         }
 
-        variant.setStockQuantity(newQty);
         productVariantRepository.save(variant);
+
+        String noteSuffix = "FAULTY".equals(targetWarehouse) ? " (Kho lỗi)" : "";
+        String finalNote = request.getNote() != null ? request.getNote() + noteSuffix : noteSuffix;
 
         InventoryTransaction transaction = InventoryTransaction.builder()
                 .productVariant(variant)
                 .type(request.getType())
                 .quantity(adjustmentQty)
                 .reason(request.getReason())
-                .note(request.getNote())
+                .note(finalNote.trim())
                 .createdBy(employeeId)
+                .targetWarehouse(targetWarehouse)
                 .build();
 
         InventoryTransaction savedTx = inventoryTransactionRepository.save(transaction);
@@ -222,10 +247,18 @@ public class InventoryManagementService {
         long total = productVariantRepository.countActiveVariants();
         long low = productVariantRepository.countLowStockVariants();
         long out = productVariantRepository.countOutOfStockVariants();
+        long faultyVars = productVariantRepository.countFaultyVariants();
+        Long faultyQtySum = productVariantRepository.sumFaultyQuantity();
+        long faultyQty = faultyQtySum != null ? faultyQtySum : 0;
+        long highFaulty = productVariantRepository.countHighFaultyAlertVariants();
+
         return hcmute.edu.zentech.dto.response.InventoryStatsResponse.builder()
                 .totalItems(total)
                 .lowStockCount(low)
                 .outOfStockCount(out)
+                .totalFaultyVariants(faultyVars)
+                .totalFaultyQuantity(faultyQty)
+                .highFaultyAlertCount(highFaulty)
                 .build();
     }
 
@@ -295,6 +328,7 @@ public class InventoryManagementService {
                 .originalPrice(variant.getOriginalPrice())
                 .salePrice(variant.getSalePrice())
                 .stockQuantity(variant.getStockQuantity())
+                .faultyQuantity(variant.getFaultyQuantity())
                 .representativeImageUrl(getRepresentativeImageUrl(product))
                 .build();
     }
@@ -332,12 +366,29 @@ public class InventoryManagementService {
         String createdByEmail = null;
         String createdByAvatar = null;
 
-        if (transaction.getReason() == InventoryTransactionReason.CUSTOMER_ORDER) {
-            Customer customer = null;
-            if (transaction.getCreatedBy() != null) {
-                customer = customerRepository.findByUserInfo_Id(transaction.getCreatedBy()).orElse(null);
+        if (transaction.getCreatedBy() != null) {
+            Employee emp = employeeMap.get(transaction.getCreatedBy());
+            AccountUser account = accountMap.get(transaction.getCreatedBy());
+            Customer customer = customerRepository.findByUserInfo_Id(transaction.getCreatedBy()).orElse(null);
+
+            if (emp != null) {
+                createdByName = emp.getFullName();
+                createdByEmail = emp.getUserInfo() != null ? emp.getUserInfo().getEmail() : null;
+                createdByAvatar = resolveImageUrl(emp.getImageUrl());
+            } else if (customer != null) {
+                createdByName = customer.getFullName();
+                createdByEmail = customer.getUserInfo() != null ? customer.getUserInfo().getEmail() : null;
+                createdByAvatar = resolveImageUrl(customer.getImageUrl());
+            } else if (account != null) {
+                createdByEmail = account.getEmail();
+                createdByName = account.getEmail();
+            } else {
+                createdByName = "Tài khoản không xác định";
             }
-            if (customer == null && transaction.getNote() != null) {
+        } else if (transaction.getReason() == InventoryTransactionReason.CUSTOMER_ORDER || 
+                   transaction.getReason() == InventoryTransactionReason.RETURN) {
+            Customer customer = null;
+            if (transaction.getNote() != null) {
                 int hashIndex = transaction.getNote().lastIndexOf('#');
                 if (hashIndex != -1 && hashIndex < transaction.getNote().length() - 1) {
                     try {
@@ -357,19 +408,6 @@ public class InventoryManagementService {
                 createdByEmail = customer.getUserInfo() != null ? customer.getUserInfo().getEmail() : null;
                 createdByAvatar = resolveImageUrl(customer.getImageUrl());
             }
-        } else if (transaction.getCreatedBy() != null) {
-            Employee emp = employeeMap.get(transaction.getCreatedBy());
-            AccountUser account = accountMap.get(transaction.getCreatedBy());
-            if (emp != null) {
-                createdByName = emp.getFullName();
-                createdByEmail = emp.getUserInfo() != null ? emp.getUserInfo().getEmail() : null;
-                createdByAvatar = resolveImageUrl(emp.getImageUrl());
-            } else if (account != null) {
-                createdByEmail = account.getEmail();
-                createdByName = account.getEmail();
-            } else {
-                createdByName = "Tài khoản không xác định";
-            }
         }
 
         return InventoryTransactionResponse.builder()
@@ -385,6 +423,7 @@ public class InventoryManagementService {
                 .createdByName(createdByName)
                 .createdByEmail(createdByEmail)
                 .createdByAvatar(createdByAvatar)
+                .targetWarehouse(transaction.getTargetWarehouse())
                 .build();
     }
 

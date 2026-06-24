@@ -16,11 +16,16 @@ import hcmute.edu.zentech.model.PaymentStatus;
 import hcmute.edu.zentech.model.ProductVariant;
 import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.model.NotificationType;
+import hcmute.edu.zentech.model.InventoryTransaction;
+import hcmute.edu.zentech.model.InventoryTransactionReason;
+import hcmute.edu.zentech.model.InventoryTransactionType;
 import hcmute.edu.zentech.repository.AddressRepository;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.OrderDetailRepository;
 import hcmute.edu.zentech.repository.OrderRepository;
 import hcmute.edu.zentech.repository.ProductVariantRepository;
+import hcmute.edu.zentech.repository.InventoryTransactionRepository;
+import hcmute.edu.zentech.security.SecurityContextUtils;
 import hcmute.edu.zentech.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -55,6 +60,7 @@ public class OrderManagementService {
     private final R2StorageService r2StorageService;
     private final OrderManagementMapper orderManagementMapper;
     private final NotificationService notificationService;
+    private final InventoryTransactionRepository inventoryTransactionRepository;
 
     public PageResponse<OrderManagementSummaryResponse> getOrders(
             int page,
@@ -230,6 +236,17 @@ public class OrderManagementService {
         return orderManagementMapper.toDetailResponse(order, orderDetails, getProductImageUrls(orderDetails));
     }
 
+    @Transactional
+    public void cancelOrderByCustomer(Order order, List<OrderDetail> orderDetails) {
+        if (order.getOrderStatus() != OrderStatus.CREATED) {
+            throw new RuntimeException("Chỉ đơn hàng ở trạng thái mới tạo mới có thể hủy.");
+        }
+        if (order.getPaymentStatus() != PaymentStatus.PENDING) {
+            throw new RuntimeException("Chỉ đơn hàng chưa thanh toán mới có thể hủy. Nếu đã thanh toán, vui lòng liên hệ nhân viên.");
+        }
+        cancelOrder(order, orderDetails);
+    }
+
     private Customer getCustomer(UUID customerId) {
         Customer customer = customerRepository.findDetailById(customerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer", "id", customerId));
@@ -280,11 +297,24 @@ public class OrderManagementService {
         return productVariant.getSalePrice() != null ? productVariant.getSalePrice() : productVariant.getOriginalPrice();
     }
 
-    private void restoreStock(List<OrderDetail> orderDetails) {
+    private void restoreStock(Order order, List<OrderDetail> orderDetails) {
+        UUID currentUserId = SecurityContextUtils.getCurrentUserId();
         orderDetails.forEach(orderDetail -> {
             ProductVariant productVariant = orderDetail.getProductVariant();
             if (productVariant != null) {
                 productVariant.setStockQuantity(productVariant.getStockQuantity() + orderDetail.getQuantity());
+                productVariantRepository.save(productVariant);
+
+                InventoryTransaction transaction = InventoryTransaction.builder()
+                        .productVariant(productVariant)
+                        .type(InventoryTransactionType.IMPORT)
+                        .quantity(orderDetail.getQuantity())
+                        .reason(InventoryTransactionReason.RETURN)
+                        .note("Hoàn tồn kho từ đơn hàng bị hủy #" + order.getId())
+                        .createdBy(currentUserId)
+                        .targetWarehouse("MAIN")
+                        .build();
+                inventoryTransactionRepository.save(transaction);
             }
         });
     }
@@ -323,7 +353,7 @@ public class OrderManagementService {
         }
 
         if (order.getOrderStatus() != OrderStatus.CANCELLED) {
-            restoreStock(orderDetails);
+            restoreStock(order, orderDetails);
             order.setOrderStatus(OrderStatus.CANCELLED);
 
             // Notify customer about cancellation

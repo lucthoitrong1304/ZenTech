@@ -70,6 +70,7 @@ public class CustomerSelfService {
     private final ApplicationEventPublisher eventPublisher;
     private final CustomerSelfMapper customerSelfMapper;
     private final ReturnRequestMapper returnRequestMapper;
+    private final OrderManagementService orderManagementService;
 
     public MyProfileResponse getMyProfile() {
         MyProfileResponse response = customerSelfMapper.toMyProfileResponse(getCurrentCustomer());
@@ -498,6 +499,19 @@ public class CustomerSelfService {
             eventPublisher.publishEvent(new ReturnEvidenceCleanupEvent(this, tempKeysToCleanup));
         }
         return returnRequestMapper.toResponse(saved);
+    }
+
+    @Transactional
+    public CustomerOrderDetailResponse cancelMyOrder(UUID orderId) {
+        Customer currentCustomer = getCurrentCustomer();
+        Order order = orderRepository.findByIdAndCustomer_Id(orderId, currentCustomer.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
+
+        List<OrderDetail> orderDetails = getOrderDetails(List.of(orderId));
+        orderManagementService.cancelOrderByCustomer(order, orderDetails);
+
+        Map<UUID, String> productImageUrls = getProductImageUrls(orderDetails);
+        return customerSelfMapper.toCustomerOrderDetailResponse(order, orderDetails, productImageUrls);
     }
 
     private record OrderDetailImage(OrderDetail orderDetail, String imageUrl) {
