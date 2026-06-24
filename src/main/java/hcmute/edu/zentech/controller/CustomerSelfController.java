@@ -2,6 +2,7 @@ package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.request.CustomerAddressRequest;
 import hcmute.edu.zentech.dto.request.UpdateMyProfileRequest;
+import hcmute.edu.zentech.dto.request.ReturnRequestCreateRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.CustomerAddressResponse;
 import hcmute.edu.zentech.dto.response.CustomerOrderDetailResponse;
@@ -9,6 +10,7 @@ import hcmute.edu.zentech.dto.response.CustomerOrderHistoryResponse;
 import hcmute.edu.zentech.dto.response.CustomerVoucherResponse;
 import hcmute.edu.zentech.dto.response.MyProfileResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
+import hcmute.edu.zentech.dto.response.ReturnRequestResponse;
 import hcmute.edu.zentech.model.CustomerVoucherStatus;
 import hcmute.edu.zentech.model.OrderStatus;
 import hcmute.edu.zentech.service.CustomerSelfService;
@@ -105,5 +107,13 @@ public class CustomerSelfController {
         return ResponseEntity.ok(ApiResponse.success(
                 customerSelfService.getMyVouchers(page, size, sort, status)
         ));
+    }
+
+    @PostMapping("/orders/{orderId}/return")
+    public ResponseEntity<ApiResponse<ReturnRequestResponse>> createReturnRequest(
+            @PathVariable UUID orderId,
+            @Valid @RequestBody ReturnRequestCreateRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(customerSelfService.createReturnRequest(orderId, request)));
     }
 }

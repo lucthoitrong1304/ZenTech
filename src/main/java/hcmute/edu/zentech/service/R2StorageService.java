@@ -202,6 +202,38 @@ public class R2StorageService {
                 .build();
     }
 
+    public UploadPresignResponse generateReturnEvidencePresignedUrl(
+            UUID userId,
+            String originalFilename,
+            String contentType,
+            long fileSize
+    ) {
+        validateChatAttachmentRequest(contentType, fileSize);
+
+        String fileKey = buildReturnEvidenceTempKey(userId, originalFilename);
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest putObjectPresignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
+
+        log.info("Generated return evidence presigned URL for key: {}", fileKey);
+        return UploadPresignResponse.builder()
+                .presignedUrl(presignedPutObjectRequest.url().toString())
+                .fileKey(fileKey)
+                .method("PUT")
+                .expiresInMinutes(expirationMinutes)
+                .requiredHeaders(Map.of("Content-Type", contentType))
+                .build();
+    }
+
     public void validateUploadedReviewImage(String fileKey, UUID userId) {
         if (fileKey == null || fileKey.isBlank()) {
             throw new IllegalArgumentException("imageKey is required");
@@ -406,6 +438,14 @@ public class R2StorageService {
         return getCustomerAvatarPrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
     }
 
+    private String buildReturnEvidenceTempKey(UUID userId, String originalFilename) {
+        return getReturnEvidenceTempPrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
+    }
+
+    private String getReturnEvidenceTempPrefix(UUID userId) {
+        return "temp/returns/" + userId + "/";
+    }
+
     private String getReviewVideoPrefix(UUID userId) {
         return "uploads/reviews/" + userId + "/videos/";
     }
@@ -490,6 +530,78 @@ public class R2StorageService {
             log.info("Đã dọn dẹp thành công file cũ trên R2: {}", fileKey);
         } catch (Exception e) {
             log.error("Lỗi khi xóa file trên R2 với key [{}]: {}", fileKey, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Copies return evidence to its permanent key without deleting the temporary
+     * object. Deletion is deliberately deferred until the database transaction
+     * commits so a failed request can be retried safely.
+     */
+    public String promoteReturnEvidence(String tempKey, UUID accountId) {
+        if (tempKey == null || tempKey.isBlank()) {
+            throw new IllegalArgumentException("Return evidence key is required");
+        }
+        if (accountId == null) {
+            throw new IllegalArgumentException("Return evidence owner is required");
+        }
+
+        String tempPrefix = getReturnEvidenceTempPrefix(accountId);
+        if (!tempKey.startsWith(tempPrefix)) {
+            throw new IllegalArgumentException("Invalid return evidence key owner");
+        }
+
+        String filename = tempKey.substring(tempPrefix.length());
+        if (filename.isBlank() || filename.contains("/")) {
+            throw new IllegalArgumentException("Invalid return evidence key");
+        }
+
+        String permanentKey = "evidence/returns/" + accountId + "/" + filename;
+        if (objectExists(tempKey)) {
+            copyObject(tempKey, permanentKey);
+            return permanentKey;
+        }
+
+        if (objectExists(permanentKey)) {
+            log.info("Return evidence already promoted to {}; treating request as a retry", permanentKey);
+            return permanentKey;
+        }
+
+        throw new IllegalArgumentException("Uploaded return evidence does not exist: " + tempKey);
+    }
+
+    private boolean objectExists(String fileKey) {
+        try {
+            s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(fileKey)
+                    .build());
+            return true;
+        } catch (NoSuchKeyException e) {
+            return false;
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    private void copyObject(String sourceKey, String destinationKey) {
+        try {
+            String encodedSourceKey = java.net.URLEncoder.encode(sourceKey, java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("+", "%20");
+            CopyObjectRequest copyObjectRequest = CopyObjectRequest.builder()
+                    .copySource("/" + bucketName + "/" + encodedSourceKey)
+                    .destinationBucket(bucketName)
+                    .destinationKey(destinationKey)
+                    .build();
+            s3Client.copyObject(copyObjectRequest);
+            log.info("Successfully copied R2 return evidence from {} to {}", sourceKey, destinationKey);
+        } catch (Exception e) {
+            log.error("Failed to copy R2 return evidence from {} to {}: {}",
+                    sourceKey, destinationKey, e.getMessage(), e);
+            throw new RuntimeException("Failed to promote return evidence: " + e.getMessage(), e);
         }
     }
 

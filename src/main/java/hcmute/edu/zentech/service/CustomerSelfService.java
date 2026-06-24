@@ -2,14 +2,18 @@ package hcmute.edu.zentech.service;
 
 import hcmute.edu.zentech.dto.request.CustomerAddressRequest;
 import hcmute.edu.zentech.dto.request.UpdateMyProfileRequest;
+import hcmute.edu.zentech.dto.request.ReturnRequestCreateRequest;
 import hcmute.edu.zentech.dto.response.CustomerAddressResponse;
 import hcmute.edu.zentech.dto.response.CustomerOrderDetailResponse;
 import hcmute.edu.zentech.dto.response.CustomerOrderHistoryResponse;
 import hcmute.edu.zentech.dto.response.CustomerVoucherResponse;
 import hcmute.edu.zentech.dto.response.MyProfileResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
+import hcmute.edu.zentech.dto.response.ReturnRequestResponse;
+import hcmute.edu.zentech.event.ReturnEvidenceCleanupEvent;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.CustomerSelfMapper;
+import hcmute.edu.zentech.mapper.ReturnRequestMapper;
 import hcmute.edu.zentech.model.Address;
 import hcmute.edu.zentech.model.Coupon;
 import hcmute.edu.zentech.model.Customer;
@@ -18,12 +22,16 @@ import hcmute.edu.zentech.model.CustomerVoucherStatus;
 import hcmute.edu.zentech.model.Order;
 import hcmute.edu.zentech.model.OrderDetail;
 import hcmute.edu.zentech.model.OrderStatus;
+import hcmute.edu.zentech.model.ReturnRequest;
+import hcmute.edu.zentech.model.ReturnRequestStatus;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.CustomerVoucherRepository;
 import hcmute.edu.zentech.repository.OrderDetailRepository;
 import hcmute.edu.zentech.repository.OrderRepository;
+import hcmute.edu.zentech.repository.ReturnRequestRepository;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -57,8 +65,11 @@ public class CustomerSelfService {
     private final OrderRepository orderRepository;
     private final OrderDetailRepository orderDetailRepository;
     private final CustomerVoucherRepository customerVoucherRepository;
+    private final ReturnRequestRepository returnRequestRepository;
     private final R2StorageService r2StorageService;
+    private final ApplicationEventPublisher eventPublisher;
     private final CustomerSelfMapper customerSelfMapper;
+    private final ReturnRequestMapper returnRequestMapper;
 
     public MyProfileResponse getMyProfile() {
         MyProfileResponse response = customerSelfMapper.toMyProfileResponse(getCurrentCustomer());
@@ -432,6 +443,61 @@ public class CustomerSelfService {
                 new Sort.Order(direction, mappedField),
                 new Sort.Order(Sort.Direction.ASC, "id")
         );
+    }
+
+    @Transactional
+    public ReturnRequestResponse createReturnRequest(UUID orderId, ReturnRequestCreateRequest request) {
+        UUID currentAccountId = SecurityContextUtils.getCurrentUserId();
+        if (currentAccountId == null) {
+            throw new AccessDeniedException("Authentication is required");
+        }
+        Customer currentCustomer = getCurrentCustomer();
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", "id", orderId));
+
+        if (!order.getCustomer().getId().equals(currentCustomer.getId())) {
+            throw new AccessDeniedException("You do not have permission to return this order");
+        }
+
+        if (order.getOrderStatus() != OrderStatus.COMPLETED) {
+            throw new RuntimeException("Chỉ đơn hàng đã hoàn thành mới có thể yêu cầu trả hàng.");
+        }
+
+        if (returnRequestRepository.existsByOrder_IdAndStatus(orderId, ReturnRequestStatus.PENDING)) {
+            throw new RuntimeException("Yêu cầu trả hàng cho đơn hàng này đã tồn tại.");
+        }
+
+        ReturnRequest returnRequest = new ReturnRequest();
+        returnRequest.setOrder(order);
+        returnRequest.setReason(request.getReason());
+        returnRequest.setDetails(request.getDetails());
+        returnRequest.setStatus(ReturnRequestStatus.PENDING);
+        returnRequest.setResellable(false);
+
+        // Copy proof files to permanent storage. Temp files are deleted only after DB commit.
+        String tempKeys = request.getProofFileKeys();
+        String permanentKeys = "";
+        List<String> tempKeysToCleanup = new java.util.ArrayList<>();
+        if (tempKeys != null && !tempKeys.isBlank()) {
+            List<String> movedKeys = new java.util.ArrayList<>();
+            for (String key : tempKeys.split(",")) {
+                String trimmedKey = key.trim();
+                String permanentKey = r2StorageService.promoteReturnEvidence(trimmedKey, currentAccountId);
+                movedKeys.add(permanentKey);
+                tempKeysToCleanup.add(trimmedKey);
+            }
+            permanentKeys = String.join(",", movedKeys);
+        }
+        returnRequest.setProofFileKeys(permanentKeys);
+
+        order.setOrderStatus(OrderStatus.RETURN_REQUESTED);
+        orderRepository.saveAndFlush(order);
+
+        ReturnRequest saved = returnRequestRepository.saveAndFlush(returnRequest);
+        if (!tempKeysToCleanup.isEmpty()) {
+            eventPublisher.publishEvent(new ReturnEvidenceCleanupEvent(this, tempKeysToCleanup));
+        }
+        return returnRequestMapper.toResponse(saved);
     }
 
     private record OrderDetailImage(OrderDetail orderDetail, String imageUrl) {

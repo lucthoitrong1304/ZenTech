@@ -55,8 +55,12 @@ public class SearchManagementService {
                 .toList();
 
         // 2. Search Orders (max 5)
+        String orderSearchKeyword = searchKeyword;
+        if (orderSearchKeyword.startsWith("#")) {
+            orderSearchKeyword = orderSearchKeyword.substring(1).trim();
+        }
         Page<Order> orderPage = orderRepository.searchManagementOrders(
-                searchKeyword,
+                orderSearchKeyword,
                 null,
                 null,
                 null,

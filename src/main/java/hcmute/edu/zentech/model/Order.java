@@ -42,6 +42,7 @@ public class Order {
     private PaymentStatus paymentStatus;
 
     @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "varchar(32)")
     private OrderStatus orderStatus;
 
     @ManyToOne(fetch = FetchType.LAZY)

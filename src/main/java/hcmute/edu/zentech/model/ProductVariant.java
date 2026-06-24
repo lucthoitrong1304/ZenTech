@@ -31,6 +31,9 @@ public class ProductVariant {
 
     private int stockQuantity;
 
+    @Column(nullable = false, columnDefinition = "int default 0")
+    private int faultyQuantity;
+
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean deleted;
 

@@ -158,7 +158,21 @@ public class CouponManagementService {
             throw new RuntimeException("Cannot issue expired coupon");
         }
 
-        if (request.getCustomerId() != null) {
+        if (request.getCustomerIds() != null && !request.getCustomerIds().isEmpty()) {
+            for (UUID customerId : request.getCustomerIds()) {
+                Customer customer = customerRepository.findById(customerId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Customer", "id", customerId));
+                
+                if (customerVoucherRepository.existsByCustomer_IdAndCoupon_Id(customer.getId(), coupon.getId())) {
+                    continue;
+                }
+
+                CustomerVoucher customerVoucher = new CustomerVoucher();
+                customerVoucher.setCustomer(customer);
+                customerVoucher.setCoupon(coupon);
+                customerVoucherRepository.save(customerVoucher);
+            }
+        } else if (request.getCustomerId() != null) {
             Customer customer = customerRepository.findById(request.getCustomerId())
                     .orElseThrow(() -> new ResourceNotFoundException("Customer", "id", request.getCustomerId()));
             
