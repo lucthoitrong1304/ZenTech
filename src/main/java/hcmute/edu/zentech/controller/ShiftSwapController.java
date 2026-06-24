@@ -1,6 +1,8 @@
 package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.response.ApiResponse;
+import hcmute.edu.zentech.dto.response.ShiftSwapRequestResponse;
+import hcmute.edu.zentech.mapper.ApprovalRequestMapper;
 import hcmute.edu.zentech.model.ApprovalStatus;
 import hcmute.edu.zentech.model.ShiftSwapRequest;
 import hcmute.edu.zentech.service.ApprovalService;
@@ -15,29 +17,31 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ShiftSwapController {
     private final ApprovalService approvalService;
+    private final ApprovalRequestMapper approvalRequestMapper;
 
     @PostMapping("/api/schedules/swaps")
-    public ResponseEntity<ApiResponse<ShiftSwapRequest>> requestSwap(
+    public ResponseEntity<ApiResponse<ShiftSwapRequestResponse>> requestSwap(
             @RequestBody ShiftSwapRequest request
     ) {
-        return ResponseEntity.status(201).body(ApiResponse.success(approvalService.requestShiftSwap(request)));
+        ShiftSwapRequest saved = approvalService.requestShiftSwap(request);
+        return ResponseEntity.status(201).body(ApiResponse.success(approvalRequestMapper.toShiftSwapResponse(saved)));
     }
 
     @GetMapping("/api/management/schedules/swaps/pending")
-    public ResponseEntity<ApiResponse<List<ShiftSwapRequest>>> getPendingSwaps() {
-        return ResponseEntity.ok(ApiResponse.success(approvalService.getPendingShiftSwaps()));
+    public ResponseEntity<ApiResponse<List<ShiftSwapRequestResponse>>> getPendingSwaps() {
+        return ResponseEntity.ok(ApiResponse.success(approvalRequestMapper.toShiftSwapResponses(approvalService.getPendingShiftSwaps())));
     }
 
     @PostMapping("/api/management/schedules/swaps/{id}/approve")
-    public ResponseEntity<ApiResponse<ShiftSwapRequest>> approveSwap(
+    public ResponseEntity<ApiResponse<ShiftSwapRequestResponse>> approveSwap(
             @PathVariable UUID id,
             @RequestParam ApprovalStatus status
     ) {
-        return ResponseEntity.ok(ApiResponse.success(approvalService.approveShiftSwap(id, status)));
+        return ResponseEntity.ok(ApiResponse.success(approvalRequestMapper.toShiftSwapResponse(approvalService.approveShiftSwap(id, status))));
     }
 
     @GetMapping("/api/schedules/swaps/my")
-    public ResponseEntity<ApiResponse<List<ShiftSwapRequest>>> getMySwaps() {
-        return ResponseEntity.ok(ApiResponse.success(approvalService.getMySwaps()));
+    public ResponseEntity<ApiResponse<List<ShiftSwapRequestResponse>>> getMySwaps() {
+        return ResponseEntity.ok(ApiResponse.success(approvalRequestMapper.toShiftSwapResponses(approvalService.getMySwaps())));
     }
 }
