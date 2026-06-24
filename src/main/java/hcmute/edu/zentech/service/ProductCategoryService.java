@@ -158,12 +158,39 @@ public class ProductCategoryService {
     public PagedResponse<CategoryProductListItemResponse> getProductsByCategoryId(
             UUID categoryId,
             CategoryProductListQueryRequest request) {
-        // Tìm Category
-        ProductCategory productCategory = productCategoryRepository.findCategoryWithProductsById(categoryId)
+        // Tìm toàn bộ danh mục để dựng cây quan hệ cha-con
+        List<ProductCategory> allCategories = productCategoryRepository.findAllWithParent();
+
+        // Kiểm tra xem danh mục mục tiêu có tồn tại hay không
+        ProductCategory targetCategory = allCategories.stream()
+                .filter(c -> c.getId().equals(categoryId))
+                .findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Product Category", "ID", categoryId));
 
-        List<ProductListingView> listingViews = productCategory.getProductList().stream()
+        // Nhóm các danh mục con theo parent_id
+        Map<UUID, List<ProductCategory>> childrenMap = allCategories.stream()
+                .filter(c -> c.getParent() != null)
+                .collect(Collectors.groupingBy(c -> c.getParent().getId()));
+
+        // Thu thập đệ quy tất cả categoryId (bao gồm cả categoryId mục tiêu và các danh mục con cháu)
+        java.util.Set<UUID> categoryIds = new java.util.HashSet<>();
+        collectDescendantIds(categoryId, childrenMap, categoryIds);
+
+        // Lấy danh sách danh mục cùng với sản phẩm của chúng
+        List<ProductCategory> categoriesWithProducts = productCategoryRepository.findCategoriesWithProductsByIds(categoryIds);
+
+        // Lấy tất cả sản phẩm không trùng lặp và không bị xóa
+        List<ProductListingView> listingViews = categoriesWithProducts.stream()
+                .flatMap(c -> c.getProductList().stream())
                 .filter(Objects::nonNull)
+                .filter(p -> !p.isDeleted())
+                .collect(Collectors.toMap(
+                        Product::getId,
+                        p -> p,
+                        (existing, replacement) -> existing
+                ))
+                .values()
+                .stream()
                 .map(this::buildListingView)
                 .filter(view -> matchesSearch(view, request.getSearch())) // Lọc theo keyword
                 .filter(view -> matchesMinRating(view, request.getMinRating())) // Lọc theo rating
@@ -172,6 +199,20 @@ public class ProductCategoryService {
 
         return buildPagedResponse(listingViews, request.getPage(), request.getSize());
     }
+
+    private void collectDescendantIds(
+            UUID currentId,
+            Map<UUID, List<ProductCategory>> childrenMap,
+            java.util.Set<UUID> result) {
+        result.add(currentId);
+        List<ProductCategory> children = childrenMap.get(currentId);
+        if (children != null) {
+            for (ProductCategory child : children) {
+                collectDescendantIds(child.getId(), childrenMap, result);
+            }
+        }
+    }
+
 
     // Sort
     private CategoryProductSortOption resolveSortOption(CategoryProductSortOption sortOption) {
