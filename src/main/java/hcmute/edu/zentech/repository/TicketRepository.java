@@ -53,4 +53,8 @@ public interface TicketRepository extends JpaRepository<Ticket, UUID> {
 
     @Query("SELECT COUNT(t) FROM Ticket t")
     long countAllTickets();
+
+    List<Ticket> findByStatusIn(List<TicketStatus> statuses);
+    List<Ticket> findByCreatedAtBetween(Instant startDate, Instant endDate);
+    List<Ticket> findByResolvedAtBetween(Instant startDate, Instant endDate);
 }
