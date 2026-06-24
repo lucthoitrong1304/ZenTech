@@ -2,6 +2,7 @@ package hcmute.edu.zentech.service;
 
 import hcmute.edu.zentech.dto.request.ChatConversationListQueryRequest;
 import hcmute.edu.zentech.dto.response.ConversationResponse;
+import hcmute.edu.zentech.dto.response.ChatMessageResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
 import hcmute.edu.zentech.mapper.ChatMapper;
@@ -15,6 +16,9 @@ import hcmute.edu.zentech.dto.response.ChatStaffResponse;
 import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.model.NotificationType;
 import hcmute.edu.zentech.service.NotificationService;
+import hcmute.edu.zentech.model.ChatMessage;
+import hcmute.edu.zentech.model.ChatMessageType;
+import hcmute.edu.zentech.repository.ChatMessageRepository;
 import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import hcmute.edu.zentech.repository.EmployeeRepository;
@@ -51,6 +55,7 @@ public class ChatConversationService {
     private final ChatMapper chatMapper;
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationService notificationService;
+    private final ChatMessageRepository chatMessageRepository;
 
     @Transactional
     public ConversationResponse createOrGetCurrentCustomerConversation() {
@@ -145,8 +150,33 @@ public class ChatConversationService {
         conversation.setStatus(ConversationStatus.AGENT_HANDLING);
         conversation.setUpdatedAt(Instant.now());
 
-        ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
+        Conversation savedConversation = conversationRepository.save(conversation);
+
+        // Lấy tên nhân viên
+        String staffName = "Nhân viên";
+        if (staff.participantType() == ParticipantType.EMPLOYEE || staff.participantType() == ParticipantType.EXPERT) {
+            staffName = employeeRepository.findById(staff.referenceId())
+                    .map(hcmute.edu.zentech.model.Employee::getFullName)
+                    .orElse("Nhân viên");
+        }
+
+        // Tạo system message
+        ChatMessage systemMessage = ChatMessage.builder()
+                .conversation(savedConversation)
+                .participant(null)
+                .messageType(ChatMessageType.SYSTEM)
+                .content("Nhân viên " + staffName + " đã tiếp nhận cuộc trò chuyện")
+                .createdAt(Instant.now())
+                .build();
+        chatMessageRepository.save(systemMessage);
+
+        ConversationResponse response = toConversationResponse(savedConversation);
         messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+
+        // Broadcast system message
+        ChatMessageResponse systemMsgResponse = chatMapper.toChatMessageResponse(systemMessage);
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, systemMsgResponse);
+
         messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
         return response;
     }
