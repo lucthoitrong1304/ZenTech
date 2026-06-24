@@ -98,7 +98,10 @@ public class AdminDashboardResponse {
     public static class ServiceErrorItem {
         private String service;
         private long occurrences;
+        private long errorOccurrences;
+        private long warningOccurrences;
         private String latestIssueTitle;
+        private String latestIssueLevel;
         private Instant lastSeen;
     }
 }

@@ -30,6 +30,7 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 @Service
 @RequiredArgsConstructor
 public class AdminObservabilityService {
+    private static final double SLOW_API_AVERAGE_THRESHOLD_MS = 500;
     private static final String HEAP_PERCENT = "100 * sum(jvm_memory_used_bytes{area=\"heap\"}) / sum(jvm_memory_max_bytes{area=\"heap\"} > 0)";
     private static final String REQUEST_RATE = "sum(rate(http_server_requests_seconds_count{uri!=\"/actuator/prometheus\"}[5m])) * 60";
     private static final String ERROR_RATE = "100 * (sum(rate(http_server_requests_seconds_count{uri!=\"/actuator/prometheus\",status=~\"4..|5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_server_requests_seconds_count{uri!=\"/actuator/prometheus\"}[5m])), 0.000001)";
@@ -43,6 +44,8 @@ public class AdminObservabilityService {
     private final RestTemplateBuilder restTemplateBuilder;
 
     @Value("${app.loki.url:http://localhost:3100}") private String lokiUrl;
+    @Value("${app.qdrant.url:http://localhost:6333}") private String qdrantUrl;
+    @Value("${app.alloy.url:http://localhost:12345}") private String alloyUrl;
     @Value("${app.dashboard.zone-id:Asia/Ho_Chi_Minh}") private String dashboardZoneId;
 
     public AdminObservabilityResponse getObservability(String requestedPeriod, Instant customFrom, Instant customTo) {
@@ -134,7 +137,7 @@ public class AdminObservabilityService {
                 )
                 """;
         return prometheus.queryVectorSafe(query).stream()
-                .filter(item -> item.value() > 0)
+                .filter(item -> item.value() >= SLOW_API_AVERAGE_THRESHOLD_MS)
                 .map(item -> AdminObservabilityResponse.ApiAnomaly.builder()
                         .method(item.labels().getOrDefault("method", "HTTP"))
                         .uri(item.labels().getOrDefault("uri", "unknown"))
@@ -161,7 +164,7 @@ public class AdminObservabilityService {
                         .method(item.labels().getOrDefault("method", "HTTP"))
                         .uri(item.labels().getOrDefault("uri", "unknown"))
                         .status(item.labels().get("status"))
-                        .value(item.value()).unit("lỗi trong 15 phút").build())
+                        .value(Math.rint(item.value())).unit("lỗi").build())
                 .toList();
     }
     private List<AdminObservabilityResponse.ThresholdEvent> buildThresholdEvents(
@@ -195,20 +198,26 @@ public class AdminObservabilityService {
 
     private List<AdminObservabilityResponse.DependencyStatus> checkDependencies(boolean prometheusAvailable) {
         List<AdminObservabilityResponse.DependencyStatus> result = new ArrayList<>();
-        result.add(dependency("Prometheus", prometheusAvailable, prometheusAvailable ? "Äang thu tháº­p metric" : "KhÃ´ng thá»ƒ káº¿t ná»‘i", null, null, null, null));
+        result.add(dependency("Prometheus", prometheusAvailable, prometheusAvailable ? "Đang thu thập metric" : "Không thể kết nối", null, null, null, null));
 
         boolean mysqlUp = checkMysql();
-        result.add(dependency("MySQL", mysqlUp, mysqlUp ? "HikariCP hoáº¡t Ä‘á»™ng" : "Káº¿t ná»‘i database tháº¥t báº¡i",
+        result.add(dependency("MySQL", mysqlUp, mysqlUp ? "Pool kết nối sẵn sàng" : "Kết nối database thất bại",
                 prometheus.queryScalar("hikaricp_connections_active"), "active",
-                prometheus.queryScalar("hikaricp_connections_pending"), "pending"));
+                prometheus.queryScalar("hikaricp_connections_idle"), "idle"));
 
         boolean rabbitUp = checkRabbit();
-        result.add(dependency("RabbitMQ", rabbitUp, rabbitUp ? "Broker connection hoáº¡t Ä‘á»™ng" : "KhÃ´ng thá»ƒ káº¿t ná»‘i broker",
+        result.add(dependency("RabbitMQ", rabbitUp, rabbitUp ? "Broker connection hoạt động" : "Không thể kết nối broker",
                 prometheus.queryScalar("rabbitmq_connections"), "connections",
                 prometheus.queryScalar("rabbitmq_channels"), "channels"));
 
         boolean lokiUp = checkHttpReady(lokiUrl + "/ready");
-        result.add(dependency("Loki", lokiUp, lokiUp ? "Log storage sáºµn sÃ ng" : "Loki khÃ´ng pháº£n há»“i", null, null, null, null));
+        result.add(dependency("Loki", lokiUp, lokiUp ? "Log storage sẵn sàng" : "Loki không phản hồi", null, null, null, null));
+
+        boolean qdrantUp = checkHttpReady(qdrantUrl + "/readyz");
+        result.add(dependency("Qdrant", qdrantUp, qdrantUp ? "Vector database sẵn sàng" : "Qdrant không phản hồi", null, null, null, null));
+
+        boolean alloyUp = checkHttpReady(alloyUrl + "/-/ready");
+        result.add(dependency("Alloy", alloyUp, alloyUp ? "Đang thu thập telemetry" : "Ngừng thu thập telemetry", null, null, null, null));
         return result;
     }
 
@@ -266,11 +275,11 @@ public class AdminObservabilityService {
             case "7D" -> from = now.toLocalDate().minusDays(6).atStartOfDay(zone).toInstant();
             case "30D" -> from = now.toLocalDate().minusDays(29).atStartOfDay(zone).toInstant();
             case "CUSTOM" -> {
-                if (customFrom == null || customTo == null || customFrom.isAfter(customTo)) throw badRequest("Khoáº£ng thá»i gian tÃ¹y chá»n khÃ´ng há»£p lá»‡.");
-                if (Duration.between(customFrom, customTo).compareTo(Duration.ofDays(90)) > 0) throw badRequest("Khoáº£ng thá»i gian tá»‘i Ä‘a lÃ  90 ngÃ y.");
+                if (customFrom == null || customTo == null || customFrom.isAfter(customTo)) throw badRequest("Khoảng thời gian tùy chọn không hợp lệ.");
+                if (Duration.between(customFrom, customTo).compareTo(Duration.ofDays(90)) > 0) throw badRequest("Khoảng thời gian tối đa là 90 ngày.");
                 from = customFrom; to = customTo;
             }
-            default -> throw badRequest("Period chá»‰ há»— trá»£ TODAY, 7D, 30D hoáº·c CUSTOM.");
+            default -> throw badRequest("Period chỉ hỗ trợ TODAY, 7D, 30D hoặc CUSTOM.");
         }
         return new DateRange(period, from, to);
     }

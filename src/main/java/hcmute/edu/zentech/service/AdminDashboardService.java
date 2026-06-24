@@ -257,9 +257,12 @@ public class AdminDashboardService {
             ServiceAggregate aggregate = services.computeIfAbsent(serviceKey,
                     ignored -> new ServiceAggregate(serviceKey, 0, issue.title, issue.lastSeen));
             aggregate.occurrences += issue.occurrences;
+            if ("ERROR".equals(issue.level)) aggregate.errorOccurrences += issue.occurrences;
+            else if ("WARN".equals(issue.level)) aggregate.warningOccurrences += issue.occurrences;
             if (issue.lastSeen.isAfter(aggregate.lastSeen)) {
                 aggregate.lastSeen = issue.lastSeen;
                 aggregate.latestIssueTitle = issue.title;
+                aggregate.latestIssueLevel = issue.level;
             }
         }
         return services.values().stream()
@@ -269,7 +272,10 @@ public class AdminDashboardService {
                 .map(item -> AdminDashboardResponse.ServiceErrorItem.builder()
                         .service(item.service)
                         .occurrences(item.occurrences)
+                        .errorOccurrences(item.errorOccurrences)
+                        .warningOccurrences(item.warningOccurrences)
                         .latestIssueTitle(item.latestIssueTitle)
+                        .latestIssueLevel(item.latestIssueLevel)
                         .lastSeen(item.lastSeen)
                         .build())
                 .toList();
@@ -567,7 +573,10 @@ public class AdminDashboardService {
     private static class ServiceAggregate {
         private final String service;
         private long occurrences;
+        private long errorOccurrences;
+        private long warningOccurrences;
         private String latestIssueTitle;
+        private String latestIssueLevel;
         private Instant lastSeen;
 
         private ServiceAggregate(String service, long occurrences, String latestIssueTitle, Instant lastSeen) {
