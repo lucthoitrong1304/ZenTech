@@ -31,4 +31,15 @@ public interface ProductCategoryRepository extends JpaRepository<ProductCategory
             where c.id = :categoryId
             """)
     Optional<ProductCategory> findCategoryWithProductsById(@Param("categoryId") UUID categoryId);
+
+    @Query("""
+            select distinct c
+            from ProductCategory c
+            left join fetch c.productList p
+            left join fetch p.reviewList
+            left join fetch p.variants
+            where c.id in :categoryIds
+            """)
+    List<ProductCategory> findCategoriesWithProductsByIds(@Param("categoryIds") java.util.Collection<UUID> categoryIds);
 }
+
