@@ -19,6 +19,10 @@ import hcmute.edu.zentech.model.ProductVariant;
 import hcmute.edu.zentech.model.InventoryTransaction;
 import hcmute.edu.zentech.model.InventoryTransactionReason;
 import hcmute.edu.zentech.model.InventoryTransactionType;
+import hcmute.edu.zentech.model.Role;
+import hcmute.edu.zentech.model.AccountUser;
+import hcmute.edu.zentech.model.NotificationType;
+import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.CustomerVoucherRepository;
 import hcmute.edu.zentech.repository.OrderRepository;
@@ -28,6 +32,7 @@ import hcmute.edu.zentech.security.SecurityContextUtils;
 import hcmute.edu.zentech.service.payment.PaymentGatewayCreateResult;
 import hcmute.edu.zentech.service.payment.MomoGatewayClient;
 import hcmute.edu.zentech.service.payment.VnpayGatewayClient;
+import hcmute.edu.zentech.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -51,6 +56,8 @@ public class CheckoutService {
     private final VnpayGatewayClient vnpayGatewayClient;
     private final MomoGatewayClient momoGatewayClient;
     private final InventoryTransactionRepository inventoryTransactionRepository;
+    private final AccountUserRepository accountUserRepository;
+    private final NotificationService notificationService;
 
     @Transactional
     public CheckoutResponse checkout(CheckoutRequest request, String clientIp) {
@@ -91,6 +98,36 @@ public class CheckoutService {
                     .createdBy(customer.getUserInfo() != null ? customer.getUserInfo().getId() : null)
                     .build();
             inventoryTransactionRepository.save(transaction);
+        }
+
+        // Notify Customer
+        if (customer.getUserInfo() != null) {
+            String title = "Đặt hàng thành công";
+            String content = String.format("Đơn hàng #%s của bạn đã được đặt thành công.", savedOrder.getId());
+            notificationService.createNotification(
+                    customer.getUserInfo().getId(),
+                    title,
+                    content,
+                    NotificationType.ORDER_STATUS,
+                    savedOrder.getId()
+            );
+        }
+
+        // Notify Admins & Managers
+        List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
+                List.of(Role.ADMIN, Role.MANAGER, Role.OWNER)
+        );
+        String mgrTitle = "Có đơn hàng mới";
+        String mgrContent = String.format("Đơn hàng mới #%s vừa được đặt bởi %s.", 
+                savedOrder.getId(), customer.getFullName());
+        for (AccountUser mgr : managers) {
+            notificationService.createNotification(
+                    mgr.getId(),
+                    mgrTitle,
+                    mgrContent,
+                    NotificationType.ORDER_STATUS,
+                    savedOrder.getId()
+            );
         }
 
         String paymentUrl = createPaymentUrlIfNeeded(savedOrder, orderDetails, clientIp);

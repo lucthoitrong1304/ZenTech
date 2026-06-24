@@ -6,6 +6,7 @@ import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.*;
 import hcmute.edu.zentech.repository.projection.EmployeeWeeklyScheduleProjection;
 import hcmute.edu.zentech.security.SecurityContextUtils;
+import hcmute.edu.zentech.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -30,6 +31,7 @@ public class ShiftService {
     private final AttendanceEventRepository attendanceEventRepository;
     private final ScheduleAdjustmentRepository scheduleAdjustmentRepository;
     private final AccountUserRepository accountUserRepository;
+    private final NotificationService notificationService;
 
 
     @Transactional
@@ -167,6 +169,20 @@ public class ShiftService {
         es.setShift(shift);
         es.setWorkDate(dto.getWorkDate());
         employeeShiftRepository.save(es);
+
+        // Notify employee
+        if (employee.getUserInfo() != null) {
+            String title = "Cập nhật lịch làm việc";
+            String content = String.format("Lịch làm việc ngày %s của bạn đã được cập nhật thành ca: %s.", 
+                    dto.getWorkDate(), shift.getName());
+            notificationService.createNotification(
+                    employee.getUserInfo().getId(),
+                    title,
+                    content,
+                    NotificationType.WORK_SCHEDULE,
+                    employee.getId()
+            );
+        }
     }
 
     @Transactional
@@ -210,6 +226,22 @@ public class ShiftService {
         }
         
         employeeShiftRepository.saveAll(newShifts);
+
+        // Notify employees
+        for (Employee emp : employees) {
+            if (emp.getUserInfo() != null) {
+                String title = "Cập nhật lịch làm việc hàng loạt";
+                String content = String.format("Lịch làm việc của bạn từ ngày %s đến ngày %s đã được cập nhật thành ca: %s.",
+                        dto.getStartDate(), dto.getEndDate(), shift.getName());
+                notificationService.createNotification(
+                        emp.getUserInfo().getId(),
+                        title,
+                        content,
+                        NotificationType.WORK_SCHEDULE,
+                        emp.getId()
+                );
+            }
+        }
     }
 
     @Transactional
@@ -240,5 +272,25 @@ public class ShiftService {
         }
         
         employeeShiftRepository.saveAll(newShifts);
+
+        // Notify affected employees
+        List<Employee> affectedEmployees = prevShifts.stream()
+                .map(EmployeeShift::getEmployee)
+                .distinct()
+                .collect(Collectors.toList());
+        for (Employee emp : affectedEmployees) {
+            if (emp.getUserInfo() != null) {
+                String title = "Lịch làm việc mới được sao chép";
+                String content = String.format("Lịch làm việc của bạn cho tuần từ ngày %s đã được sao chép từ tuần trước.",
+                        dto.getToWeekStartDate());
+                notificationService.createNotification(
+                        emp.getUserInfo().getId(),
+                        title,
+                        content,
+                        NotificationType.WORK_SCHEDULE,
+                        emp.getId()
+                );
+            }
+        }
     }
 }
