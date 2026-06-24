@@ -592,6 +592,8 @@ public class ReportManagementService {
         int totalItems = 0;
         int lowStockCount = 0;
         int deadStockCount = 0;
+        double totalFaultyValue = 0.0;
+        int totalFaultyItems = 0;
         List<ReportManagementProductPerformanceResponse> lowStockProducts = new ArrayList<>();
 
         for (ProductVariant v : allVariants) {
@@ -599,16 +601,21 @@ public class ReportManagementService {
                 continue;
             }
 
+            double price = v.getSalePrice() != null ? v.getSalePrice() : v.getOriginalPrice();
             int stock = v.getStockQuantity();
             if (stock > 0) {
                 totalItems += stock;
-                // Use salePrice if available, else originalPrice
-                double price = v.getSalePrice() != null ? v.getSalePrice() : v.getOriginalPrice();
                 totalValue += stock * price;
                 
                 if (!soldVariantIds.contains(v.getId())) {
                     deadStockCount++;
                 }
+            }
+
+            int faulty = v.getFaultyQuantity();
+            if (faulty > 0) {
+                totalFaultyItems += faulty;
+                totalFaultyValue += faulty * price;
             }
 
             // Low stock condition: stock < 5
@@ -620,7 +627,6 @@ public class ReportManagementService {
                 String imageUrl = (imageKey != null && !imageKey.isBlank()) ? r2StorageService.getPresignedGetUrl(imageKey) : null;
                 String categoryName = (v.getProduct() != null && !v.getProduct().getCategories().isEmpty()) 
                         ? v.getProduct().getCategories().stream().findFirst().get().getCategoryName() : "Khác";
-                double price = v.getSalePrice() != null ? v.getSalePrice() : v.getOriginalPrice();
 
                 int qtySold = quantityMap.getOrDefault(v, 0);
                 double rev = revenueMap.getOrDefault(v, 0.0);
@@ -643,6 +649,8 @@ public class ReportManagementService {
                 .totalItemsInStock(totalItems)
                 .lowStockVariations(lowStockCount)
                 .deadStockVariations(deadStockCount)
+                .totalFaultyValue(totalFaultyValue)
+                .totalFaultyItems(totalFaultyItems)
                 .lowStockProducts(lowStockProducts)
                 .build();
     }
