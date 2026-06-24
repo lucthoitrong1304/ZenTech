@@ -117,7 +117,15 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             FROM Order o
             WHERE o.createdAt >= :startDate
               AND o.createdAt < :endDate
-              AND o.orderStatus = :completedStatus
+              AND (
+                o.orderStatus = :completedStatus
+                OR (o.paymentStatus = hcmute.edu.zentech.model.PaymentStatus.SUCCESS
+                    AND o.orderStatus NOT IN (
+                      hcmute.edu.zentech.model.OrderStatus.CANCELLED,
+                      hcmute.edu.zentech.model.OrderStatus.RETURNED
+                    )
+                )
+              )
             """)
     List<Order> findSuccessfulOrdersBetween(
             @Param("startDate") Instant startDate,

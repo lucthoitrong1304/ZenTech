@@ -50,4 +50,7 @@ public class InventoryTransaction {
 
     @Column(name = "created_by")
     private UUID createdBy; // Employee User ID who performed the manual transaction, or null if system
+
+    @Column(name = "target_warehouse", length = 20)
+    private String targetWarehouse;
 }

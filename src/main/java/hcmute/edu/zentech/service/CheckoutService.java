@@ -96,6 +96,7 @@ public class CheckoutService {
                     .reason(InventoryTransactionReason.CUSTOMER_ORDER)
                     .note("Khách hàng đặt mua đơn hàng #" + savedOrder.getId())
                     .createdBy(customer.getUserInfo() != null ? customer.getUserInfo().getId() : null)
+                    .targetWarehouse("MAIN")
                     .build();
             inventoryTransactionRepository.save(transaction);
         }

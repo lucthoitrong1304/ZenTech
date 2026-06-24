@@ -116,4 +116,9 @@ public class CustomerSelfController {
     ) {
         return ResponseEntity.ok(ApiResponse.success(customerSelfService.createReturnRequest(orderId, request)));
     }
+
+    @PostMapping("/orders/{orderId}/cancel")
+    public ResponseEntity<ApiResponse<CustomerOrderDetailResponse>> cancelMyOrder(@PathVariable UUID orderId) {
+        return ResponseEntity.ok(ApiResponse.success(customerSelfService.cancelMyOrder(orderId)));
+    }
 }

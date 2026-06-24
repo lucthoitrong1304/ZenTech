@@ -16,5 +16,7 @@ public class ReportManagementInventoryStatsResponse {
     private int totalItemsInStock;
     private int lowStockVariations;
     private int deadStockVariations;
+    private double totalFaultyValue;
+    private int totalFaultyItems;
     private List<ReportManagementProductPerformanceResponse> lowStockProducts;
 }

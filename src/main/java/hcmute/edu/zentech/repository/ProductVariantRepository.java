@@ -96,6 +96,35 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
             and v.stockQuantity < 10
             """)
     java.util.List<ProductVariant> findLowStockAndOutOfStockVariants();
+
+    @Query("""
+            select count(v)
+            from ProductVariant v
+            join v.product p
+            where v.deleted = false
+            and p.deleted = false
+            and v.faultyQuantity > 0
+            """)
+    long countFaultyVariants();
+
+    @Query("""
+            select sum(v.faultyQuantity)
+            from ProductVariant v
+            join v.product p
+            where v.deleted = false
+            and p.deleted = false
+            """)
+    Long sumFaultyQuantity();
+
+    @Query("""
+            select count(v)
+            from ProductVariant v
+            join v.product p
+            where v.deleted = false
+            and p.deleted = false
+            and v.faultyQuantity >= 10
+            """)
+    long countHighFaultyAlertVariants();
 }
 
 

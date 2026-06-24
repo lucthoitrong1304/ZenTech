@@ -29,4 +29,5 @@ public class InventoryTransactionResponse {
     private String createdByName;
     private String createdByEmail;
     private String createdByAvatar;
+    private String targetWarehouse;
 }

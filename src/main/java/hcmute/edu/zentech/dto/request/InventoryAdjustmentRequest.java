@@ -32,4 +32,6 @@ public class InventoryAdjustmentRequest {
     private InventoryTransactionReason reason;
 
     private String note;
+
+    private String targetWarehouse;
 }

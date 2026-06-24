@@ -22,5 +22,6 @@ public class InventorySummaryResponse {
     private double originalPrice;
     private Double salePrice;
     private int stockQuantity;
+    private int faultyQuantity;
     private String representativeImageUrl;
 }
