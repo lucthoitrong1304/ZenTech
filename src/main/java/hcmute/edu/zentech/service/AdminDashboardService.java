@@ -2,10 +2,10 @@ package hcmute.edu.zentech.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sun.management.OperatingSystemMXBean;
 import hcmute.edu.zentech.dto.response.AdminDashboardResponse;
 import hcmute.edu.zentech.dto.response.AdminResourceMetricsResponse;
 import hcmute.edu.zentech.model.Incident;
+import hcmute.edu.zentech.monitoring.HostResourceMetricsProvider;
 import hcmute.edu.zentech.model.IncidentSeverity;
 import hcmute.edu.zentech.model.IncidentStatus;
 import hcmute.edu.zentech.model.Ticket;
@@ -20,11 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.lang.management.ManagementFactory;
 import java.net.URI;
-import java.nio.file.FileStore;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -55,6 +51,8 @@ public class AdminDashboardService {
     private final TicketRepository ticketRepository;
     private final AdminLogService adminLogService;
     private final ObjectMapper objectMapper;
+    private final HostResourceMetricsProvider hostResourceMetricsProvider;
+    private final PrometheusQueryService prometheusQueryService;
 
     @Value("${app.dashboard.zone-id:Asia/Ho_Chi_Minh}")
     private String dashboardZoneId;
@@ -139,48 +137,36 @@ public class AdminDashboardService {
                 .build();
     }
 
-    public AdminResourceMetricsResponse getResourceMetrics() {
-        Instant generatedAt = Instant.now();
-        try {
-            OperatingSystemMXBean osBean = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);
-            if (osBean == null) {
-                throw new IllegalStateException("Operating system metrics are not supported by this JVM");
-            }
+    public AdminResourceMetricsResponse getResourceMetrics(String requestedPeriod, Instant customFrom, Instant customTo) {
+        DateRange range = resolveRange(requestedPeriod, customFrom, customTo);
+        HostResourceMetricsProvider.HostResourceSnapshot snapshot = hostResourceMetricsProvider.snapshot();
+        long stepSeconds = resourceHistoryStepSeconds(range);
+        PrometheusQueryService.HistoryResult historyResult = prometheusQueryService.queryHostHistory(
+                range.from(), range.to(), stepSeconds
+        );
+        boolean hasHistory = historyResult.available() && !historyResult.history().isEmpty();
 
-            long totalRam = osBean.getTotalMemorySize();
-            long freeRam = osBean.getFreeMemorySize();
-            long usedRam = Math.max(0, totalRam - freeRam);
-            double cpuLoad = osBean.getCpuLoad();
+        return AdminResourceMetricsResponse.builder()
+                .status(snapshot.available() ? "AVAILABLE" : "UNAVAILABLE")
+                .source(hasHistory ? "PROMETHEUS" : "DIRECT")
+                .historyAvailable(hasHistory)
+                .cpuUsagePercent(snapshot.cpuUsagePercent())
+                .ramUsagePercent(snapshot.ramUsagePercent())
+                .diskUsagePercent(snapshot.diskUsagePercent())
+                .ramUsedBytes(snapshot.ramUsedBytes())
+                .ramTotalBytes(snapshot.ramTotalBytes())
+                .diskUsedBytes(snapshot.diskUsedBytes())
+                .diskTotalBytes(snapshot.diskTotalBytes())
+                .diskPath(snapshot.diskPath())
+                .generatedAt(snapshot.generatedAt())
+                .message(snapshot.message())
+                .history(historyResult.history())
+                .build();
+    }
 
-            Path applicationPath = Path.of("").toAbsolutePath().normalize();
-            FileStore fileStore = Files.getFileStore(applicationPath);
-            long totalDisk = fileStore.getTotalSpace();
-            long usableDisk = fileStore.getUsableSpace();
-            long usedDisk = Math.max(0, totalDisk - usableDisk);
-
-            return AdminResourceMetricsResponse.builder()
-                    .status("AVAILABLE")
-                    .cpuUsagePercent(cpuLoad >= 0 ? roundTwoDecimals(cpuLoad * 100) : null)
-                    .ramUsagePercent(percent(usedRam, totalRam))
-                    .diskUsagePercent(percent(usedDisk, totalDisk))
-                    .ramUsedBytes(usedRam)
-                    .ramTotalBytes(totalRam)
-                    .diskUsedBytes(usedDisk)
-                    .diskTotalBytes(totalDisk)
-                    .diskPath(applicationPath.getRoot() != null
-                            ? applicationPath.getRoot().toString()
-                            : applicationPath.toString())
-                    .generatedAt(generatedAt)
-                    .message(null)
-                    .build();
-        } catch (Exception exception) {
-            log.warn("Unable to read host resource metrics", exception);
-            return AdminResourceMetricsResponse.builder()
-                    .status("UNAVAILABLE")
-                    .generatedAt(generatedAt)
-                    .message("Kh\u00F4ng th\u1EC3 \u0111\u1ECDc t\u00E0i nguy\u00EAn m\u00E1y ch\u1EE7 t\u1EA1i th\u1EDDi \u0111i\u1EC3m n\u00E0y.")
-                    .build();
-        }
+    private long resourceHistoryStepSeconds(DateRange range) {
+        long durationSeconds = Math.max(1, Duration.between(range.from(), range.to()).getSeconds());
+        return Math.max(15, durationSeconds / 120);
     }
 
     private LogSnapshot loadIssues(DateRange range) {

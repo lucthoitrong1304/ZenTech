@@ -3,6 +3,7 @@ package hcmute.edu.zentech.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import hcmute.edu.zentech.dto.response.AdminDashboardResponse;
 import hcmute.edu.zentech.model.Incident;
+import hcmute.edu.zentech.monitoring.HostResourceMetricsProvider;
 import hcmute.edu.zentech.model.IncidentSeverity;
 import hcmute.edu.zentech.model.IncidentStatus;
 import hcmute.edu.zentech.repository.IncidentRepository;
@@ -30,6 +31,8 @@ class AdminDashboardServiceTest {
     @Mock private IncidentRepository incidentRepository;
     @Mock private TicketRepository ticketRepository;
     @Mock private AdminLogService adminLogService;
+    @Mock private HostResourceMetricsProvider hostResourceMetricsProvider;
+    @Mock private PrometheusQueryService prometheusQueryService;
 
     private AdminDashboardService service;
 
@@ -39,7 +42,9 @@ class AdminDashboardServiceTest {
                 incidentRepository,
                 ticketRepository,
                 adminLogService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                hostResourceMetricsProvider,
+                prometheusQueryService
         );
         ReflectionTestUtils.setField(service, "dashboardZoneId", "Asia/Ho_Chi_Minh");
 

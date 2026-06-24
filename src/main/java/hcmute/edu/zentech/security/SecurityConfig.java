@@ -35,6 +35,7 @@ public class SecurityConfig {
     private final AuthEntryPointJwt unauthorizedHandler;
     private final CustomUserDetailsService customUserDetailsService;
     private final TraceIdFilter traceIdFilter;
+    private final PrometheusScrapeTokenFilter prometheusScrapeTokenFilter;
 
     @Value("${app.cors.allowed-origins:http://localhost:4200,http://localhost:3000,http://localhost:5173}")
     private String allowedOrigins;
@@ -67,6 +68,7 @@ public class SecurityConfig {
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .requestMatchers("/internal/ai/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/payments/**").permitAll()
@@ -100,6 +102,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authenticationProvider(authenticationProvider)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(prometheusScrapeTokenFilter, JwtAuthenticationFilter.class)
                 .addFilterBefore(traceIdFilter, JwtAuthenticationFilter.class);
         return http.build();
     }
