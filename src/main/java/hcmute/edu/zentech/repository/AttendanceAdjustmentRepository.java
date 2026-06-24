@@ -2,6 +2,7 @@ package hcmute.edu.zentech.repository;
 
 import hcmute.edu.zentech.model.ApprovalStatus;
 import hcmute.edu.zentech.model.AttendanceAdjustment;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -18,7 +19,9 @@ public interface AttendanceAdjustmentRepository extends JpaRepository<Attendance
     List<AttendanceAdjustment> findByEmployeeIdInAndWorkDateBetweenAndStatus(
             List<UUID> employeeIds, LocalDate start, LocalDate end, ApprovalStatus status);
 
+    @EntityGraph(attributePaths = {"employee"})
     List<AttendanceAdjustment> findByStatus(ApprovalStatus status);
 
+    @EntityGraph(attributePaths = {"employee"})
     List<AttendanceAdjustment> findByEmployeeIdOrderByRequestedAtDesc(UUID employeeId);
 }

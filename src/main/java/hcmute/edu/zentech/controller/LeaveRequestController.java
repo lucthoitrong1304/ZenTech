@@ -1,6 +1,8 @@
 package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.response.ApiResponse;
+import hcmute.edu.zentech.dto.response.LeaveRequestResponse;
+import hcmute.edu.zentech.mapper.ApprovalRequestMapper;
 import hcmute.edu.zentech.model.ApprovalStatus;
 import hcmute.edu.zentech.model.LeaveRequest;
 import hcmute.edu.zentech.service.ApprovalService;
@@ -15,29 +17,31 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class LeaveRequestController {
     private final ApprovalService approvalService;
+    private final ApprovalRequestMapper approvalRequestMapper;
 
     @PostMapping("/api/leaves")
-    public ResponseEntity<ApiResponse<LeaveRequest>> requestLeave(
+    public ResponseEntity<ApiResponse<LeaveRequestResponse>> requestLeave(
             @RequestBody LeaveRequest request
     ) {
-        return ResponseEntity.status(201).body(ApiResponse.success(approvalService.requestLeave(request)));
+        LeaveRequest saved = approvalService.requestLeave(request);
+        return ResponseEntity.status(201).body(ApiResponse.success(approvalRequestMapper.toLeaveResponse(saved)));
     }
 
     @GetMapping("/api/management/leaves/pending")
-    public ResponseEntity<ApiResponse<List<LeaveRequest>>> getPendingLeaves() {
-        return ResponseEntity.ok(ApiResponse.success(approvalService.getPendingLeaves()));
+    public ResponseEntity<ApiResponse<List<LeaveRequestResponse>>> getPendingLeaves() {
+        return ResponseEntity.ok(ApiResponse.success(approvalRequestMapper.toLeaveResponses(approvalService.getPendingLeaves())));
     }
 
     @PostMapping("/api/management/leaves/{id}/approve")
-    public ResponseEntity<ApiResponse<LeaveRequest>> approveLeave(
+    public ResponseEntity<ApiResponse<LeaveRequestResponse>> approveLeave(
             @PathVariable UUID id,
             @RequestParam ApprovalStatus status
     ) {
-        return ResponseEntity.ok(ApiResponse.success(approvalService.approveLeave(id, status)));
+        return ResponseEntity.ok(ApiResponse.success(approvalRequestMapper.toLeaveResponse(approvalService.approveLeave(id, status))));
     }
 
     @GetMapping("/api/leaves/my")
-    public ResponseEntity<ApiResponse<List<LeaveRequest>>> getMyLeaves() {
-        return ResponseEntity.ok(ApiResponse.success(approvalService.getMyLeaves()));
+    public ResponseEntity<ApiResponse<List<LeaveRequestResponse>>> getMyLeaves() {
+        return ResponseEntity.ok(ApiResponse.success(approvalRequestMapper.toLeaveResponses(approvalService.getMyLeaves())));
     }
 }
