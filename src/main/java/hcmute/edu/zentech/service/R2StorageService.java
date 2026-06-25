@@ -30,11 +30,17 @@ public class R2StorageService {
     );
 
     private static final long MAX_REVIEW_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+    private static final long MAX_PRODUCT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
     private static final long MAX_REVIEW_VIDEO_SIZE_BYTES = 50 * 1024 * 1024;
     private static final long MAX_CHAT_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
     private static final long MAX_CHAT_VIDEO_SIZE_BYTES = 50 * 1024 * 1024;
     private static final long MAX_CHAT_FILE_SIZE_BYTES = 20 * 1024 * 1024;
     private static final Set<String> ALLOWED_REVIEW_IMAGE_CONTENT_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+    );
+    private static final Set<String> ALLOWED_PRODUCT_IMAGE_CONTENT_TYPES = Set.of(
             "image/jpeg",
             "image/png",
             "image/webp"
@@ -129,6 +135,38 @@ public class R2StorageService {
         PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
 
         log.info("Generated review video presigned URL for key: {}", fileKey);
+        return UploadPresignResponse.builder()
+                .presignedUrl(presignedPutObjectRequest.url().toString())
+                .fileKey(fileKey)
+                .method("PUT")
+                .expiresInMinutes(expirationMinutes)
+                .requiredHeaders(Map.of("Content-Type", contentType))
+                .build();
+    }
+
+    public UploadPresignResponse generateProductImagePresignedUrl(
+            UUID userId,
+            String originalFilename,
+            String contentType,
+            long fileSize
+    ) {
+        validateProductImageRequest(contentType, fileSize);
+
+        String fileKey = buildProductImageKey(userId, originalFilename);
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+
+        PutObjectPresignRequest putObjectPresignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofMinutes(expirationMinutes))
+                .putObjectRequest(putObjectRequest)
+                .build();
+
+        PresignedPutObjectRequest presignedPutObjectRequest = s3Presigner.presignPutObject(putObjectPresignRequest);
+
+        log.info("Generated product image presigned URL for key: {}", fileKey);
         return UploadPresignResponse.builder()
                 .presignedUrl(presignedPutObjectRequest.url().toString())
                 .fileKey(fileKey)
@@ -434,6 +472,10 @@ public class R2StorageService {
         return getChatAttachmentPrefix(accountId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
     }
 
+    private String buildProductImageKey(UUID userId, String originalFilename) {
+        return getProductImagePrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
+    }
+
     private String buildCustomerAvatarKey(UUID userId, String originalFilename) {
         return getCustomerAvatarPrefix(userId) + UUID.randomUUID() + "-" + sanitizeFilename(originalFilename);
     }
@@ -458,8 +500,26 @@ public class R2StorageService {
         return "uploads/chat/" + accountId + "/";
     }
 
+    private String getProductImagePrefix(UUID userId) {
+        return "uploads/products/" + userId + "/";
+    }
+
     private String getCustomerAvatarPrefix(UUID userId) {
         return "uploads/avatars/" + userId + "/";
+    }
+
+    private void validateProductImageRequest(String contentType, long fileSize) {
+        if (!ALLOWED_PRODUCT_IMAGE_CONTENT_TYPES.contains(contentType)) {
+            throw new IllegalArgumentException("Only JPEG, PNG, and WEBP images are allowed for product images");
+        }
+
+        if (fileSize <= 0) {
+            throw new IllegalArgumentException("Product image size must be greater than 0");
+        }
+
+        if (fileSize > MAX_PRODUCT_IMAGE_SIZE_BYTES) {
+            throw new IllegalArgumentException("Product image size must not exceed 5MB");
+        }
     }
 
     private void validateCustomerAvatarRequest(String contentType, long fileSize) {

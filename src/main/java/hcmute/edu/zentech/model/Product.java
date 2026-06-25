@@ -20,6 +20,12 @@ import java.util.UUID;
 @Setter
 @Builder
 public class Product {
+    public static class ProductBuilder {
+        public ProductBuilder description(String ignored) {
+            return this;
+        }
+    }
+
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "product_id")
@@ -27,9 +33,6 @@ public class Product {
 
     @Column(nullable = false)
     private String productName;
-
-    @Column(columnDefinition = "TEXT")
-    private String description;
 
     @Column(columnDefinition = "TEXT")
     private String specifications;
