@@ -199,7 +199,6 @@ public class InternalAiController {
                 .rating(avgRating)
                 .reviewCount(reviewCount)
                 .imageKey(resolveRepresentativeImageKey(product))
-                .description(product.getDescription())
                 .specifications(product.getSpecifications())
                 .compatibility(product.getCompatibility())
                 .boxContents(product.getBoxContents())
@@ -469,7 +468,6 @@ public class InternalAiController {
         private Double rating;
         private Integer reviewCount;
         private String imageKey;
-        private String description;
         private String specifications;
         private String compatibility;
         private String boxContents;

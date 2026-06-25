@@ -1,6 +1,5 @@
 package hcmute.edu.zentech.dto.request;
 
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -26,21 +25,14 @@ public class ProductUpdateRequest {
     private Boolean clearRepresentativeImage;
     private List<@Size(max = 1000, message = "imageKey must not exceed 1000 characters") String> imageKeys;
 
-    @Valid
-    private MarkdownContentRequest description;
+    private String specifications;
 
-    @Valid
-    private MarkdownContentRequest specifications;
+    private String compatibility;
 
-    @Valid
-    private MarkdownContentRequest compatibility;
+    private String boxContents;
 
-    @Valid
-    private MarkdownContentRequest boxContents;
+    private String supportInfo;
 
-    @Valid
-    private MarkdownContentRequest supportInfo;
-
-    @Valid
+    @jakarta.validation.Valid
     private List<ProductVariantUpsertRequest> variants;
 }

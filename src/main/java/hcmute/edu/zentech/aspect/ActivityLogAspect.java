@@ -300,7 +300,6 @@ public class ActivityLogAspect {
                 .map(product -> {
                     Map<String, Object> snapshot = new LinkedHashMap<>();
                     snapshot.put("productName", product.getProductName());
-                    snapshot.put("description", product.getDescription());
                     snapshot.put("representativeImageKey", product.getRepresentativeImageKey());
                     snapshot.put("groupId", product.getProductGroup() != null ? product.getProductGroup().getId() : null);
                     snapshot.put("groupName", product.getProductGroup() != null ? product.getProductGroup().getGroupName() : null);

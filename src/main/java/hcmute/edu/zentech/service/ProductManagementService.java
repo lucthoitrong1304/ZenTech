@@ -1,6 +1,5 @@
 package hcmute.edu.zentech.service;
 
-import hcmute.edu.zentech.dto.request.MarkdownContentRequest;
 import hcmute.edu.zentech.dto.request.ProductCreateRequest;
 import hcmute.edu.zentech.dto.request.ProductUpdateRequest;
 import hcmute.edu.zentech.dto.request.ProductVariantUpsertRequest;
@@ -96,7 +95,7 @@ public class ProductManagementService {
                 product.getImageKeys(),
                 false
         ));
-        applyMarkdownContent(product, request);
+        applyContent(product, request);
         product.setVariants(new HashSet<>(buildNewVariants(product, request.getVariants())));
 
         Product savedProduct = productRepository.save(product);
@@ -138,7 +137,7 @@ public class ProductManagementService {
             ));
         }
 
-        applyMarkdownContent(product, request);
+        applyContent(product, request);
 
         if (request.getVariants() != null) {
             upsertVariants(product, request.getVariants());
@@ -341,81 +340,26 @@ public class ProductManagementService {
         }
     }
 
-    private void applyMarkdownContent(Product product, ProductCreateRequest request) {
-        product.setDescription(buildMarkdown(request.getDescription()));
-        product.setSpecifications(buildMarkdown(request.getSpecifications()));
-        product.setCompatibility(buildMarkdown(request.getCompatibility()));
-        product.setBoxContents(buildMarkdown(request.getBoxContents()));
-        product.setSupportInfo(buildMarkdown(request.getSupportInfo()));
+    private void applyContent(Product product, ProductCreateRequest request) {
+        product.setSpecifications(normalizeText(request.getSpecifications()));
+        product.setCompatibility(normalizeText(request.getCompatibility()));
+        product.setBoxContents(normalizeText(request.getBoxContents()));
+        product.setSupportInfo(normalizeText(request.getSupportInfo()));
     }
 
-    private void applyMarkdownContent(Product product, ProductUpdateRequest request) {
-        if (request.getDescription() != null) {
-            product.setDescription(buildMarkdown(request.getDescription()));
-        }
+    private void applyContent(Product product, ProductUpdateRequest request) {
         if (request.getSpecifications() != null) {
-            product.setSpecifications(buildMarkdown(request.getSpecifications()));
+            product.setSpecifications(normalizeText(request.getSpecifications()));
         }
         if (request.getCompatibility() != null) {
-            product.setCompatibility(buildMarkdown(request.getCompatibility()));
+            product.setCompatibility(normalizeText(request.getCompatibility()));
         }
         if (request.getBoxContents() != null) {
-            product.setBoxContents(buildMarkdown(request.getBoxContents()));
+            product.setBoxContents(normalizeText(request.getBoxContents()));
         }
         if (request.getSupportInfo() != null) {
-            product.setSupportInfo(buildMarkdown(request.getSupportInfo()));
+            product.setSupportInfo(normalizeText(request.getSupportInfo()));
         }
-    }
-
-    private String buildMarkdown(MarkdownContentRequest request) {
-        if (request == null || request.getSections() == null || request.getSections().isEmpty()) {
-            return null;
-        }
-
-        List<String> sectionBlocks = request.getSections().stream()
-                .map(this::buildMarkdownSection)
-                .filter(Objects::nonNull)
-                .toList();
-
-        return sectionBlocks.isEmpty() ? null : String.join("\n\n", sectionBlocks);
-    }
-
-    private String buildMarkdownSection(MarkdownContentRequest.MarkdownSectionRequest section) {
-        List<String> lines = new ArrayList<>();
-        String heading = normalizeText(section.getHeading());
-        if (heading != null) {
-            lines.add("## " + heading);
-        }
-
-        if (section.getParagraphs() != null) {
-            section.getParagraphs().stream()
-                    .map(this::normalizeText)
-                    .filter(Objects::nonNull)
-                    .forEach(lines::add);
-        }
-
-        if (section.getBullets() != null) {
-            section.getBullets().stream()
-                    .map(this::buildBullet)
-                    .filter(Objects::nonNull)
-                    .forEach(lines::add);
-        }
-
-        return lines.isEmpty() ? null : String.join("\n", lines);
-    }
-
-    private String buildBullet(MarkdownContentRequest.MarkdownBulletRequest bullet) {
-        String value = normalizeText(bullet.getValue());
-        if (value == null) {
-            return null;
-        }
-
-        String label = normalizeText(bullet.getLabel());
-        if (label == null) {
-            return "- " + value;
-        }
-
-        return "- **" + label + ":** " + value;
     }
 
     private List<String> normalizeImageKeys(List<String> imageKeys) {

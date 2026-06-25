@@ -48,6 +48,7 @@ public class ProductMapper {
                 .id(category.getId())
                 .categoryName(category.getCategoryName())
                 .shortName(category.getShortName())
+                .visible(category.isVisible())
                 .hasChildren(hasChildren)
                 .children(children)
                 .build();
@@ -96,7 +97,6 @@ public class ProductMapper {
         return ProductDetailResponse.builder()
                 .id(product.getId())
                 .productName(product.getProductName())
-                .description(product.getDescription())
                 .specifications(product.getSpecifications())
                 .compatibility(product.getCompatibility())
                 .boxContents(product.getBoxContents())
@@ -225,7 +225,6 @@ public class ProductMapper {
         return ProductManagementDetailResponse.builder()
                 .id(product.getId())
                 .productName(product.getProductName())
-                .description(product.getDescription())
                 .specifications(product.getSpecifications())
                 .compatibility(product.getCompatibility())
                 .boxContents(product.getBoxContents())
