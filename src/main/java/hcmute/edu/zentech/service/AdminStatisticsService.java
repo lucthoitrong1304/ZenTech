@@ -36,6 +36,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
 @Service
@@ -45,6 +48,7 @@ public class AdminStatisticsService {
     private static final int MAX_LOG_REQUESTS_PER_LEVEL = 256;
     private static final int MAX_LOGS_PER_LEVEL = 100_000;
     private static final long MIN_LOG_WINDOW_MILLIS = 1_000;
+    private static final long CACHE_TTL_MILLIS = 30_000;
     private static final Pattern UUID_PATTERN = Pattern.compile(
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
     private static final Pattern NUMBER_SEGMENT_PATTERN = Pattern.compile("(?<=/)\\d+(?=/|$)");
@@ -55,6 +59,8 @@ public class AdminStatisticsService {
     private final AccountUserRepository accountUserRepository;
     private final R2StorageService r2StorageService;
     private final ObjectMapper objectMapper;
+    private final Map<String, CachedStatistics> cache = new ConcurrentHashMap<>();
+    private final Map<String, ReentrantLock> cacheLocks = new ConcurrentHashMap<>();
 
     @Value("${app.dashboard.zone-id:Asia/Ho_Chi_Minh}")
     private String dashboardZoneId;
@@ -62,8 +68,31 @@ public class AdminStatisticsService {
     @Transactional(readOnly = true)
     public AdminStatisticsResponse getStatistics(String requestedPeriod, Instant customFrom, Instant customTo) {
         DateRange range = resolveRange(requestedPeriod, customFrom, customTo);
-        LogFetchResult errorLogs = fetchLogs("ERROR", range.from(), range.to());
-        LogFetchResult warningLogs = fetchLogs("WARN", range.from(), range.to());
+        String cacheKey = cacheKey(range);
+        AdminStatisticsResponse cached = cachedResponse(cacheKey);
+        if (cached != null) return cached;
+
+        ReentrantLock lock = cacheLocks.computeIfAbsent(cacheKey, ignored -> new ReentrantLock());
+        lock.lock();
+        try {
+            cached = cachedResponse(cacheKey);
+            if (cached != null) return cached;
+            AdminStatisticsResponse response = loadStatistics(range);
+            cache.put(cacheKey, new CachedStatistics(response, System.currentTimeMillis()));
+            return response;
+        } finally {
+            lock.unlock();
+            cacheLocks.remove(cacheKey, lock);
+        }
+    }
+
+    private AdminStatisticsResponse loadStatistics(DateRange range) {
+        CompletableFuture<LogFetchResult> errorFuture = CompletableFuture.supplyAsync(
+                () -> fetchLogs("ERROR", range.from(), range.to()));
+        CompletableFuture<LogFetchResult> warningFuture = CompletableFuture.supplyAsync(
+                () -> fetchLogs("WARN", range.from(), range.to()));
+        LogFetchResult errorLogs = errorFuture.join();
+        LogFetchResult warningLogs = warningFuture.join();
         boolean logsAvailable = errorLogs.available() && warningLogs.available();
         boolean partialData = errorLogs.partial() || warningLogs.partial();
 
@@ -102,6 +131,20 @@ public class AdminStatisticsService {
                 .build();
     }
 
+    private AdminStatisticsResponse cachedResponse(String cacheKey) {
+        CachedStatistics cached = cache.get(cacheKey);
+        if (cached == null) return null;
+        if (System.currentTimeMillis() - cached.createdAtMillis() <= CACHE_TTL_MILLIS) {
+            return cached.response();
+        }
+        cache.remove(cacheKey, cached);
+        return null;
+    }
+
+    private String cacheKey(DateRange range) {
+        if (!"CUSTOM".equals(range.period())) return range.period();
+        return range.period() + '|' + range.from() + '|' + range.to();
+    }
     private LogFetchResult fetchLogs(String level, Instant from, Instant to) {
         Map<String, Map<String, Object>> uniqueLogs = new LinkedHashMap<>();
         ArrayDeque<TimeWindow> pending = new ArrayDeque<>();
@@ -433,6 +476,7 @@ public class AdminStatisticsService {
         return null;
     }
 
+    private record CachedStatistics(AdminStatisticsResponse response, long createdAtMillis) {}
     private record LogFetchResult(boolean available, boolean partial, List<Map<String, Object>> logs) {}
     private record TimeWindow(long fromMillis, long toMillis) {
         private long durationMillis() { return Math.max(0, toMillis - fromMillis); }

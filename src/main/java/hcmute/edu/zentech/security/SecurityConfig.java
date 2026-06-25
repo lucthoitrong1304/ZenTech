@@ -11,6 +11,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -28,6 +29,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -67,13 +69,13 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/auth/me/**").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .requestMatchers("/internal/ai/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/payments/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/business-events").permitAll()
-                        .requestMatchers("/api/management/ai/**").hasAnyRole("EMPLOYEE", "MANAGER", "OWNER", "ADMIN")
                         .requestMatchers("/api/chat/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/uploads/presign").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/products/*/reviews").authenticated()
@@ -84,18 +86,52 @@ public class SecurityConfig {
                         .requestMatchers("/api/categories/**").permitAll()
                         .requestMatchers("/api/logs/client").permitAll()
 
-                        .requestMatchers("/api/management/search").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/categories/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/products/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/inventory/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/product-groups/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/chat/**").hasAnyRole("EMPLOYEE", "MANAGER", "OWNER")
-                        .requestMatchers("/api/management/orders/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/return-requests/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/employees/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/customers/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/reports/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
-                        .requestMatchers("/api/management/impact-analysis/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/orders/**").hasAuthority("ORDER_VIEW")
+                        .requestMatchers(HttpMethod.POST, "/api/management/orders/**").hasAuthority("ORDER_CREATE")
+                        .requestMatchers(HttpMethod.PATCH, "/api/management/orders/**").hasAuthority("ORDER_UPDATE")
+                        .requestMatchers(HttpMethod.DELETE, "/api/management/orders/**").hasAuthority("ORDER_DELETE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/return-requests/**").hasAuthority("RETURN_VIEW")
+                        .requestMatchers("/api/management/return-requests/**").hasAuthority("RETURN_APPROVE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/products/**", "/api/management/product-groups/**").hasAuthority("PRODUCT_VIEW")
+                        .requestMatchers(HttpMethod.POST, "/api/management/products/**", "/api/management/product-groups/**").hasAuthority("PRODUCT_CREATE")
+                        .requestMatchers(HttpMethod.PATCH, "/api/management/products/**", "/api/management/product-groups/**").hasAuthority("PRODUCT_UPDATE")
+                        .requestMatchers(HttpMethod.DELETE, "/api/management/products/**", "/api/management/product-groups/**").hasAuthority("PRODUCT_DELETE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/inventory/**").hasAuthority("INVENTORY_VIEW")
+                        .requestMatchers("/api/management/inventory/**").hasAuthority("INVENTORY_UPDATE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/customers/**").hasAuthority("CUSTOMER_VIEW")
+                        .requestMatchers("/api/management/customers/**").hasAuthority("CUSTOMER_UPDATE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/employees/**").hasAuthority("EMPLOYEE_VIEW")
+                        .requestMatchers(HttpMethod.POST, "/api/management/employees/**").hasAuthority("EMPLOYEE_CREATE")
+                        .requestMatchers(HttpMethod.PATCH, "/api/management/employees/**").hasAuthority("EMPLOYEE_UPDATE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/coupons/**").hasAuthority("MARKETING_VIEW")
+                        .requestMatchers(HttpMethod.POST, "/api/management/coupons/**").hasAuthority("MARKETING_CREATE")
+                        .requestMatchers(HttpMethod.PATCH, "/api/management/coupons/**").hasAuthority("MARKETING_UPDATE")
+                        .requestMatchers(HttpMethod.DELETE, "/api/management/coupons/**").hasAuthority("MARKETING_DELETE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/reports/analyze").hasAuthority("REPORT_ANALYZE")
+                        .requestMatchers(HttpMethod.POST, "/api/management/impact-analysis/incidents/*/analyze-ai").hasAuthority("REPORT_ANALYZE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/reports/**", "/api/management/impact-analysis/**").hasAuthority("REPORT_VIEW")
+                        .requestMatchers(HttpMethod.GET, "/api/management/chat/**", "/api/management/tickets/**").hasAuthority("CHAT_VIEW")
+                        .requestMatchers("/api/management/chat/**", "/api/management/tickets/**").hasAuthority("CHAT_UPDATE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/ai/**").hasAuthority("AI_VIEW")
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/management/ai/agents/*/demo",
+                                "/api/management/ai/documents/*/reingest",
+                                "/api/management/ai/products/reindex"
+                        ).hasAuthority("AI_UPDATE")
+                        .requestMatchers(HttpMethod.POST, "/api/management/ai/**").hasAuthority("AI_CREATE")
+                        .requestMatchers(HttpMethod.PATCH, "/api/management/ai/**").hasAuthority("AI_UPDATE")
+                        .requestMatchers(HttpMethod.DELETE, "/api/management/ai/**").hasAuthority("AI_DELETE")
+                        .requestMatchers(HttpMethod.GET, "/api/shifts/**", "/api/attendance/report").hasAuthority("SCHEDULE_VIEW")
+                        .requestMatchers("/api/shifts/**").hasAuthority("SCHEDULE_UPDATE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/leaves/**", "/api/management/attendance/adjustments/**", "/api/management/schedules/swaps/**").hasAuthority("APPROVAL_VIEW")
+                        .requestMatchers("/api/management/leaves/**", "/api/management/attendance/adjustments/**", "/api/management/schedules/swaps/**").hasAuthority("APPROVAL_APPROVE")
+                        .requestMatchers(HttpMethod.GET, "/api/management/pay-periods/**").hasAuthority("PAY_PERIOD_VIEW")
+                        .requestMatchers("/api/management/pay-periods/**").hasAuthority("PAY_PERIOD_UPDATE")
+                        .requestMatchers("/api/management/search").hasAnyAuthority(
+                                "PRODUCT_VIEW",
+                                "ORDER_VIEW",
+                                "CUSTOMER_VIEW"
+                        )
                         .requestMatchers("/api/attendance/location-policy").hasAnyRole("OWNER", "MANAGER", "ADMIN")
 
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

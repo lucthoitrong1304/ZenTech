@@ -9,7 +9,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
-import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Data
@@ -26,14 +27,22 @@ public class CustomUserDetails implements UserDetails {
     private Collection<? extends GrantedAuthority> authorities;
 
     public static CustomUserDetails build(AccountUser account) {
-        GrantedAuthority authority = new SimpleGrantedAuthority("ROLE_" + account.getRole().name());
+        return build(account, Set.of());
+    }
+
+    public static CustomUserDetails build(AccountUser account, Collection<String> permissions) {
+        Set<GrantedAuthority> authorities = new LinkedHashSet<>();
+        authorities.add(new SimpleGrantedAuthority("ROLE_" + account.getRole().name()));
+        permissions.stream()
+                .map(SimpleGrantedAuthority::new)
+                .forEach(authorities::add);
 
         return new CustomUserDetails(
                 account.getId(),
                 account.getEmail(),
                 account.getPassword(),
                 account.isActive(),
-                Collections.singletonList(authority)
+                authorities
         );
     }
 

@@ -16,6 +16,7 @@ import hcmute.edu.zentech.service.OrderManagementService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -36,6 +37,7 @@ public class OrderManagementController {
     private final OrderManagementService orderManagementService;
 
     @GetMapping
+    @PreAuthorize("hasAuthority('ORDER_VIEW')")
     public ResponseEntity<ApiResponse<PageResponse<OrderManagementSummaryResponse>>> getOrders(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
@@ -52,11 +54,13 @@ public class OrderManagementController {
     }
 
     @GetMapping("/{orderId}")
+    @PreAuthorize("hasAuthority('ORDER_VIEW')")
     public ResponseEntity<ApiResponse<OrderManagementDetailResponse>> getOrderDetail(@PathVariable UUID orderId) {
         return ResponseEntity.ok(ApiResponse.success(orderManagementService.getOrderDetail(orderId)));
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('ORDER_CREATE')")
     public ResponseEntity<ApiResponse<OrderManagementDetailResponse>> createOrder(
             @Valid @RequestBody OrderCreateRequest request
     ) {
@@ -64,6 +68,7 @@ public class OrderManagementController {
     }
 
     @PatchMapping("/{orderId}")
+    @PreAuthorize("hasAuthority('ORDER_UPDATE')")
     @TrackActivity(action = ActivityAction.UPDATE_ORDER_STATUS, area = ActivityArea.MANAGEMENT, module = "ORDER", targetType = "ORDER", severity = ActivitySeverity.IMPORTANT, summary = "Cập nhật trạng thái đơn hàng")
     public ResponseEntity<ApiResponse<OrderManagementDetailResponse>> updateOrder(
             @PathVariable UUID orderId,
@@ -73,6 +78,7 @@ public class OrderManagementController {
     }
 
     @DeleteMapping("/{orderId}")
+    @PreAuthorize("hasAuthority('ORDER_DELETE')")
     @TrackActivity(action = ActivityAction.CANCEL_ORDER, area = ActivityArea.MANAGEMENT, module = "ORDER", targetType = "ORDER", severity = ActivitySeverity.IMPORTANT, summary = "Hủy đơn hàng")
     public ResponseEntity<ApiResponse<OrderManagementDetailResponse>> cancelOrder(@PathVariable UUID orderId) {
         return ResponseEntity.ok(ApiResponse.success(orderManagementService.cancelOrder(orderId)));
