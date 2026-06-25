@@ -14,6 +14,7 @@ import hcmute.edu.zentech.service.ProductManagementService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -33,6 +34,7 @@ public class ProductManagementController {
     private final ProductManagementService productManagementService;
 
     @GetMapping
+    @PreAuthorize("hasAuthority('PRODUCT_VIEW')")
     public ResponseEntity<ApiResponse<PageResponse<ProductManagementSummaryResponse>>> getProducts(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
@@ -46,11 +48,13 @@ public class ProductManagementController {
     }
 
     @GetMapping("/{productId}")
+    @PreAuthorize("hasAuthority('PRODUCT_VIEW')")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> getProductDetail(@PathVariable UUID productId) {
         return ResponseEntity.ok(ApiResponse.success(productManagementService.getProductDetail(productId)));
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('PRODUCT_CREATE')")
     @TrackActivity(action = ActivityAction.CREATE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.INFO, summary = "Tạo sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> createProduct(
             @Valid @RequestBody ProductCreateRequest request
@@ -59,6 +63,7 @@ public class ProductManagementController {
     }
 
     @PatchMapping("/{productId}")
+    @PreAuthorize("hasAuthority('PRODUCT_UPDATE')")
     @TrackActivity(action = ActivityAction.UPDATE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.INFO, summary = "Cập nhật sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> updateProduct(
             @PathVariable UUID productId,
@@ -68,6 +73,7 @@ public class ProductManagementController {
     }
 
     @DeleteMapping("/{productId}")
+    @PreAuthorize("hasAuthority('PRODUCT_DELETE')")
     @TrackActivity(action = ActivityAction.DELETE_PRODUCT, area = ActivityArea.MANAGEMENT, module = "PRODUCT", targetType = "PRODUCT", severity = ActivitySeverity.IMPORTANT, summary = "Xóa sản phẩm")
     public ResponseEntity<ApiResponse<ProductManagementDetailResponse>> deleteProduct(@PathVariable UUID productId) {
         return ResponseEntity.ok(ApiResponse.success(productManagementService.deleteProduct(productId)));
