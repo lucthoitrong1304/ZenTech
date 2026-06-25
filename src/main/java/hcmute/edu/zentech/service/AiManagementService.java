@@ -596,11 +596,17 @@ public class AiManagementService {
             if (variant.getName() != null && !variant.getName().isBlank()) {
                 searchTextBuilder.append("Phiên bản/Màu: ").append(variant.getName()).append("\n");
             }
-            if (product.getDescription() != null) {
-                searchTextBuilder.append("Mô tả: ").append(product.getDescription()).append("\n");
-            }
             if (product.getSpecifications() != null) {
                 searchTextBuilder.append("Thông số kỹ thuật: ").append(product.getSpecifications()).append("\n");
+            }
+            if (product.getCompatibility() != null) {
+                searchTextBuilder.append("Compatibility: ").append(product.getCompatibility()).append("\n");
+            }
+            if (product.getBoxContents() != null) {
+                searchTextBuilder.append("Box contents: ").append(product.getBoxContents()).append("\n");
+            }
+            if (product.getSupportInfo() != null) {
+                searchTextBuilder.append("Support info: ").append(product.getSupportInfo()).append("\n");
             }
             if (product.getProductGroup() != null) {
                 searchTextBuilder.append("Nhóm sản phẩm: ").append(product.getProductGroup().getGroupName()).append("\n");

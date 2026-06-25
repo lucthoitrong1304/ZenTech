@@ -40,11 +40,6 @@ public class ChargesInitializer implements ProductCategoryInitializer {
 
     @Override
     public void synchronizeExistingData() {
-        productService.setSeedDescriptionIfMissing(
-                "Alpha65 & Power Strip Bundle",
-                buildBundleDescription()
-        );
-        productService.setSeedDescriptionIfMissing("Power Strip", buildPowerStripDescription());
     }
 
     @Override
