@@ -42,4 +42,20 @@ public interface AccountUserRepository extends JpaRepository<AccountUser, UUID> 
             @Param("active") Boolean active,
             Pageable pageable
     );
+
+    @Query("SELECT a.id as id, a.email as email, a.role as role, a.isActive as isActive, a.createdAt as createdAt, " +
+            "CASE WHEN a.role = hcmute.edu.zentech.model.Role.CUSTOMER THEN COALESCE(c.fullName, a.email) " +
+            "ELSE COALESCE(e.fullName, a.email) END as displayName, " +
+            "CASE WHEN a.role = hcmute.edu.zentech.model.Role.CUSTOMER THEN c.imageUrl ELSE e.imageUrl END as imageUrl " +
+            "FROM AccountUser a LEFT JOIN Employee e ON e.userInfo = a LEFT JOIN Customer c ON c.userInfo = a " +
+            "WHERE a.id IN :ids")
+    List<AccountSummaryProjection> findAccountSummariesByIds(@Param("ids") List<UUID> ids);
+
+    @Query("SELECT a.id as id, a.email as email, a.role as role, a.isActive as isActive, a.createdAt as createdAt, " +
+            "CASE WHEN a.role = hcmute.edu.zentech.model.Role.CUSTOMER THEN COALESCE(c.fullName, a.email) " +
+            "ELSE COALESCE(e.fullName, a.email) END as displayName, " +
+            "CASE WHEN a.role = hcmute.edu.zentech.model.Role.CUSTOMER THEN c.imageUrl ELSE e.imageUrl END as imageUrl " +
+            "FROM AccountUser a LEFT JOIN Employee e ON e.userInfo = a LEFT JOIN Customer c ON c.userInfo = a " +
+            "WHERE LOWER(a.email) IN :emails")
+    List<AccountSummaryProjection> findAccountSummariesByEmails(@Param("emails") List<String> emails);
 }

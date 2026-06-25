@@ -69,4 +69,5 @@ public interface IncidentRepository extends JpaRepository<Incident, UUID> {
     List<Incident> findByStatusNot(IncidentStatus status);
     List<Incident> findByCreatedAtBetween(Instant startDate, Instant endDate);
     List<Incident> findByResolvedAtBetween(Instant startDate, Instant endDate);
+    List<Incident> findByOccurredAtBetween(Instant startDate, Instant endDate);
 }

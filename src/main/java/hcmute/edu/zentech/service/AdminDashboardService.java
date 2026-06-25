@@ -255,7 +255,7 @@ public class AdminDashboardService {
                     ? issue.category + " \u00B7 " + issue.endpoint
                     : issue.category;
             ServiceAggregate aggregate = services.computeIfAbsent(serviceKey,
-                    ignored -> new ServiceAggregate(serviceKey, 0, issue.title, issue.lastSeen));
+                    ignored -> new ServiceAggregate(serviceKey, 0, issue.title, issue.level, issue.lastSeen));
             aggregate.occurrences += issue.occurrences;
             if ("ERROR".equals(issue.level)) aggregate.errorOccurrences += issue.occurrences;
             else if ("WARN".equals(issue.level)) aggregate.warningOccurrences += issue.occurrences;
@@ -266,7 +266,9 @@ public class AdminDashboardService {
             }
         }
         return services.values().stream()
-                .sorted(Comparator.comparingLong((ServiceAggregate item) -> item.occurrences).reversed()
+                .sorted(Comparator.comparingInt((ServiceAggregate item) -> item.errorOccurrences > 0 ? 0 : 1)
+                        .thenComparing(Comparator.comparingLong((ServiceAggregate item) -> item.errorOccurrences).reversed())
+                        .thenComparing(Comparator.comparingLong((ServiceAggregate item) -> item.warningOccurrences).reversed())
                         .thenComparing(item -> item.lastSeen, Comparator.reverseOrder()))
                 .limit(5)
                 .map(item -> AdminDashboardResponse.ServiceErrorItem.builder()
@@ -579,10 +581,11 @@ public class AdminDashboardService {
         private String latestIssueLevel;
         private Instant lastSeen;
 
-        private ServiceAggregate(String service, long occurrences, String latestIssueTitle, Instant lastSeen) {
+        private ServiceAggregate(String service, long occurrences, String latestIssueTitle, String latestIssueLevel, Instant lastSeen) {
             this.service = service;
             this.occurrences = occurrences;
             this.latestIssueTitle = latestIssueTitle;
+            this.latestIssueLevel = latestIssueLevel;
             this.lastSeen = lastSeen;
         }
     }

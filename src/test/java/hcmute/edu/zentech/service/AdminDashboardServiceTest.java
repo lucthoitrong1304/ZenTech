@@ -18,7 +18,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -88,11 +90,46 @@ class AdminDashboardServiceTest {
     }
 
     @Test
+    void prioritizesServicesWithErrorsAndKeepsTheActualLatestLevel() {
+        when(ticketRepository.findByStatusIn(any())).thenReturn(List.of());
+        when(incidentRepository.findByStatusNot(IncidentStatus.RESOLVED)).thenReturn(List.of());
+        when(incidentRepository.findByCreatedAtBetween(any(), any())).thenReturn(List.of());
+        when(incidentRepository.findByResolvedAtBetween(any(), any())).thenReturn(List.of());
+
+        Instant now = Instant.now();
+        when(adminLogService.getLogs(any(), any(), any(), any(Integer.class), any(), any()))
+                .thenReturn(List.of(
+                        log("WARN", "FRONTEND", "Frontend warning 1", now.minus(5, ChronoUnit.MINUTES)),
+                        log("WARN", "FRONTEND", "Frontend warning 2", now.minus(4, ChronoUnit.MINUTES)),
+                        log("WARN", "FRONTEND", "Frontend warning 3", now.minus(3, ChronoUnit.MINUTES)),
+                        log("ERROR", "BACKEND", "Backend error", now.minus(2, ChronoUnit.MINUTES)),
+                        log("WARN", "BACKEND", "Backend recovered with warning", now.minus(1, ChronoUnit.MINUTES))
+                ));
+
+        AdminDashboardResponse response = service.getDashboard("7D", null, null);
+
+        assertThat(response.getTopServices()).extracting(AdminDashboardResponse.ServiceErrorItem::getService)
+                .containsExactly("BACKEND", "FRONTEND");
+        assertThat(response.getTopServices().getFirst().getErrorOccurrences()).isEqualTo(1);
+        assertThat(response.getTopServices().getFirst().getLatestIssueLevel()).isEqualTo("WARN");
+        assertThat(response.getTopServices().getFirst().getLatestIssueTitle())
+                .isEqualTo("Backend recovered with warning");
+    }
+    @Test
     void rejectsCustomRangeLongerThanNinetyDays() {
         Instant to = Instant.now().minus(1, ChronoUnit.MINUTES);
         Instant from = to.minus(91, ChronoUnit.DAYS);
 
         assertThatThrownBy(() -> service.getDashboard("CUSTOM", from, to))
                 .isInstanceOf(ResponseStatusException.class);
+    }
+    private Map<String, Object> log(String level, String category, String message, Instant timestamp) {
+        Map<String, Object> log = new HashMap<>();
+        log.put("level", level);
+        log.put("category", category);
+        log.put("message", message);
+        log.put("details", "");
+        log.put("timestamp", timestamp);
+        return log;
     }
 }
