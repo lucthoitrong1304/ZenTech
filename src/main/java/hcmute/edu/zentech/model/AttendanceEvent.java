@@ -32,4 +32,12 @@ public class AttendanceEvent {
     private String source;
 
     private String details;
+
+    private Double latitude;
+
+    private Double longitude;
+
+    private Double accuracyMeters;
+
+    private Boolean locationValid;
 }
