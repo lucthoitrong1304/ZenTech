@@ -68,7 +68,9 @@ public class AdminObservabilityService {
         merge(history, prometheus.queryRangeSafe(ERROR_RATE, range.from(), range.to(), step), Metric.ERROR_RATE);
         merge(history, prometheus.queryRangeSafe(P95_LATENCY, range.from(), range.to(), step), Metric.P95);
         List<AdminObservabilityResponse.MetricHistoryPoint> historyPoints = history.values().stream()
-                .map(MutableHistory::toResponse).toList();
+                .map(MutableHistory::toResponse)
+                .sorted(Comparator.comparing(AdminObservabilityResponse.MetricHistoryPoint::getTimestamp))
+                .toList();
 
         return AdminObservabilityResponse.builder()
                 .period(range.period()).from(range.from()).to(range.to()).generatedAt(Instant.now())
