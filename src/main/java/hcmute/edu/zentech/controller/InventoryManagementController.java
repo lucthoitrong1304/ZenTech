@@ -16,6 +16,7 @@ import hcmute.edu.zentech.service.InventoryManagementService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,6 +33,8 @@ import java.util.UUID;
 public class InventoryManagementController {
     private final InventoryManagementService inventoryManagementService;
 
+    @PreAuthorize("hasAuthority('INVENTORY_VIEW')")
+
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<PageResponse<InventorySummaryResponse>>> getInventorySummary(
             @RequestParam(defaultValue = "0") int page,
@@ -44,6 +47,8 @@ public class InventoryManagementController {
                 inventoryManagementService.getInventorySummary(page, size, sort, keyword, stockStatus)
         ));
     }
+
+    @PreAuthorize("hasAuthority('INVENTORY_VIEW')")
 
     @GetMapping("/transactions")
     public ResponseEntity<ApiResponse<PageResponse<InventoryTransactionResponse>>> getTransactionLogs(
@@ -62,6 +67,8 @@ public class InventoryManagementController {
         ));
     }
 
+    @PreAuthorize("hasAuthority('INVENTORY_VIEW')")
+
     @GetMapping("/transactions/stats")
     public ResponseEntity<ApiResponse<InventoryTransactionStatsResponse>> getTransactionStats(
             @RequestParam(required = false) String keyword,
@@ -77,6 +84,7 @@ public class InventoryManagementController {
     }
 
     @PostMapping("/adjust")
+    @PreAuthorize("hasAuthority('INVENTORY_UPDATE')")
     @TrackActivity(action = ActivityAction.UPDATE_STOCK, area = ActivityArea.MANAGEMENT, module = "INVENTORY", targetType = "INVENTORY", severity = ActivitySeverity.IMPORTANT, summary = "Điều chỉnh tồn kho")
     public ResponseEntity<ApiResponse<InventoryTransactionResponse>> adjustStock(
             @Valid @RequestBody InventoryAdjustmentRequest request
@@ -87,12 +95,16 @@ public class InventoryManagementController {
         ));
     }
 
+    @PreAuthorize("hasAuthority('INVENTORY_VIEW')")
+
     @GetMapping("/stats")
     public ResponseEntity<ApiResponse<InventoryStatsResponse>> getInventoryStats() {
         return ResponseEntity.ok(ApiResponse.success(
                 inventoryManagementService.getInventoryStats()
         ));
     }
+
+    @PreAuthorize("hasAuthority('INVENTORY_VIEW')")
 
     @GetMapping("/ai-recommendations")
     public ResponseEntity<ApiResponse<hcmute.edu.zentech.dto.response.AiInventoryRecommendResponse>> getAiRecommendations() {
