@@ -48,6 +48,7 @@ public class ProductMapper {
                 .id(category.getId())
                 .categoryName(category.getCategoryName())
                 .shortName(category.getShortName())
+                .visible(category.isVisible())
                 .hasChildren(hasChildren)
                 .children(children)
                 .build();

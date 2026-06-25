@@ -85,6 +85,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/logs/client").permitAll()
 
                         .requestMatchers("/api/management/search").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
+                        .requestMatchers("/api/management/categories/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/products/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/inventory/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")
                         .requestMatchers("/api/management/product-groups/**").hasAnyRole("OWNER", "MANAGER", "EMPLOYEE")

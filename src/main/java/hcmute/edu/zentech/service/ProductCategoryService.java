@@ -1,6 +1,9 @@
 package hcmute.edu.zentech.service;
 
+import hcmute.edu.zentech.dto.request.CategoryManagementRequest;
 import hcmute.edu.zentech.dto.request.CategoryProductListQueryRequest;
+import hcmute.edu.zentech.dto.request.CategoryReorderItemRequest;
+import hcmute.edu.zentech.dto.request.CategoryReorderRequest;
 import hcmute.edu.zentech.dto.response.CategoryProductListItemResponse;
 import hcmute.edu.zentech.dto.response.PagedResponse;
 import hcmute.edu.zentech.dto.response.ProductCategorySummaryResponse;
@@ -19,11 +22,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -122,12 +128,25 @@ public class ProductCategoryService {
 
     @Transactional(readOnly = true)
     public List<ProductCategorySummaryResponse> getAllCategories() {
+        return getCategoryTree(false);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductCategorySummaryResponse> getAllManagementCategories() {
+        return getCategoryTree(true);
+    }
+
+    private List<ProductCategorySummaryResponse> getCategoryTree(boolean includeHidden) {
         List<ProductCategory> categories = productCategoryRepository.findAllWithParent();
-        Map<UUID, List<ProductCategory>> categoriesByParentId = categories.stream()
+        List<ProductCategory> visibleCategories = includeHidden
+                ? categories
+                : categories.stream().filter(ProductCategory::isVisible).toList();
+        Map<UUID, List<ProductCategory>> categoriesByParentId = visibleCategories.stream()
                 .filter(category -> category.getParent() != null)
+                .filter(category -> includeHidden || category.getParent().isVisible())
                 .collect(Collectors.groupingBy(category -> category.getParent().getId()));
 
-        return categories.stream()
+        return visibleCategories.stream()
                 .filter(category -> category.getParent() == null)
                 .sorted(buildCategoryComparator())
                 .map(category -> buildCategoryTree(category, categoriesByParentId))
@@ -154,6 +173,157 @@ public class ProductCategoryService {
                 .thenComparing(ProductCategory::getId, Comparator.nullsLast(Comparator.naturalOrder()));
     }
 
+    @Transactional
+    public ProductCategorySummaryResponse createManagementCategory(CategoryManagementRequest request) {
+        ProductCategory category = new ProductCategory();
+        applyEditableFields(category, request);
+        category.setPriority(resolveNextPriority(request.getParentId()));
+        return buildSingleCategoryResponse(productCategoryRepository.save(category));
+    }
+
+    @Transactional
+    public ProductCategorySummaryResponse updateManagementCategory(UUID categoryId, CategoryManagementRequest request) {
+        ProductCategory category = findCategoryOrThrow(categoryId);
+        UUID parentId = request.getParentId();
+        if (parentId != null) {
+            validateParent(categoryId, parentId);
+        }
+        applyEditableFields(category, request);
+        return buildSingleCategoryResponse(productCategoryRepository.save(category));
+    }
+
+    @Transactional
+    public ProductCategorySummaryResponse deleteManagementCategory(UUID categoryId) {
+        ProductCategory category = findCategoryOrThrow(categoryId);
+        if (productCategoryRepository.existsByParent_Id(categoryId)) {
+            throw new RuntimeException("Không thể xóa danh mục đang có danh mục con.");
+        }
+        if (productCategoryRepository.countActiveProductsByCategoryId(categoryId) > 0) {
+            throw new RuntimeException("Không thể xóa danh mục đang được gắn với sản phẩm.");
+        }
+
+        ProductCategorySummaryResponse response = buildSingleCategoryResponse(category);
+        productCategoryRepository.delete(category);
+        return response;
+    }
+
+    @Transactional
+    public List<ProductCategorySummaryResponse> reorderManagementCategories(CategoryReorderRequest request) {
+        List<ProductCategory> categories = productCategoryRepository.findAllWithParent();
+        Map<UUID, ProductCategory> categoryById = categories.stream()
+                .collect(Collectors.toMap(ProductCategory::getId, category -> category));
+        Map<UUID, UUID> parentById = new HashMap<>();
+
+        for (CategoryReorderItemRequest item : request.getItems()) {
+            ProductCategory category = categoryById.get(item.getId());
+            if (category == null) {
+                throw new ResourceNotFoundException("Product Category", "ID", item.getId());
+            }
+            UUID parentId = item.getParentId();
+            if (parentId != null && !categoryById.containsKey(parentId)) {
+                throw new ResourceNotFoundException("Product Category", "ID", parentId);
+            }
+            if (Objects.equals(item.getId(), parentId)) {
+                throw new RuntimeException("Danh mục không thể là cha của chính nó.");
+            }
+            parentById.put(item.getId(), parentId);
+        }
+
+        for (ProductCategory category : categories) {
+            parentById.putIfAbsent(
+                    category.getId(),
+                    category.getParent() == null ? null : category.getParent().getId()
+            );
+        }
+
+        for (UUID categoryId : parentById.keySet()) {
+            validateNoCycle(categoryId, parentById);
+        }
+
+        for (CategoryReorderItemRequest item : request.getItems()) {
+            ProductCategory category = categoryById.get(item.getId());
+            category.setParent(item.getParentId() == null ? null : categoryById.get(item.getParentId()));
+            category.setPriority(item.getPriority());
+        }
+
+        productCategoryRepository.saveAll(categories);
+        return getAllManagementCategories();
+    }
+
+    private ProductCategory findCategoryOrThrow(UUID categoryId) {
+        return productCategoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product Category", "ID", categoryId));
+    }
+
+    private void applyEditableFields(ProductCategory category, CategoryManagementRequest request) {
+        category.setCategoryName(normalizeRequiredText(request.getCategoryName(), "categoryName"));
+        category.setShortName(normalizeOptionalText(request.getShortName()));
+        category.setVisible(request.getVisible() == null || request.getVisible());
+
+        UUID parentId = request.getParentId();
+        category.setParent(parentId == null ? null : findCategoryOrThrow(parentId));
+    }
+
+    private void validateParent(UUID categoryId, UUID parentId) {
+        if (Objects.equals(categoryId, parentId)) {
+            throw new RuntimeException("Danh mục không thể là cha của chính nó.");
+        }
+
+        List<ProductCategory> categories = productCategoryRepository.findAllWithParent();
+        Map<UUID, UUID> parentById = new HashMap<>();
+        for (ProductCategory category : categories) {
+            parentById.put(
+                    category.getId(),
+                    category.getParent() == null ? null : category.getParent().getId()
+            );
+        }
+        parentById.put(categoryId, parentId);
+        validateNoCycle(categoryId, parentById);
+    }
+
+    private void validateNoCycle(UUID categoryId, Map<UUID, UUID> parentById) {
+        Set<UUID> visited = new HashSet<>();
+        UUID currentId = categoryId;
+        while (currentId != null) {
+            if (!visited.add(currentId)) {
+                throw new RuntimeException("Không thể tạo vòng lặp trong cây danh mục.");
+            }
+            currentId = parentById.get(currentId);
+        }
+    }
+
+    private int resolveNextPriority(UUID parentId) {
+        return productCategoryRepository.findAllWithParent().stream()
+                .filter(category -> Objects.equals(
+                        category.getParent() == null ? null : category.getParent().getId(),
+                        parentId
+                ))
+                .map(ProductCategory::getPriority)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .map(priority -> priority + 1)
+                .orElse(1);
+    }
+
+    private ProductCategorySummaryResponse buildSingleCategoryResponse(ProductCategory category) {
+        return productMapper.toProductCategorySummaryResponse(category, false, List.of());
+    }
+
+    private String normalizeRequiredText(String value, String fieldName) {
+        String normalized = normalizeOptionalText(value);
+        if (normalized == null) {
+            throw new RuntimeException(fieldName + " is required");
+        }
+        return normalized;
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        return value.trim();
+    }
+
     @Transactional(readOnly = true)
     public PagedResponse<CategoryProductListItemResponse> getProductsByCategoryId(
             UUID categoryId,
@@ -166,10 +336,15 @@ public class ProductCategoryService {
                 .filter(c -> c.getId().equals(categoryId))
                 .findFirst()
                 .orElseThrow(() -> new ResourceNotFoundException("Product Category", "ID", categoryId));
+        if (!targetCategory.isVisible()) {
+            throw new ResourceNotFoundException("Product Category", "ID", categoryId);
+        }
 
         // Nhóm các danh mục con theo parent_id
         Map<UUID, List<ProductCategory>> childrenMap = allCategories.stream()
+                .filter(ProductCategory::isVisible)
                 .filter(c -> c.getParent() != null)
+                .filter(c -> c.getParent().isVisible())
                 .collect(Collectors.groupingBy(c -> c.getParent().getId()));
 
         // Thu thập đệ quy tất cả categoryId (bao gồm cả categoryId mục tiêu và các danh mục con cháu)

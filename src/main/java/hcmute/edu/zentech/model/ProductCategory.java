@@ -27,6 +27,9 @@ public class ProductCategory {
     @Column(nullable = false, columnDefinition = "int default 999")
     private Integer priority = 999;
 
+    @Column(nullable = false, columnDefinition = "boolean default true")
+    private boolean visible = true;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
     private ProductCategory parent;

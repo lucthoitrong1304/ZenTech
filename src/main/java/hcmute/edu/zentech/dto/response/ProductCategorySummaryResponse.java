@@ -18,6 +18,7 @@ public class ProductCategorySummaryResponse {
     private UUID id;
     private String categoryName;
     private String shortName;
+    private boolean visible;
     private boolean hasChildren;
     private List<ProductCategorySummaryResponse> children;
 }
