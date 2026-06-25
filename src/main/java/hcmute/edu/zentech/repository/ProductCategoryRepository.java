@@ -14,6 +14,17 @@ import java.util.UUID;
 public interface ProductCategoryRepository extends JpaRepository<ProductCategory, UUID> {
     ProductCategory findCategoryByShortName(String shortName);
 
+    boolean existsByParent_Id(UUID parentId);
+
+    @Query("""
+            select count(p)
+            from Product p
+            join p.categories c
+            where c.id = :categoryId
+              and p.deleted = false
+            """)
+    long countActiveProductsByCategoryId(@Param("categoryId") UUID categoryId);
+
     @Query("""
             select c
             from ProductCategory c
