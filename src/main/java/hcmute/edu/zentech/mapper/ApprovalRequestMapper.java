@@ -4,6 +4,7 @@ import hcmute.edu.zentech.dto.response.ApprovalEmployeeResponse;
 import hcmute.edu.zentech.dto.response.ApprovalShiftResponse;
 import hcmute.edu.zentech.dto.response.AttendanceAdjustmentResponse;
 import hcmute.edu.zentech.dto.response.LeaveRequestResponse;
+import hcmute.edu.zentech.dto.response.LeaveTypeResponse;
 import hcmute.edu.zentech.dto.response.ShiftSwapRequestResponse;
 import hcmute.edu.zentech.model.AttendanceAdjustment;
 import hcmute.edu.zentech.model.Employee;
@@ -12,6 +13,10 @@ import hcmute.edu.zentech.model.Shift;
 import hcmute.edu.zentech.model.ShiftSwapRequest;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @Component
@@ -27,7 +32,10 @@ public class ApprovalRequestMapper {
                 .employee(toEmployeeResponse(request.getEmployee()))
                 .startDate(request.getStartDate())
                 .endDate(request.getEndDate())
-                .leaveType(request.getLeaveType())
+                .startTime(request.getStartTime())
+                .endTime(request.getEndTime())
+                .leaveType(toLeaveTypeResponse(request.getLeaveType()))
+                .amount(calculateAmount(request))
                 .reason(request.getReason())
                 .status(request.getStatus())
                 .requestedAt(request.getRequestedAt())
@@ -93,6 +101,47 @@ public class ApprovalRequestMapper {
                 .id(employee.getId())
                 .fullName(employee.getFullName())
                 .build();
+    }
+
+    private LeaveTypeResponse toLeaveTypeResponse(hcmute.edu.zentech.model.LeaveType leaveType) {
+        if (leaveType == null) {
+            return null;
+        }
+
+        return LeaveTypeResponse.builder()
+                .id(leaveType.getId())
+                .code(leaveType.getCode())
+                .name(leaveType.getName())
+                .description(leaveType.getDescription())
+                .unit(leaveType.getUnit())
+                .active(leaveType.isActive())
+                .systemDefault(leaveType.isSystemDefault())
+                .sortOrder(leaveType.getSortOrder())
+                .build();
+    }
+
+    private BigDecimal calculateAmount(LeaveRequest request) {
+        if (request.getLeaveType() == null || request.getLeaveType().getUnit() == null) {
+            return BigDecimal.ZERO;
+        }
+
+        return switch (request.getLeaveType().getUnit()) {
+            case DAY -> {
+                if (request.getStartDate() == null || request.getEndDate() == null) {
+                    yield BigDecimal.ZERO;
+                }
+                long days = ChronoUnit.DAYS.between(request.getStartDate(), request.getEndDate()) + 1;
+                yield BigDecimal.valueOf(Math.max(0, days));
+            }
+            case HOUR -> {
+                if (request.getStartTime() == null || request.getEndTime() == null) {
+                    yield BigDecimal.ZERO;
+                }
+                long minutes = Duration.between(request.getStartTime(), request.getEndTime()).toMinutes();
+                yield BigDecimal.valueOf(Math.max(0, minutes))
+                        .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
+            }
+        };
     }
 
     private ApprovalShiftResponse toShiftResponse(Shift shift) {

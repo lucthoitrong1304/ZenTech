@@ -1,14 +1,15 @@
 package hcmute.edu.zentech.dto.response;
 
 import hcmute.edu.zentech.model.ApprovalStatus;
-import hcmute.edu.zentech.model.LeaveType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.UUID;
 
 @Data
@@ -20,7 +21,10 @@ public class LeaveRequestResponse {
     private ApprovalEmployeeResponse employee;
     private LocalDate startDate;
     private LocalDate endDate;
-    private LeaveType leaveType;
+    private LocalTime startTime;
+    private LocalTime endTime;
+    private LeaveTypeResponse leaveType;
+    private BigDecimal amount;
     private String reason;
     private ApprovalStatus status;
     private LocalDateTime requestedAt;

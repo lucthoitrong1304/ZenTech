@@ -34,6 +34,18 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, UUID
     @EntityGraph(attributePaths = {"employee"})
     List<LeaveRequest> findByStatus(ApprovalStatus status);
 
-    @EntityGraph(attributePaths = {"employee"})
+    @EntityGraph(attributePaths = {"employee", "leaveType"})
+    List<LeaveRequest> findByStatusIn(List<ApprovalStatus> statuses);
+
+    @EntityGraph(attributePaths = {"employee", "leaveType"})
     List<LeaveRequest> findByEmployeeIdOrderByRequestedAtDesc(UUID employeeId);
+
+    @EntityGraph(attributePaths = {"employee", "leaveType"})
+    List<LeaveRequest> findByEmployeeIdAndLeaveTypeIdAndStatusInAndStartDateBetween(
+            UUID employeeId,
+            UUID leaveTypeId,
+            List<ApprovalStatus> statuses,
+            LocalDate startDate,
+            LocalDate endDate
+    );
 }

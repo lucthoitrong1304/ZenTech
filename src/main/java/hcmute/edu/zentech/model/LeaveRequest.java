@@ -29,9 +29,13 @@ public class LeaveRequest {
     @Column(nullable = false)
     private LocalDate endDate;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "leave_type_id")
     private LeaveType leaveType;
+
+    private java.time.LocalTime startTime;
+
+    private java.time.LocalTime endTime;
 
     @Column(nullable = false)
     private String reason;
