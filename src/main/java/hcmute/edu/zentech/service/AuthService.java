@@ -180,6 +180,10 @@ public class AuthService {
         AccountUser user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy tài khoản với email này!"));
 
+        if (!user.isPasswordSet()) {
+            throw new RuntimeException("Tài khoản này đang sử dụng đăng nhập Google. Vui lòng đăng nhập bằng Google trước, sau đó đặt mật khẩu trong hồ sơ.");
+        }
+
         String resetTokenString = java.util.UUID.randomUUID().toString();
 
         PasswordResetToken tokenEntity = PasswordResetToken.builder()
@@ -208,6 +212,7 @@ public class AuthService {
 
         AccountUser user = resetToken.getUser();
         user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordSet(true);
         userRepository.save(user);
 
         // 4. Xóa token đi để không dùng lại được nữa
