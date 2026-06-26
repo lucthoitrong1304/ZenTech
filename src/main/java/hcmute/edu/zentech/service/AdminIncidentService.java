@@ -1,10 +1,13 @@
 package hcmute.edu.zentech.service;
 
 import hcmute.edu.zentech.dto.request.IncidentCreateRequest;
+import hcmute.edu.zentech.dto.request.IncidentCreateFromIssueRequest;
 import hcmute.edu.zentech.dto.request.IncidentUpdateRequest;
 import hcmute.edu.zentech.dto.response.AiAnalysisResponseDto;
 import hcmute.edu.zentech.dto.response.IncidentResponseDto;
+import hcmute.edu.zentech.dto.response.IssueIncidentLinkResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
+import hcmute.edu.zentech.exception.IssueIncidentConflictException;
 import hcmute.edu.zentech.mapper.IncidentMapper;
 import hcmute.edu.zentech.mapper.TicketMapper;
 import hcmute.edu.zentech.dto.response.TicketResponseDto;
@@ -114,6 +117,119 @@ public class AdminIncidentService {
         return Optional.empty();
     }
 
+    private IncidentResponseDto toIncidentResponse(Incident incident) {
+        String ticketCode = ticketRepository.findByIncidentId(incident.getId())
+                .map(Ticket::getCode)
+                .orElse(null);
+        String firstEmail = incident.getUser() != null ? incident.getUser().getEmail() : null;
+        List<String> affectedEmails = getAffectedUserEmails(incident.getId(), firstEmail);
+        List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(incident);
+        return incidentMapper.toResponseDto(incident, (AiAnalysisResponseDto) null, ticketCode, affectedEmails, occurrences);
+    }
+
+    private List<IncidentStatus> activeIncidentStatuses() {
+        return List.of(IncidentStatus.OPEN, IncidentStatus.INVESTIGATING);
+    }
+
+    private Optional<Incident> findDuplicateIncidentByIssue(String issueSignature) {
+        if (issueSignature == null || issueSignature.isBlank()) {
+            return Optional.empty();
+        }
+        return incidentRepository.findFirstByIssueSignatureAndStatusInOrderByCreatedAtDesc(
+                issueSignature.trim(), activeIncidentStatuses()
+        );
+    }
+
+    public Map<String, IssueIncidentLinkResponse> findIssueLinks(List<String> signatures) {
+        if (signatures == null || signatures.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<String> normalized = signatures.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(signature -> !signature.isBlank())
+                .distinct()
+                .collect(Collectors.toList());
+        if (normalized.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, IssueIncidentLinkResponse> result = new LinkedHashMap<>();
+        incidentRepository.findByIssueSignatureInAndStatusIn(normalized, activeIncidentStatuses()).stream()
+                .sorted(Comparator.comparing(Incident::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
+                .forEach(incident -> result.putIfAbsent(incident.getIssueSignature(), IssueIncidentLinkResponse.builder()
+                        .incidentId(incident.getId())
+                        .incidentCode(incident.getCode())
+                        .creationSource(incident.getCreationSource())
+                        .status(incident.getStatus())
+                        .build()));
+        return result;
+    }
+
+    @Transactional
+    public IncidentResponseDto createIncidentFromIssue(IncidentCreateFromIssueRequest request) {
+        Optional<Incident> issueDuplicate = findDuplicateIncidentByIssue(request.getIssueSignature());
+        if (issueDuplicate.isPresent()) {
+            throw new IssueIncidentConflictException(toIncidentResponse(issueDuplicate.get()));
+        }
+
+        Optional<Incident> payloadDuplicate = findDuplicateIncident(request.getApiPath(), request.getHttpMethod(), request.getErrorMessage());
+        if (payloadDuplicate.isPresent()) {
+            Incident duplicate = payloadDuplicate.get();
+            if (duplicate.getIssueSignature() == null || duplicate.getIssueSignature().isBlank()) {
+                duplicate.setIssueSignature(request.getIssueSignature().trim());
+                incidentRepository.save(duplicate);
+            }
+            throw new IssueIncidentConflictException(toIncidentResponse(duplicate));
+        }
+
+        AccountUser user = null;
+        if (request.getUserId() != null) {
+            user = accountUserRepository.findById(request.getUserId()).orElse(null);
+        }
+
+        Instant occurredAt = request.getOccurredAt() != null ? request.getOccurredAt() : Instant.now();
+        Incident incident = Incident.builder()
+                .code(generateIncidentCode())
+                .traceId(request.getTraceId())
+                .user(user)
+                .serviceName(request.getServiceName())
+                .apiPath(request.getApiPath())
+                .httpMethod(request.getHttpMethod())
+                .statusCode(request.getStatusCode())
+                .errorMessage(request.getErrorMessage() != null && !request.getErrorMessage().isBlank() ? request.getErrorMessage() : request.getTitle())
+                .stackTrace(request.getStackTrace())
+                .severity(request.getSeverity())
+                .status(IncidentStatus.OPEN)
+                .occurredAt(occurredAt)
+                .firstOccurredAt(occurredAt)
+                .issueSignature(request.getIssueSignature().trim())
+                .creationSource(IncidentCreationSource.MANUAL)
+                .build();
+
+        Incident saved = incidentRepository.save(incident);
+        activityLogService.log(
+                user != null ? user.getId() : null,
+                ActivityArea.ADMIN,
+                "INCIDENT",
+                ActivityAction.CREATE_INCIDENT,
+                ActivitySeverity.IMPORTANT,
+                "Incident",
+                saved.getId().toString(),
+                saved.getCode(),
+                "Create incident manually from Issue: " + saved.getCode(),
+                null
+        );
+
+        IncidentResponseDto response = toIncidentResponse(saved);
+        try {
+            messagingTemplate.convertAndSend("/topic/admin.incidents", response);
+            messagingTemplate.convertAndSend("/topic/admin.incidents.new", response);
+        } catch (Exception e) {
+            log.error("Failed to send websocket notification for issue-created incident: {}", saved.getCode(), e);
+        }
+        return response;
+    }
     private List<String> getAffectedUserEmails(UUID incidentId, String firstOccurrenceUserEmail) {
         Set<String> emails = new LinkedHashSet<>();
         if (firstOccurrenceUserEmail != null) {

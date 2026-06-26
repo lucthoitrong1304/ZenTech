@@ -1,11 +1,15 @@
 package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.request.IncidentCreateRequest;
+import hcmute.edu.zentech.dto.request.IncidentCreateFromIssueRequest;
+import hcmute.edu.zentech.dto.request.IssueLinkLookupRequest;
 import hcmute.edu.zentech.dto.request.IncidentUpdateRequest;
 import hcmute.edu.zentech.dto.response.AiAnalysisResponseDto;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.dto.response.IncidentResponseDto;
+import hcmute.edu.zentech.dto.response.IssueIncidentLinkResponse;
+import hcmute.edu.zentech.exception.IssueIncidentConflictException;
 import hcmute.edu.zentech.model.IncidentStatus;
 import hcmute.edu.zentech.model.IncidentSeverity;
 import hcmute.edu.zentech.service.AdminIncidentService;
@@ -16,11 +20,13 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -65,6 +71,30 @@ public class AdminIncidentController {
     ) {
         log.info("Request to manually create incident");
         return ResponseEntity.ok(ApiResponse.success(incidentService.createIncident(request)));
+    }
+
+
+    @PostMapping("/from-issue")
+    public ResponseEntity<ApiResponse<IncidentResponseDto>> createIncidentFromIssue(
+            @Valid @RequestBody IncidentCreateFromIssueRequest request
+    ) {
+        log.info("Request to manually create incident from issue signature={}", request.getIssueSignature());
+        try {
+            return ResponseEntity.ok(ApiResponse.success(incidentService.createIncidentFromIssue(request)));
+        } catch (IssueIncidentConflictException ex) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.<IncidentResponseDto>builder()
+                    .success(false)
+                    .data(ex.getIncident())
+                    .message(ex.getMessage())
+                    .build());
+        }
+    }
+
+    @PostMapping("/issue-links")
+    public ResponseEntity<ApiResponse<Map<String, IssueIncidentLinkResponse>>> getIssueIncidentLinks(
+            @Valid @RequestBody IssueLinkLookupRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(incidentService.findIssueLinks(request.getSignatures())));
     }
 
     @PatchMapping("/{id}/status")

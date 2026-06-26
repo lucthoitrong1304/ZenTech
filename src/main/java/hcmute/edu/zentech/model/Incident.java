@@ -59,9 +59,9 @@ public class Incident {
     private Instant occurredAt;
 
     /**
-     * Thời điểm sự cố xảy ra LẦN ĐẦU TIÊN.
-     * Không bao giờ bị ghi đè khi có occurrence mới.
-     * Dùng làm mốc bắt đầu cho cửa sổ tính toán business impact.
+     * Thá»i Ä‘iá»ƒm sá»± cá»‘ xáº£y ra Láº¦N Äáº¦U TIÃŠN.
+     * KhÃ´ng bao giá» bá»‹ ghi Ä‘Ã¨ khi cÃ³ occurrence má»›i.
+     * DÃ¹ng lÃ m má»‘c báº¯t Ä‘áº§u cho cá»­a sá»• tÃ­nh toÃ¡n business impact.
      */
     @Column(name = "first_occurred_at")
     private Instant firstOccurredAt;
@@ -77,6 +77,13 @@ public class Incident {
     @Column(name = "images", length = 2000)
     private String images;
 
+    @Column(name = "issue_signature", length = 1000)
+    private String issueSignature;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "creation_source", nullable = false)
+    private IncidentCreationSource creationSource;
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {
@@ -85,7 +92,7 @@ public class Incident {
         if (occurredAt == null) {
             occurredAt = Instant.now();
         }
-        // firstOccurredAt chỉ set một lần khi tạo mới
+        // firstOccurredAt chá»‰ set má»™t láº§n khi táº¡o má»›i
         if (firstOccurredAt == null) {
             firstOccurredAt = occurredAt;
         }
@@ -94,6 +101,9 @@ public class Incident {
         }
         if (severity == null) {
             severity = IncidentSeverity.LOW;
+        }
+        if (creationSource == null) {
+            creationSource = IncidentCreationSource.MANUAL;
         }
     }
 }

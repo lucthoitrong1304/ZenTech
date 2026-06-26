@@ -93,7 +93,7 @@ public class WebSocketLogAppender extends AppenderBase<ILoggingEvent> {
             String message = event.getFormattedMessage() != null ? event.getFormattedMessage() : "";
             
             // Log target endpoint exclusions
-            if (message.contains("/ws") || message.contains("/api/health")) {
+            if (message.contains("/ws") || message.contains("/api/health") || message.contains("/api/admin/logs") || message.contains("/api/admin/activity-logs") || message.contains("/api/admin/incidents/issue-links")) {
                 return;
             }
             
@@ -129,7 +129,7 @@ public class WebSocketLogAppender extends AppenderBase<ILoggingEvent> {
             System.out.println("[WebSocketLogAppender] Sending log to WS: " + message);
             messagingTemplate.convertAndSend("/topic/admin.logs", logPayload);
         } catch (org.springframework.messaging.MessageDeliveryException e) {
-            logger.error("[WebSocketLogAppender] MessageDeliveryException occurred: {}", e.getMessage());
+            // Broker can be unavailable during startup/shutdown; skip to avoid creating log loops.
         } catch (Exception e) {
             logger.error("[WebSocketLogAppender] Exception occurred while appending log: ", e);
         }

@@ -2,6 +2,7 @@ package hcmute.edu.zentech.dto.response;
 
 import hcmute.edu.zentech.model.IncidentSeverity;
 import hcmute.edu.zentech.model.IncidentStatus;
+import hcmute.edu.zentech.model.IncidentCreationSource;
 import lombok.*;
 
 import java.time.Instant;
@@ -36,6 +37,8 @@ public class IncidentResponseDto {
     private String ticketCode;
     private java.util.List<OccurrenceDto> occurrences;
     private String images;
+    private String issueSignature;
+    private IncidentCreationSource creationSource;
 
     @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
     public static class OccurrenceDto {
