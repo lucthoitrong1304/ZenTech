@@ -201,7 +201,16 @@ class AttendanceCalculatorTest {
         // Approved Leave Request
         LeaveRequest leave = new LeaveRequest();
         leave.setStatus(ApprovalStatus.APPROVED);
-        leave.setLeaveType(LeaveType.PAID);
+        LeaveType leaveType = LeaveType.builder()
+                .id(UUID.randomUUID())
+                .code("NGHI")
+                .name("Nghỉ")
+                .unit(LeaveTypeUnit.DAY)
+                .active(true)
+                .systemDefault(true)
+                .sortOrder(10)
+                .build();
+        leave.setLeaveType(leaveType);
         when(leaveRequestRepository.findApprovedLeavesForEmployeeInRange(employee.getId(), workDate, workDate, ApprovalStatus.APPROVED))
                 .thenReturn(List.of(leave));
 
