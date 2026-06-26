@@ -11,4 +11,10 @@ public class CheckInRequest {
     @NotNull(message = "Face descriptor must not be null")
     @NotEmpty(message = "Face descriptor must not be empty")
     private List<Float> faceDescriptor;
+
+    private Double latitude;
+
+    private Double longitude;
+
+    private Double accuracyMeters;
 }

@@ -38,6 +38,7 @@ public class AttendanceService {
     private final ObjectMapper objectMapper;
     private final FaceEncryptionUtils faceEncryptionUtils;
     private final AdminActivityLogService adminActivityLogService;
+    private final AttendanceLocationPolicyService attendanceLocationPolicyService;
 
 
     @Value("${zentech.attendance.face-match-threshold:0.5}")
@@ -78,6 +79,17 @@ public class AttendanceService {
 
         Employee employee = employeeRepository.findByUserInfo_Id(accountId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
+
+        boolean locationValid = attendanceLocationPolicyService.isLocationAllowed(
+                request.getLatitude(),
+                request.getLongitude()
+        );
+        if (!locationValid) {
+            String message = attendanceLocationPolicyService.isPolicyEnabled()
+                    ? "Vị trí hiện tại nằm ngoài phạm vi check-in hợp lệ."
+                    : "Vị trí check-in không hợp lệ.";
+            throw new RuntimeException(message);
+        }
 
         if (employee.getFaceDescriptors() == null || employee.getFaceDescriptors().isEmpty()) {
             throw new RuntimeException("Nhân viên chưa đăng ký khuôn mặt.");
@@ -149,6 +161,10 @@ public class AttendanceService {
         event.setEventType(type);
         event.setSource("FACE");
         event.setDetails("Xác thực khuôn mặt thành công. (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
+        event.setLatitude(request.getLatitude());
+        event.setLongitude(request.getLongitude());
+        event.setAccuracyMeters(request.getAccuracyMeters());
+        event.setLocationValid(locationValid);
         attendanceEventRepository.save(event);
 
         // Ghi audit log thành công

@@ -49,6 +49,8 @@ class AttendanceServiceTest {
     private PayPeriodRepository payPeriodRepository;
     @Mock
     private AttendanceEventRepository attendanceEventRepository;
+    @Mock
+    private AttendanceLocationPolicyService attendanceLocationPolicyService;
 
     @InjectMocks
     private AttendanceService attendanceService;
@@ -82,6 +84,8 @@ class AttendanceServiceTest {
         lenient().when(payPeriodRepository.findPeriodActiveAt(any())).thenReturn(Optional.empty());
         lenient().when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
                 .thenReturn(new ArrayList<>());
+        lenient().when(attendanceLocationPolicyService.isLocationAllowed(any(), any())).thenReturn(true);
+        lenient().when(attendanceLocationPolicyService.isPolicyEnabled()).thenReturn(false);
     }
 
     @AfterEach
@@ -167,6 +171,28 @@ class AttendanceServiceTest {
                 anyString(),
                 isNull()
         );
+    }
+
+    @Test
+    void testCheckInBlockedOutsideAllowedLocation() {
+        // Arrange
+        securityContextUtilsMock.when(SecurityContextUtils::getCurrentUserId).thenReturn(mockAccountId);
+
+        CheckInRequest request = new CheckInRequest();
+        request.setFaceDescriptor(new ArrayList<>(Collections.nCopies(128, 0.1f)));
+        request.setLatitude(10.0);
+        request.setLongitude(106.0);
+
+        when(employeeRepository.findByUserInfo_Id(mockAccountId)).thenReturn(Optional.of(mockEmployee));
+        when(attendanceLocationPolicyService.isLocationAllowed(10.0, 106.0)).thenReturn(false);
+        when(attendanceLocationPolicyService.isPolicyEnabled()).thenReturn(true);
+
+        // Act & Assert
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> attendanceService.checkIn(request));
+
+        assertEquals("Vị trí hiện tại nằm ngoài phạm vi check-in hợp lệ.", exception.getMessage());
+        verify(attendanceEventRepository, never()).save(any(AttendanceEvent.class));
+        verify(faceEncryptionUtils, never()).decrypt(anyString());
     }
 
     @Test

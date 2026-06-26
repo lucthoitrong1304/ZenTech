@@ -132,6 +132,7 @@ public class SecurityConfig {
                                 "ORDER_VIEW",
                                 "CUSTOMER_VIEW"
                         )
+                        .requestMatchers("/api/attendance/location-policy").hasAnyRole("OWNER", "MANAGER", "ADMIN")
 
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
