@@ -195,7 +195,7 @@ public class AdminDashboardService {
                     String apiPart = hasText(endpoint) ? endpoint : baseMessage;
                     String signature = level + ":" + category + ":" + eventPart + ":" + apiPart;
                     String title = hasText(context.eventType()) && hasText(endpoint)
-                            ? friendlyJourneyTitle(context.eventType(), message) + " \u00B7 "
+                            ? friendlyJourneyTitle(context.eventType(), message) + " · "
                             + (hasText(context.method()) ? context.method() : "HTTP") + " " + endpoint
                             : firstMessageSegment(message);
 
@@ -252,7 +252,7 @@ public class AdminDashboardService {
         Map<String, ServiceAggregate> services = new LinkedHashMap<>();
         for (IssueAggregate issue : issues) {
             String serviceKey = hasText(issue.endpoint)
-                    ? issue.category + " \u00B7 " + issue.endpoint
+                    ? issue.category + " · " + issue.endpoint
                     : issue.category;
             ServiceAggregate aggregate = services.computeIfAbsent(serviceKey,
                     ignored -> new ServiceAggregate(serviceKey, 0, issue.title, issue.level, issue.lastSeen));
@@ -299,7 +299,7 @@ public class AdminDashboardService {
         return AdminDashboardResponse.IncidentItem.builder()
                 .id(incident.getId())
                 .code(incident.getCode())
-                .title(firstNonBlank(incident.getErrorMessage(), incident.getApiPath(), "S\u1EF1 c\u1ED1 h\u1EC7 th\u1ED1ng"))
+                .title(firstNonBlank(incident.getErrorMessage(), incident.getApiPath(), "Sự cố hệ thống"))
                 .severity(incident.getSeverity())
                 .status(incident.getStatus())
                 .serviceName(incident.getServiceName())
@@ -366,16 +366,16 @@ public class AdminDashboardService {
             }
             case "CUSTOM" -> {
                 if (customFrom == null || customTo == null) {
-                    throw badRequest("Kho\u1EA3ng th\u1EDDi gian t\u00F9y ch\u1ECDn c\u1EA7n c\u00F3 \u0111\u1EA7y \u0111\u1EE7 from v\u00E0 to.");
+                    throw badRequest("Khoảng thời gian tùy chọn cần có đầy đủ from và to.");
                 }
                 if (customFrom.isAfter(customTo)) {
-                    throw badRequest("Th\u1EDDi gian b\u1EAFt \u0111\u1EA7u kh\u00F4ng th\u1EC3 sau th\u1EDDi gian k\u1EBFt th\u00FAc.");
+                    throw badRequest("Thời gian bắt đầu không thể sau thời gian kết thúc.");
                 }
                 if (customTo.isAfter(Instant.now().plusSeconds(60))) {
-                    throw badRequest("Kho\u1EA3ng th\u1EDDi gian kh\u00F4ng th\u1EC3 v\u01B0\u1EE3t qu\u00E1 hi\u1EC7n t\u1EA1i.");
+                    throw badRequest("Khoảng thời gian không thể vượt quá hiện tại.");
                 }
                 if (Duration.between(customFrom, customTo).compareTo(Duration.ofDays(90)) > 0) {
-                    throw badRequest("Kho\u1EA3ng th\u1EDDi gian t\u00F9y ch\u1ECDn t\u1ED1i \u0111a l\u00E0 90 ng\u00E0y.");
+                    throw badRequest("Khoảng thời gian tùy chọn tối đa là 90 ngày.");
                 }
                 from = customFrom;
                 to = customTo;
@@ -383,7 +383,7 @@ public class AdminDashboardService {
                 LocalDate endDate = customTo.atZone(zone).toLocalDate();
                 hourly = startDate.equals(endDate);
             }
-            default -> throw badRequest("Period ch\u1EC9 h\u1ED7 tr\u1EE3 TODAY, 7D, 30D ho\u1EB7c CUSTOM.");
+            default -> throw badRequest("Period chỉ hỗ trợ TODAY, 7D, 30D hoặc CUSTOM.");
         }
         return new DateRange(period, from, to, hourly);
     }
@@ -424,20 +424,20 @@ public class AdminDashboardService {
 
     private String friendlyJourneyTitle(String eventType, String fallback) {
         return switch (eventType) {
-            case "HttpRequestSucceeded" -> "G\u1ECDi API th\u00E0nh c\u00F4ng";
-            case "HttpRequestFailed" -> "G\u1ECDi API th\u1EA5t b\u1EA1i";
-            case "RouteNavigated" -> "\u0110i\u1EC1u h\u01B0\u1EDBng trang";
-            case "ProductViewed" -> "Xem s\u1EA3n ph\u1EA9m";
-            case "CartItemAdded" -> "Th\u00EAm s\u1EA3n ph\u1EA9m v\u00E0o gi\u1ECF";
-            case "AuthLoginSucceeded" -> "\u0110\u0103ng nh\u1EADp th\u00E0nh c\u00F4ng";
-            case "AuthLoginFailed" -> "\u0110\u0103ng nh\u1EADp th\u1EA5t b\u1EA1i";
-            case "RouteGuardDenied" -> "B\u1ECB ch\u1EB7n truy c\u1EADp";
+            case "HttpRequestSucceeded" -> "Gọi API thành công";
+            case "HttpRequestFailed" -> "Gọi API thất bại";
+            case "RouteNavigated" -> "Điều hướng trang";
+            case "ProductViewed" -> "Xem sản phẩm";
+            case "CartItemAdded" -> "Thêm sản phẩm vào giỏ";
+            case "AuthLoginSucceeded" -> "Đăng nhập thành công";
+            case "AuthLoginFailed" -> "Đăng nhập thất bại";
+            case "RouteGuardDenied" -> "Bị chặn truy cập";
             default -> firstNonBlank(eventType, firstMessageSegment(fallback), fallback);
         };
     }
 
     private String firstMessageSegment(String message) {
-        if (!hasText(message)) return "V\u1EA5n \u0111\u1EC1 h\u1EC7 th\u1ED1ng";
+        if (!hasText(message)) return "Vấn đề hệ thống";
         String[] segments = message.split("\\|", 2);
         return segments[0].trim();
     }
