@@ -61,8 +61,9 @@ public class IncidentMapper {
                 .ticketCode(ticketCode)
                 .occurrences(occurrences)
                 .images(resolvePublicUrls(incident.getImages()))
+                .issueSignature(incident.getIssueSignature())
+                .creationSource(incident.getCreationSource())
                 .build();
     }
 
 }
-

@@ -32,6 +32,14 @@ public interface IncidentRepository extends JpaRepository<Incident, UUID> {
             String apiPath, String httpMethod, List<IncidentStatus> statuses
     );
 
+    Optional<Incident> findFirstByIssueSignatureAndStatusInOrderByCreatedAtDesc(
+            String issueSignature, List<IncidentStatus> statuses
+    );
+
+    List<Incident> findByIssueSignatureInAndStatusIn(
+            List<String> issueSignatures, List<IncidentStatus> statuses
+    );
+
     Optional<Incident> findFirstByApiPathAndHttpMethodAndStatusOrderByResolvedAtDesc(
             String apiPath, String httpMethod, IncidentStatus status
     );

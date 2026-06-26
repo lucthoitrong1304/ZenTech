@@ -42,7 +42,7 @@ public class TraceIdFilter extends OncePerRequestFilter {
         String method = request.getMethod();
         
         // Bỏ qua ghi log cho endpoint đẩy log client, websocket và health để tránh rác log file
-        boolean shouldLog = !uri.contains("/api/logs/client") && !uri.startsWith("/ws") && !uri.equals("/health") && !uri.startsWith("/api/health");
+        boolean shouldLog = !isInternalObservabilityEndpoint(uri);
 
         if (shouldLog) {
             log.info("Incoming Request: {} {} từ IP: {}", method, uri, request.getRemoteAddr());
@@ -65,5 +65,15 @@ public class TraceIdFilter extends OncePerRequestFilter {
             // 4. Xóa traceId khỏi MDC sau khi kết thúc request để tránh rò rỉ bộ nhớ sang request khác
             MDC.remove(MDC_TRACE_ID_KEY);
         }
+    }
+    private boolean isInternalObservabilityEndpoint(String uri) {
+        return uri == null
+                || uri.contains("/api/logs/client")
+                || uri.startsWith("/ws")
+                || uri.equals("/health")
+                || uri.startsWith("/api/health")
+                || uri.startsWith("/api/admin/logs")
+                || uri.startsWith("/api/admin/activity-logs")
+                || uri.startsWith("/api/admin/incidents/issue-links");
     }
 }
