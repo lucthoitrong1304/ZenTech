@@ -41,13 +41,18 @@ public class ProductCategoryService {
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductMapper productMapper;
 
-    // Tiêm thêm R2StorageService để gen link ảnh
+    // Dùng để tạo presigned URL cho ảnh sản phẩm lưu trên R2.
     private final R2StorageService r2StorageService;
 
-    public ProductCategory addCategory(String categoryName, String shortName, UUID categoryParentId) {
-        return addCategory(categoryName, shortName, categoryParentId, DEFAULT_CATEGORY_PRIORITY);
-    }
-
+    /**
+     * Tạo danh mục sản phẩm mới.
+     *
+     * @param categoryName tên đầy đủ của danh mục
+     * @param shortName tên rút gọn dùng để hiển thị
+     * @param categoryParentId id danh mục cha, null nếu là danh mục gốc
+     * @param priority thứ tự hiển thị, null sẽ dùng độ ưu tiên mặc định
+     * @return danh mục vừa được lưu
+     */
     public ProductCategory addCategory(String categoryName, String shortName, UUID categoryParentId, Integer priority) {
         ProductCategory newCategory = new ProductCategory();
         newCategory.setCategoryName(categoryName);
@@ -65,6 +70,9 @@ public class ProductCategoryService {
         return productCategoryRepository.save(newCategory);
     }
 
+    /**
+     * Áp dụng thứ tự mặc định cho các danh mục có sẵn.
+     */
     @Transactional
     public void applyDefaultPriorities() {
         Map<String, Integer> rootPriorities = Map.of(
@@ -89,6 +97,14 @@ public class ProductCategoryService {
         }
     }
 
+    /**
+     * Cập nhật priority cho một danh mục nếu có cấu hình mặc định tương ứng.
+     *
+     * @param category danh mục cần kiểm tra priority
+     * @param rootPriorities map priority cho danh mục gốc
+     * @param keyboardChildPriorities map priority cho danh mục con của Keyboards
+     * @return true nếu danh mục được thay đổi priority
+     */
     private boolean applyDefaultPriority(
             ProductCategory category,
             Map<String, Integer> rootPriorities,
@@ -110,6 +126,12 @@ public class ProductCategoryService {
         return true;
     }
 
+    /**
+     * Lấy khóa định danh danh mục để so với cấu hình priority.
+     *
+     * @param category danh mục cần lấy tên so khớp
+     * @return shortName nếu có, ngược lại là categoryName
+     */
     private String resolveCategoryKey(ProductCategory category) {
         if (category.getShortName() != null && !category.getShortName().isBlank()) {
             return category.getShortName();
@@ -118,6 +140,12 @@ public class ProductCategoryService {
         return category.getCategoryName();
     }
 
+    /**
+     * Tìm danh mục theo shortName.
+     *
+     * @param shortName tên rút gọn của danh mục
+     * @return danh mục khớp shortName
+     */
     public ProductCategory findCategoryByShortName(String shortName) {
         ProductCategory productCategory = productCategoryRepository.findCategoryByShortName(shortName);
         if (productCategory == null) {
@@ -126,16 +154,32 @@ public class ProductCategoryService {
         return productCategory;
     }
 
+    /**
+     * Lấy cây danh mục công khai cho khách hàng.
+     *
+     * @return danh sách danh mục gốc kèm danh mục con đang hiển thị
+     */
     @Transactional(readOnly = true)
     public List<ProductCategorySummaryResponse> getAllCategories() {
         return getCategoryTree(false);
     }
 
+    /**
+     * Lấy cây danh mục cho trang quản lý.
+     *
+     * @return danh sách danh mục gốc kèm danh mục con, bao gồm danh mục bị ẩn
+     */
     @Transactional(readOnly = true)
     public List<ProductCategorySummaryResponse> getAllManagementCategories() {
         return getCategoryTree(true);
     }
 
+    /**
+     * Dựng cây danh mục cha-con.
+     *
+     * @param includeHidden true nếu cần lấy cả danh mục bị ẩn
+     * @return cây danh mục đã sắp xếp theo priority và tên
+     */
     private List<ProductCategorySummaryResponse> getCategoryTree(boolean includeHidden) {
         List<ProductCategory> categories = productCategoryRepository.findAllWithParent();
         List<ProductCategory> visibleCategories = includeHidden
@@ -153,6 +197,13 @@ public class ProductCategoryService {
                 .toList();
     }
 
+    /**
+     * Dựng response cho một nhánh danh mục.
+     *
+     * @param category danh mục hiện tại
+     * @param categoriesByParentId map danh mục con theo id danh mục cha
+     * @return response danh mục hiện tại kèm các danh mục con
+     */
     private ProductCategorySummaryResponse buildCategoryTree(
             ProductCategory category,
             Map<UUID, List<ProductCategory>> categoriesByParentId) {
@@ -166,6 +217,11 @@ public class ProductCategoryService {
         return productMapper.toProductCategorySummaryResponse(category, !children.isEmpty(), children);
     }
 
+    /**
+     * Tạo comparator dùng để sắp xếp danh mục.
+     *
+     * @return comparator ưu tiên priority, sau đó tên và id
+     */
     private Comparator<ProductCategory> buildCategoryComparator() {
         return Comparator
                 .comparing(ProductCategory::getPriority, Comparator.nullsLast(Comparator.naturalOrder()))
@@ -173,6 +229,12 @@ public class ProductCategoryService {
                 .thenComparing(ProductCategory::getId, Comparator.nullsLast(Comparator.naturalOrder()));
     }
 
+    /**
+     * Tạo danh mục từ trang quản lý.
+     *
+     * @param request dữ liệu tên, shortName, trạng thái hiển thị và danh mục cha
+     * @return thông tin danh mục vừa tạo
+     */
     @Transactional
     public ProductCategorySummaryResponse createManagementCategory(CategoryManagementRequest request) {
         ProductCategory category = new ProductCategory();
@@ -181,6 +243,13 @@ public class ProductCategoryService {
         return buildSingleCategoryResponse(productCategoryRepository.save(category));
     }
 
+    /**
+     * Cập nhật danh mục từ trang quản lý.
+     *
+     * @param categoryId id danh mục cần cập nhật
+     * @param request dữ liệu mới của danh mục
+     * @return thông tin danh mục sau khi cập nhật
+     */
     @Transactional
     public ProductCategorySummaryResponse updateManagementCategory(UUID categoryId, CategoryManagementRequest request) {
         ProductCategory category = findCategoryOrThrow(categoryId);
@@ -192,6 +261,12 @@ public class ProductCategoryService {
         return buildSingleCategoryResponse(productCategoryRepository.save(category));
     }
 
+    /**
+     * Xóa danh mục quản lý nếu danh mục không còn con và không gắn sản phẩm.
+     *
+     * @param categoryId id danh mục cần xóa
+     * @return thông tin danh mục trước khi bị xóa
+     */
     @Transactional
     public ProductCategorySummaryResponse deleteManagementCategory(UUID categoryId) {
         ProductCategory category = findCategoryOrThrow(categoryId);
@@ -207,6 +282,12 @@ public class ProductCategoryService {
         return response;
     }
 
+    /**
+     * Cập nhật lại thứ tự và quan hệ cha-con của nhiều danh mục.
+     *
+     * @param request danh sách danh mục kèm parentId và priority mới
+     * @return cây danh mục quản lý sau khi sắp xếp lại
+     */
     @Transactional
     public List<ProductCategorySummaryResponse> reorderManagementCategories(CategoryReorderRequest request) {
         List<ProductCategory> categories = productCategoryRepository.findAllWithParent();
@@ -250,13 +331,25 @@ public class ProductCategoryService {
         return getAllManagementCategories();
     }
 
+    /**
+     * Tìm danh mục theo id hoặc báo lỗi nếu không tồn tại.
+     *
+     * @param categoryId id danh mục cần tìm
+     * @return danh mục tìm được
+     */
     private ProductCategory findCategoryOrThrow(UUID categoryId) {
         return productCategoryRepository.findById(categoryId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product Category", "ID", categoryId));
     }
 
+    /**
+     * Gán các trường được phép chỉnh sửa từ request vào entity.
+     *
+     * @param category entity danh mục cần cập nhật
+     * @param request dữ liệu nhập từ trang quản lý
+     */
     private void applyEditableFields(ProductCategory category, CategoryManagementRequest request) {
-        category.setCategoryName(normalizeRequiredText(request.getCategoryName(), "categoryName"));
+        category.setCategoryName(normalizeRequiredCategoryName(request.getCategoryName()));
         category.setShortName(normalizeOptionalText(request.getShortName()));
         category.setVisible(request.getVisible() == null || request.getVisible());
 
@@ -264,6 +357,12 @@ public class ProductCategoryService {
         category.setParent(parentId == null ? null : findCategoryOrThrow(parentId));
     }
 
+    /**
+     * Kiểm tra parent mới hợp lệ và không tạo vòng lặp.
+     *
+     * @param categoryId id danh mục đang chỉnh sửa
+     * @param parentId id danh mục cha mới
+     */
     private void validateParent(UUID categoryId, UUID parentId) {
         if (Objects.equals(categoryId, parentId)) {
             throw new RuntimeException("Danh mục không thể là cha của chính nó.");
@@ -281,6 +380,12 @@ public class ProductCategoryService {
         validateNoCycle(categoryId, parentById);
     }
 
+    /**
+     * Kiểm tra cây danh mục không có vòng lặp cha-con.
+     *
+     * @param categoryId id danh mục bắt đầu kiểm tra
+     * @param parentById map id danh mục sang id cha
+     */
     private void validateNoCycle(UUID categoryId, Map<UUID, UUID> parentById) {
         Set<UUID> visited = new HashSet<>();
         UUID currentId = categoryId;
@@ -292,6 +397,12 @@ public class ProductCategoryService {
         }
     }
 
+    /**
+     * Tính priority kế tiếp trong cùng một nhóm cha.
+     *
+     * @param parentId id danh mục cha, null nếu thuộc cấp gốc
+     * @return priority mới lớn hơn các danh mục cùng cấp hiện có
+     */
     private int resolveNextPriority(UUID parentId) {
         return productCategoryRepository.findAllWithParent().stream()
                 .filter(category -> Objects.equals(
@@ -305,18 +416,36 @@ public class ProductCategoryService {
                 .orElse(1);
     }
 
+    /**
+     * Chuyển một entity danh mục thành response đơn lẻ.
+     *
+     * @param category danh mục cần chuyển đổi
+     * @return response không kèm danh mục con
+     */
     private ProductCategorySummaryResponse buildSingleCategoryResponse(ProductCategory category) {
         return productMapper.toProductCategorySummaryResponse(category, false, List.of());
     }
 
-    private String normalizeRequiredText(String value, String fieldName) {
+    /**
+     * Chuẩn hóa tên danh mục bắt buộc.
+     *
+     * @param value tên danh mục người dùng nhập, có thể chứa khoảng trắng đầu/cuối
+     * @return tên danh mục đã được trim
+     */
+    private String normalizeRequiredCategoryName(String value) {
         String normalized = normalizeOptionalText(value);
         if (normalized == null) {
-            throw new RuntimeException(fieldName + " is required");
+            throw new RuntimeException("categoryName is required");
         }
         return normalized;
     }
 
+    /**
+     * Chuẩn hóa chuỗi không bắt buộc.
+     *
+     * @param value chuỗi đầu vào có thể null hoặc rỗng
+     * @return chuỗi đã trim, hoặc null nếu không có nội dung
+     */
     private String normalizeOptionalText(String value) {
         if (value == null || value.trim().isEmpty()) {
             return null;
@@ -324,6 +453,13 @@ public class ProductCategoryService {
         return value.trim();
     }
 
+    /**
+     * Lấy danh sách sản phẩm thuộc một danh mục và các danh mục con.
+     *
+     * @param categoryId id danh mục cần xem sản phẩm
+     * @param request bộ lọc, phân trang và kiểu sắp xếp
+     * @return danh sách sản phẩm đã lọc, sắp xếp và phân trang
+     */
     @Transactional(readOnly = true)
     public PagedResponse<CategoryProductListItemResponse> getProductsByCategoryId(
             UUID categoryId,
@@ -375,6 +511,13 @@ public class ProductCategoryService {
         return buildPagedResponse(listingViews, request.getPage(), request.getSize());
     }
 
+    /**
+     * Thu thập đệ quy id của danh mục hiện tại và toàn bộ danh mục con.
+     *
+     * @param currentId id danh mục đang duyệt
+     * @param childrenMap map danh mục con theo id cha
+     * @param result tập id dùng để gom kết quả
+     */
     private void collectDescendantIds(
             UUID currentId,
             Map<UUID, List<ProductCategory>> childrenMap,
@@ -388,13 +531,22 @@ public class ProductCategoryService {
         }
     }
 
-
-    // Sort
+    /**
+     * Chọn kiểu sắp xếp mặc định nếu request không truyền sort.
+     *
+     * @param sortOption kiểu sắp xếp từ request
+     * @return sortOption hợp lệ, mặc định là NEWEST
+     */
     private CategoryProductSortOption resolveSortOption(CategoryProductSortOption sortOption) {
         return sortOption == null ? CategoryProductSortOption.NEWEST : sortOption;
     }
 
-    // Build 1 product render cho người dùng
+    /**
+     * Dựng dữ liệu trung gian để hiển thị một sản phẩm trong listing.
+     *
+     * @param product sản phẩm cần hiển thị
+     * @return view gồm ảnh đại diện, giá, rating và tồn kho
+     */
     private ProductListingView buildListingView(Product product) {
         Optional<ProductVariant> representativeVariant = getRepresentativeVariant(product);
         Double originalPrice = representativeVariant.map(ProductVariant::getOriginalPrice).orElse(null);
@@ -417,7 +569,12 @@ public class ProductCategoryService {
         );
     }
 
-    // Lấy biến thể sản phẩm đầu tiên
+    /**
+     * Lấy biến thể đại diện của sản phẩm.
+     *
+     * @param product sản phẩm cần lấy biến thể
+     * @return biến thể có id nhỏ nhất nếu tồn tại
+     */
     private Optional<ProductVariant> getRepresentativeVariant(Product product) {
         if (product.getVariants() == null || product.getVariants().isEmpty()) {
             return Optional.empty();
@@ -428,7 +585,12 @@ public class ProductCategoryService {
                 .min(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())));
     }
 
-    // Ưu tiên ảnh đại diện đã chọn, fallback ảnh đầu tiên trong gallery.
+    /**
+     * Lấy URL ảnh đại diện của sản phẩm.
+     *
+     * @param product sản phẩm cần lấy ảnh
+     * @return presigned URL ảnh đại diện, hoặc null nếu sản phẩm chưa có ảnh
+     */
     private String getRepresentativeImageUrl(Product product) {
         String representativeImageKey = getRepresentativeImageKey(product);
         if (representativeImageKey == null) {
@@ -438,6 +600,12 @@ public class ProductCategoryService {
         return r2StorageService.getPresignedGetUrl(representativeImageKey);
     }
 
+    /**
+     * Lấy key ảnh đại diện của sản phẩm.
+     *
+     * @param product sản phẩm cần lấy image key
+     * @return representativeImageKey nếu có, ngược lại là ảnh đầu tiên trong gallery
+     */
     private String getRepresentativeImageKey(Product product) {
         if (product.getRepresentativeImageKey() != null && !product.getRepresentativeImageKey().isBlank()) {
             return product.getRepresentativeImageKey();
@@ -450,7 +618,12 @@ public class ProductCategoryService {
         return product.getImageKeys().getFirst();
     }
 
-    // Tính trung bình điểm đánh giá của 1 sản phẩm.
+    /**
+     * Tính điểm đánh giá trung bình của sản phẩm.
+     *
+     * @param product sản phẩm cần tính rating
+     * @return điểm trung bình, hoặc null nếu chưa có đánh giá
+     */
     private Double getAverageRating(Product product) {
         if (product.getReviewList() == null || product.getReviewList().isEmpty()) {
             return null;
@@ -468,7 +641,13 @@ public class ProductCategoryService {
                 .orElse(null);
     }
 
-    // Filter Search
+    /**
+     * Kiểm tra sản phẩm có khớp từ khóa tìm kiếm hay không.
+     *
+     * @param view dữ liệu listing của sản phẩm
+     * @param search từ khóa tìm kiếm
+     * @return true nếu không có search hoặc tên sản phẩm chứa từ khóa
+     */
     private boolean matchesSearch(ProductListingView view, String search) {
         if (search == null || search.trim().isEmpty()) {
             return true;
@@ -482,7 +661,13 @@ public class ProductCategoryService {
         return productName.toLowerCase(Locale.ROOT).contains(search.trim().toLowerCase(Locale.ROOT));
     }
 
-    // Filter Rating
+    /**
+     * Kiểm tra sản phẩm có đạt mức rating tối thiểu hay không.
+     *
+     * @param view dữ liệu listing của sản phẩm
+     * @param minRating rating tối thiểu cần lọc
+     * @return true nếu không lọc rating hoặc sản phẩm đạt rating yêu cầu
+     */
     private boolean matchesMinRating(ProductListingView view, Integer minRating) {
         if (minRating == null) {
             return true;
@@ -491,9 +676,12 @@ public class ProductCategoryService {
         return view.averageRating() != null && view.averageRating() >= minRating;
     }
 
-    // Logic sort:
-    // Nếu 2 sản phẩm bằng nhau => thenComparing được chạy => Id nào nhỏ hơn nằm trước
-    // Các đối tượng nào null => nằm cuối ds.
+    /**
+     * Tạo comparator sắp xếp danh sách sản phẩm.
+     *
+     * @param sortOption kiểu sắp xếp theo giá, rating hoặc thời gian tạo
+     * @return comparator có fallback theo productId để thứ tự ổn định
+     */
     private Comparator<ProductListingView> buildComparator(CategoryProductSortOption sortOption) {
         Comparator<ProductListingView> productIdComparator =
                 Comparator.comparing(ProductListingView::productId, Comparator.nullsLast(Comparator.naturalOrder()));
@@ -520,6 +708,14 @@ public class ProductCategoryService {
         };
     }
 
+    /**
+     * Cắt danh sách sản phẩm theo trang và map sang response trả về client.
+     *
+     * @param listingViews danh sách sản phẩm đã lọc và sắp xếp
+     * @param page trang hiện tại, bắt đầu từ 0
+     * @param size số sản phẩm mỗi trang
+     * @return response phân trang cho danh sách sản phẩm
+     */
     private PagedResponse<CategoryProductListItemResponse> buildPagedResponse(
             List<ProductListingView> listingViews,
             int page,
@@ -556,7 +752,17 @@ public class ProductCategoryService {
                 .build();
     }
 
-    // View Object
+    /**
+     * View trung gian chứa dữ liệu đã tính toán cho product listing.
+     *
+     * @param product entity sản phẩm gốc
+     * @param imageUrl URL ảnh đại diện
+     * @param originalPrice giá gốc của biến thể đại diện
+     * @param salePrice giá khuyến mãi của biến thể đại diện
+     * @param effectivePrice giá dùng để hiển thị và sort
+     * @param averageRating điểm đánh giá trung bình
+     * @param stockQuantity tổng tồn kho của các biến thể chưa xóa
+     */
     private record ProductListingView(
             Product product,
             String imageUrl,
@@ -564,16 +770,31 @@ public class ProductCategoryService {
             Double salePrice,
             Double effectivePrice,
             Double averageRating,
-            Integer stockQuantity) { // Điểm đánh giá trung bình
+            Integer stockQuantity) {
+        /**
+         * Lấy id sản phẩm để dùng làm tie-breaker khi sort.
+         *
+         * @return id của sản phẩm gốc
+         */
         private UUID productId() {
             return product.getId();
         }
 
+        /**
+         * Lấy thời điểm tạo sản phẩm để sort mới/cũ.
+         *
+         * @return thời điểm tạo của sản phẩm gốc
+         */
         private Instant createdAt() {
             return product.getCreatedAt();
         }
     }
 
+    /**
+     * Đếm tổng số danh mục trong hệ thống.
+     *
+     * @return tổng số danh mục hiện có
+     */
     @Transactional(readOnly = true)
     public long count() {
         return productCategoryRepository.count();
