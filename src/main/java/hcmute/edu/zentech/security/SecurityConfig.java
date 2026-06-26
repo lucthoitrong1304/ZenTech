@@ -117,9 +117,12 @@ public class SecurityConfig {
                         .requestMatchers("/api/management/chat/**", "/api/management/tickets/**").hasAuthority("CHAT_UPDATE")
                         .requestMatchers(HttpMethod.GET, "/api/management/ai/**").hasAuthority("AI_VIEW")
                         .requestMatchers(HttpMethod.POST,
-                                "/api/management/ai/agents/*/demo",
+                                "/api/management/ai/demo",
                                 "/api/management/ai/documents/*/reingest",
-                                "/api/management/ai/products/reindex"
+                                "/api/management/ai/products/reindex",
+                                "/api/management/ai/products/verify",
+                                "/api/management/ai/products/variants/*/sync",
+                                "/api/management/ai/products/variants/*/verify"
                         ).hasAuthority("AI_UPDATE")
                         .requestMatchers(HttpMethod.POST, "/api/management/ai/**").hasAuthority("AI_CREATE")
                         .requestMatchers(HttpMethod.PATCH, "/api/management/ai/**").hasAuthority("AI_UPDATE")

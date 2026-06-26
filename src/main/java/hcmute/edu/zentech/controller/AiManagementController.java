@@ -1,19 +1,17 @@
 package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.aspect.TrackActivity;
+import hcmute.edu.zentech.dto.request.AiAgentDemoRequest;
+import hcmute.edu.zentech.dto.request.AiDatasetRequest;
+import hcmute.edu.zentech.dto.response.AiAgentDemoResponse;
+import hcmute.edu.zentech.dto.response.AiDatasetResponse;
+import hcmute.edu.zentech.dto.response.AiDocumentResponse;
+import hcmute.edu.zentech.dto.response.AiProductVectorStatusResponse;
+import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.model.ActivityAction;
 import hcmute.edu.zentech.model.ActivityArea;
 import hcmute.edu.zentech.model.ActivitySeverity;
-import hcmute.edu.zentech.dto.request.AiAgentDatasetsRequest;
-import hcmute.edu.zentech.dto.request.AiAgentDemoRequest;
-import hcmute.edu.zentech.dto.request.AiAgentRequest;
-import hcmute.edu.zentech.dto.request.AiAgentRolesRequest;
-import hcmute.edu.zentech.dto.request.AiDatasetRequest;
-import hcmute.edu.zentech.dto.response.AiAgentDemoResponse;
-import hcmute.edu.zentech.dto.response.AiAgentResponse;
-import hcmute.edu.zentech.dto.response.AiDatasetResponse;
-import hcmute.edu.zentech.dto.response.AiDocumentResponse;
-import hcmute.edu.zentech.dto.response.ApiResponse;
+import hcmute.edu.zentech.model.AiProductVectorSyncStatus;
 import hcmute.edu.zentech.service.AiManagementService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +24,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -39,61 +38,9 @@ import java.util.UUID;
 public class AiManagementController {
     private final AiManagementService aiManagementService;
 
-    @GetMapping("/agents")
-    public ResponseEntity<ApiResponse<List<AiAgentResponse>>> getAgents() {
-        return ResponseEntity.ok(ApiResponse.success(aiManagementService.getAgents()));
-    }
-
-    @PostMapping("/agents")
-    @TrackActivity(action = ActivityAction.CREATE_AI_AGENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.INFO, summary = "Tạo AI agent")
-    public ResponseEntity<ApiResponse<AiAgentResponse>> createAgent(@Valid @RequestBody AiAgentRequest request) {
-        return ResponseEntity.ok(ApiResponse.success(aiManagementService.createAgent(request)));
-    }
-
-    @GetMapping("/agents/{agentId}")
-    public ResponseEntity<ApiResponse<AiAgentResponse>> getAgent(@PathVariable UUID agentId) {
-        return ResponseEntity.ok(ApiResponse.success(aiManagementService.getAgent(agentId)));
-    }
-
-    @PatchMapping("/agents/{agentId}")
-    @TrackActivity(action = ActivityAction.UPDATE_AI_AGENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.INFO, summary = "Cập nhật AI agent")
-    public ResponseEntity<ApiResponse<AiAgentResponse>> updateAgent(
-            @PathVariable UUID agentId,
-            @Valid @RequestBody AiAgentRequest request
-    ) {
-        return ResponseEntity.ok(ApiResponse.success(aiManagementService.updateAgent(agentId, request)));
-    }
-
-    @DeleteMapping("/agents/{agentId}")
-    @TrackActivity(action = ActivityAction.DELETE_AI_AGENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.IMPORTANT, summary = "Xóa AI agent")
-    public ResponseEntity<ApiResponse<AiAgentResponse>> deleteAgent(@PathVariable UUID agentId) {
-        return ResponseEntity.ok(ApiResponse.success(aiManagementService.deleteAgent(agentId)));
-    }
-
-    @PatchMapping("/agents/{agentId}/roles")
-    @TrackActivity(action = ActivityAction.CHANGE_AI_AGENT_ROLE, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.INFO, summary = "Cập nhật vai trò phục vụ của AI agent")
-    public ResponseEntity<ApiResponse<AiAgentResponse>> updateAgentRoles(
-            @PathVariable UUID agentId,
-            @Valid @RequestBody AiAgentRolesRequest request
-    ) {
-        return ResponseEntity.ok(ApiResponse.success(aiManagementService.updateAgentRoles(agentId, request)));
-    }
-
-    @PatchMapping("/agents/{agentId}/datasets")
-    @TrackActivity(action = ActivityAction.UPDATE_AI_AGENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_AGENT", severity = ActivitySeverity.INFO, summary = "Cập nhật bộ dữ liệu liên kết với AI agent")
-    public ResponseEntity<ApiResponse<AiAgentResponse>> updateAgentDatasets(
-            @PathVariable UUID agentId,
-            @RequestBody AiAgentDatasetsRequest request
-    ) {
-        return ResponseEntity.ok(ApiResponse.success(aiManagementService.updateAgentDatasets(agentId, request)));
-    }
-
-    @PostMapping("/agents/{agentId}/demo")
-    public ResponseEntity<ApiResponse<AiAgentDemoResponse>> demoAgent(
-            @PathVariable UUID agentId,
-            @Valid @RequestBody AiAgentDemoRequest request
-    ) {
-        return ResponseEntity.ok(ApiResponse.success(aiManagementService.demoAgent(agentId, request)));
+    @PostMapping("/demo")
+    public ResponseEntity<ApiResponse<AiAgentDemoResponse>> demoAgent(@Valid @RequestBody AiAgentDemoRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(aiManagementService.demoAgent(request)));
     }
 
     @GetMapping("/datasets")
@@ -102,7 +49,7 @@ public class AiManagementController {
     }
 
     @PostMapping("/datasets")
-    @TrackActivity(action = ActivityAction.CREATE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.INFO, summary = "Tạo bộ dữ liệu AI")
+    @TrackActivity(action = ActivityAction.CREATE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.INFO, summary = "Tao bo du lieu AI")
     public ResponseEntity<ApiResponse<AiDatasetResponse>> createDataset(@Valid @RequestBody AiDatasetRequest request) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.createDataset(request)));
     }
@@ -113,7 +60,7 @@ public class AiManagementController {
     }
 
     @PatchMapping("/datasets/{datasetId}")
-    @TrackActivity(action = ActivityAction.UPDATE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.INFO, summary = "Cập nhật bộ dữ liệu AI")
+    @TrackActivity(action = ActivityAction.UPDATE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.INFO, summary = "Cap nhat bo du lieu AI")
     public ResponseEntity<ApiResponse<AiDatasetResponse>> updateDataset(
             @PathVariable UUID datasetId,
             @Valid @RequestBody AiDatasetRequest request
@@ -122,7 +69,7 @@ public class AiManagementController {
     }
 
     @DeleteMapping("/datasets/{datasetId}")
-    @TrackActivity(action = ActivityAction.DELETE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.IMPORTANT, summary = "Xóa bộ dữ liệu AI")
+    @TrackActivity(action = ActivityAction.DELETE_AI_DATASET, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DATASET", severity = ActivitySeverity.IMPORTANT, summary = "Archive bo du lieu AI")
     public ResponseEntity<ApiResponse<AiDatasetResponse>> deleteDataset(@PathVariable UUID datasetId) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.deleteDataset(datasetId)));
     }
@@ -131,7 +78,7 @@ public class AiManagementController {
             value = "/datasets/{datasetId}/documents",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
-    @TrackActivity(action = ActivityAction.UPLOAD_AI_DOCUMENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DOCUMENT", severity = ActivitySeverity.INFO, summary = "Tải lên tài liệu AI")
+    @TrackActivity(action = ActivityAction.UPLOAD_AI_DOCUMENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DOCUMENT", severity = ActivitySeverity.INFO, summary = "Tai len tai lieu AI")
     public ResponseEntity<ApiResponse<AiDocumentResponse>> uploadDocument(
             @PathVariable UUID datasetId,
             @RequestPart("file") MultipartFile file
@@ -140,7 +87,7 @@ public class AiManagementController {
     }
 
     @DeleteMapping("/documents/{documentId}")
-    @TrackActivity(action = ActivityAction.DELETE_AI_DOCUMENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DOCUMENT", severity = ActivitySeverity.IMPORTANT, summary = "Xóa tài liệu AI")
+    @TrackActivity(action = ActivityAction.DELETE_AI_DOCUMENT, area = ActivityArea.MANAGEMENT, module = "AI", targetType = "AI_DOCUMENT", severity = ActivitySeverity.IMPORTANT, summary = "Xoa tai lieu AI")
     public ResponseEntity<ApiResponse<AiDocumentResponse>> deleteDocument(@PathVariable UUID documentId) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.deleteDocument(documentId)));
     }
@@ -148,6 +95,34 @@ public class AiManagementController {
     @PostMapping("/documents/{documentId}/reingest")
     public ResponseEntity<ApiResponse<AiDocumentResponse>> reingestDocument(@PathVariable UUID documentId) {
         return ResponseEntity.ok(ApiResponse.success(aiManagementService.reingestDocument(documentId)));
+    }
+
+    @GetMapping("/products/vector-status")
+    public ResponseEntity<ApiResponse<List<AiProductVectorStatusResponse>>> getProductVectorStatuses(
+            @RequestParam(required = false) String filter
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(aiManagementService.getProductVectorStatuses(filter)));
+    }
+
+    @PostMapping("/products/variants/{variantId}/sync")
+    public ResponseEntity<ApiResponse<AiProductVectorStatusResponse>> syncProductVariant(@PathVariable UUID variantId) {
+        AiProductVectorStatusResponse response = aiManagementService.syncProductVariantToAi(variantId);
+        if (response.getSyncStatus() == AiProductVectorSyncStatus.FAILED) {
+            throw new RuntimeException(response.getErrorMessage() == null
+                    ? "Dong bo san pham qua AI/Qdrant that bai."
+                    : response.getErrorMessage());
+        }
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PostMapping("/products/variants/{variantId}/verify")
+    public ResponseEntity<ApiResponse<AiProductVectorStatusResponse>> verifyProductVariant(@PathVariable UUID variantId) {
+        return ResponseEntity.ok(ApiResponse.success(aiManagementService.verifyProductVariantInQdrant(variantId)));
+    }
+
+    @PostMapping("/products/verify")
+    public ResponseEntity<ApiResponse<List<AiProductVectorStatusResponse>>> verifyAllProducts() {
+        return ResponseEntity.ok(ApiResponse.success(aiManagementService.verifyAllProductVectors()));
     }
 
     @PostMapping("/products/reindex")
