@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 
@@ -41,6 +42,7 @@ public class EmployeeManagementService {
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
     private final EmployeeManagementMapper employeeManagementMapper;
+    private final LeaveManagementService leaveManagementService;
 
     @Value("${app.frontend.url:http://localhost:4200}")
     private String frontendUrl;
@@ -87,6 +89,7 @@ public class EmployeeManagementService {
         employee.setImageUrl(normalizeNullableText(request.getImageUrl()));
         employee.setUserInfo(account);
         employee = employeeRepository.save(employee);
+        leaveManagementService.ensureQuotas(employee, LocalDate.now().getYear());
 
         String resetTokenString = UUID.randomUUID().toString();
         resetTokenRepository.deleteByUser(account);

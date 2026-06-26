@@ -1,5 +1,7 @@
 package hcmute.edu.zentech.service;
 
+import hcmute.edu.zentech.dto.request.LeaveRequestCreateRequest;
+import hcmute.edu.zentech.dto.response.EmployeeLeaveQuotaResponse;
 import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.*;
 import hcmute.edu.zentech.security.SecurityContextUtils;
@@ -8,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,6 +26,8 @@ public class ApprovalService {
     private final PayPeriodRepository payPeriodRepository;
     private final AccountUserRepository accountUserRepository;
     private final EmployeeRepository employeeRepository;
+    private final LeaveTypeRepository leaveTypeRepository;
+    private final LeaveManagementService leaveManagementService;
     private final NotificationService notificationService;
 
     private void checkLock(LocalDate date) {
@@ -237,7 +242,7 @@ public class ApprovalService {
 
     // --- Leave Requests ---
     @Transactional
-    public LeaveRequest requestLeave(LeaveRequest request) {
+    public LeaveRequest requestLeave(LeaveRequestCreateRequest request) {
         // Check lock for start date and end date
         checkLock(request.getStartDate());
         checkLock(request.getEndDate());
@@ -249,11 +254,32 @@ public class ApprovalService {
             throw new RuntimeException("Không tìm thấy thông tin nhân viên.");
         }
 
-        request.setEmployee(employee);
-        request.setRequestedAt(LocalDateTime.now());
-        request.setStatus(ApprovalStatus.PENDING);
+        LeaveType leaveType = leaveTypeRepository.findById(request.getLeaveTypeId())
+                .orElseThrow(() -> new RuntimeException("Loại phép không tồn tại."));
+        validateLeaveRequestShape(leaveType, request);
 
-        LeaveRequest saved = leaveRequestRepository.save(request);
+        leaveManagementService.ensureQuotas(employee, request.getStartDate().getYear());
+        BigDecimal requestedAmount = leaveManagementService.calculateAmount(
+                leaveType,
+                request.getStartDate(),
+                request.getEndDate(),
+                request.getStartTime(),
+                request.getEndTime()
+        );
+        leaveManagementService.assertWithinQuota(employee, leaveType, request.getStartDate().getYear(), requestedAmount, null, true);
+
+        LeaveRequest entity = new LeaveRequest();
+        entity.setEmployee(employee);
+        entity.setLeaveType(leaveType);
+        entity.setStartDate(request.getStartDate());
+        entity.setEndDate(request.getEndDate());
+        entity.setStartTime(request.getStartTime());
+        entity.setEndTime(request.getEndTime());
+        entity.setReason(request.getReason().trim());
+        entity.setRequestedAt(LocalDateTime.now());
+        entity.setStatus(ApprovalStatus.PENDING);
+
+        LeaveRequest saved = leaveRequestRepository.save(entity);
 
         // Notify managers/admins/owners
         List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
@@ -282,6 +308,18 @@ public class ApprovalService {
 
         checkLock(request.getStartDate());
         checkLock(request.getEndDate());
+
+        if (status == ApprovalStatus.APPROVED) {
+            BigDecimal requestedAmount = leaveManagementService.calculateAmount(request);
+            leaveManagementService.assertWithinQuota(
+                    request.getEmployee(),
+                    request.getLeaveType(),
+                    request.getStartDate().getYear(),
+                    requestedAmount,
+                    request.getId(),
+                    false
+            );
+        }
 
         UUID userId = SecurityContextUtils.getCurrentUserId();
         AccountUser user = userId != null ? accountUserRepository.findById(userId).orElse(null) : null;
@@ -313,7 +351,7 @@ public class ApprovalService {
 
     @Transactional(readOnly = true)
     public List<LeaveRequest> getPendingLeaves() {
-        return leaveRequestRepository.findByStatus(ApprovalStatus.PENDING);
+        return leaveRequestRepository.findByStatusIn(List.of(ApprovalStatus.PENDING));
     }
 
     @Transactional(readOnly = true)
@@ -324,6 +362,16 @@ public class ApprovalService {
             throw new RuntimeException("Không tìm thấy thông tin nhân viên.");
         }
         return leaveRequestRepository.findByEmployeeIdOrderByRequestedAtDesc(employee.getId());
+    }
+
+    @Transactional
+    public List<EmployeeLeaveQuotaResponse> getMyLeaveQuotas(int year) {
+        UUID userId = SecurityContextUtils.getCurrentUserId();
+        Employee employee = userId != null ? employeeRepository.findByUserInfo_Id(userId).orElse(null) : null;
+        if (employee == null) {
+            throw new RuntimeException("Không tìm thấy thông tin nhân viên.");
+        }
+        return leaveManagementService.getEmployeeQuotas(employee.getId(), year);
     }
 
     @Transactional(readOnly = true)
@@ -344,5 +392,26 @@ public class ApprovalService {
             throw new RuntimeException("Không tìm thấy thông tin nhân viên.");
         }
         return attendanceAdjustmentRepository.findByEmployeeIdOrderByRequestedAtDesc(employee.getId());
+    }
+
+    private void validateLeaveRequestShape(LeaveType leaveType, LeaveRequestCreateRequest request) {
+        if (!leaveType.isActive()) {
+            throw new RuntimeException("Loại phép đã bị tắt.");
+        }
+        if (request.getEndDate().isBefore(request.getStartDate())) {
+            throw new RuntimeException("Ngày kết thúc phải sau hoặc bằng ngày bắt đầu.");
+        }
+        if (leaveType.getUnit() == LeaveTypeUnit.DAY) {
+            return;
+        }
+        if (!request.getStartDate().equals(request.getEndDate())) {
+            throw new RuntimeException("Loại phép theo giờ chỉ được đăng ký trong cùng một ngày.");
+        }
+        if (request.getStartTime() == null || request.getEndTime() == null) {
+            throw new RuntimeException("Vui lòng nhập giờ bắt đầu và kết thúc.");
+        }
+        if (!request.getEndTime().isAfter(request.getStartTime())) {
+            throw new RuntimeException("Giờ kết thúc phải sau giờ bắt đầu.");
+        }
     }
 }
