@@ -63,7 +63,7 @@ public class AdminTicketService {
 
     public TicketResponseDto getTicketById(UUID id) {
         Ticket ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("KhÃ´ng tÃ¬m tháº¥y Ticket há»— trá»£ vá»›i ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Ticket hỗ trợ với ID: " + id));
         return ticketMapper.toResponseDto(ticket, ticketAudienceService.getAffectedUserEmails(ticket));
     }
 
@@ -89,13 +89,13 @@ public class AdminTicketService {
         Incident incident = null;
         if (request.getIncidentId() != null) {
             incident = incidentRepository.findById(request.getIncidentId())
-                    .orElseThrow(() -> new ResourceNotFoundException("KhÃ´ng tÃ¬m tháº¥y sá»± cá»‘ vá»›i ID: " + request.getIncidentId()));
+                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy sự cố với ID: " + request.getIncidentId()));
         }
 
-        // Kiá»ƒm tra xem Incident nÃ y Ä‘Ã£ cÃ³ Ticket chÆ°a
+        // Kiểm tra xem Incident này đã có Ticket chưa
         if (incident != null) {
             ticketRepository.findByIncidentId(incident.getId()).ifPresent(existingTicket -> {
-                throw new IllegalStateException("Sá»± cá»‘ nÃ y Ä‘Ã£ Ä‘Æ°á»£c liÃªn káº¿t vá»›i Ticket: " + existingTicket.getCode());
+                throw new IllegalStateException("Sự cố này đã được liên kết với Ticket: " + existingTicket.getCode());
             });
             if (incident.getUser() != null) {
                 createdBy = incident.getUser();
@@ -123,16 +123,16 @@ public class AdminTicketService {
                 .createdAt(Instant.now())
                 .build();
 
-        // Náº¿u táº¡o Ticket tá»« Incident vÃ  gÃ¡n tráº¡ng thÃ¡i khÃ¡c RESOLVED/CLOSED, tá»± Ä‘á»™ng chuyá»ƒn Incident sang INVESTIGATING
+        // Nếu tạo Ticket từ Incident và gán trạng thái khác RESOLVED/CLOSED, tự động chuyển Incident sang INVESTIGATING
         if (incident != null && request.getStatus() != TicketStatus.RESOLVED && request.getStatus() != TicketStatus.CLOSED) {
             incident.setStatus(IncidentStatus.INVESTIGATING);
             if (assignee != null) {
-                // Äá»“ng bá»™ tÃªn ngÆ°á»i phá»¥ trÃ¡ch cho Incident
+                // Đồng bộ tên người phụ trách cho Incident
                 incident.setAssignee(assignee.getEmail());
             }
             incidentRepository.save(incident);
             
-            // Gá»­i websocket sá»± cá»‘ cáº­p nháº­t
+            // Gửi websocket sự cố cập nhật
             try {
                 IncidentResponseDto incDto = incidentMapper.toResponseDto(incident, null, ticket.getCode());
                 messagingTemplate.convertAndSend("/topic/admin.incidents", incDto);
@@ -143,7 +143,7 @@ public class AdminTicketService {
 
         Ticket saved = ticketRepository.save(ticket);
         
-        // Ghi log hoáº¡t Ä‘á»™ng táº¡o ticket má»›i
+        // Ghi log hoạt động tạo ticket mới
         activityLogService.log(
                 createdById,
                 ActivityArea.ADMIN,
@@ -153,20 +153,20 @@ public class AdminTicketService {
                 "Ticket",
                 saved.getId().toString(),
                 saved.getCode(),
-                "Táº¡o Ticket há»— trá»£ má»›i: " + saved.getCode(),
+                "Tạo Ticket hỗ trợ mới: " + saved.getCode(),
                 null
         );
 
-        // Náº¿u táº¡o Ticket tá»« Incident vÃ  gÃ¡n tráº¡ng thÃ¡i khÃ¡c RESOLVED/CLOSED, tá»± Ä‘á»™ng chuyá»ƒn Incident sang INVESTIGATING
+        // Nếu tạo Ticket từ Incident và gán trạng thái khác RESOLVED/CLOSED, tự động chuyển Incident sang INVESTIGATING
         if (incident != null && request.getStatus() != TicketStatus.RESOLVED && request.getStatus() != TicketStatus.CLOSED) {
             incident.setStatus(IncidentStatus.INVESTIGATING);
             if (assignee != null) {
-                // Äá»“ng bá»™ tÃªn ngÆ°á»i phá»¥ trÃ¡ch cho Incident
+                // Đồng bộ tên người phụ trách cho Incident
                 incident.setAssignee(assignee.getEmail());
             }
             incidentRepository.save(incident);
             
-            // Gá»­i websocket sá»± cá»‘ cáº­p nháº­t
+            // Gửi websocket sự cố cập nhật
             try {
                 IncidentResponseDto incDto = incidentMapper.toResponseDto(incident, null, ticket.getCode());
                 messagingTemplate.convertAndSend("/topic/admin.incidents", incDto);
@@ -188,7 +188,7 @@ public class AdminTicketService {
     @Transactional
     public TicketResponseDto updateTicketStatus(UUID id, TicketStatus status) {
         Ticket ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("KhÃ´ng tÃ¬m tháº¥y Ticket há»— trá»£ vá»›i ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Ticket hỗ trợ với ID: " + id));
 
         TicketStatus oldStatus = ticket.getStatus();
         ticket.setStatus(status);
@@ -198,7 +198,7 @@ public class AdminTicketService {
         if (status == TicketStatus.RESOLVED || status == TicketStatus.CLOSED) {
             ticket.setResolvedAt(Instant.now());
 
-            // Äá»“ng bá»™ tráº¡ng thÃ¡i RESOLVED cho Incident liÃªn káº¿t
+            // Đồng bộ trạng thái RESOLVED cho Incident liên kết
             if (ticket.getIncident() != null) {
                 Incident incident = ticket.getIncident();
                 if (incident.getStatus() != IncidentStatus.RESOLVED) {
@@ -207,7 +207,7 @@ public class AdminTicketService {
                     incidentRepository.save(incident);
                     log.info("Automatically resolved linked incident: {}", incident.getCode());
 
-                    // Ghi log hoáº¡t Ä‘á»™ng Ä‘á»“ng bá»™
+                    // Ghi log hoạt động đồng bộ
                     activityLogService.log(
                             null,
                             ActivityArea.SYSTEM,
@@ -217,7 +217,7 @@ public class AdminTicketService {
                             "Incident",
                             incident.getId().toString(),
                             incident.getCode(),
-                            "Há»‡ thá»‘ng tá»± Ä‘á»™ng Ä‘Ã³ng sá»± cá»‘ liÃªn káº¿t: " + incident.getCode() + " do Ä‘Ã³ng Ticket",
+                            "Hệ thống tự động đóng sự cố liên kết: " + incident.getCode() + " do đóng Ticket",
                             null
                     );
 
@@ -228,7 +228,7 @@ public class AdminTicketService {
         } else {
             ticket.setResolvedAt(null);
             
-            // Náº¿u má»Ÿ láº¡i Ticket, cÅ©ng má»Ÿ láº¡i Incident
+            // Nếu mở lại Ticket, cũng mở lại Incident
             if (ticket.getIncident() != null) {
                 Incident incident = ticket.getIncident();
                 if (incident.getStatus() == IncidentStatus.RESOLVED) {
@@ -237,7 +237,7 @@ public class AdminTicketService {
                     incidentRepository.save(incident);
                     log.info("Automatically reopened linked incident: {}", incident.getCode());
 
-                    // Ghi log hoáº¡t Ä‘á»™ng Ä‘á»“ng bá»™
+                    // Ghi log hoạt động đồng bộ
                     activityLogService.log(
                             null,
                             ActivityArea.SYSTEM,
@@ -247,7 +247,7 @@ public class AdminTicketService {
                             "Incident",
                             incident.getId().toString(),
                             incident.getCode(),
-                            "Há»‡ thá»‘ng tá»± Ä‘á»™ng má»Ÿ láº¡i sá»± cá»‘ liÃªn káº¿t: " + incident.getCode() + " do má»Ÿ láº¡i Ticket",
+                            "Hệ thống tự động mở lại sự cố liên kết: " + incident.getCode() + " do mở lại Ticket",
                             null
                     );
 
@@ -259,7 +259,7 @@ public class AdminTicketService {
 
         Ticket saved = ticketRepository.save(ticket);
 
-        // Ghi log hoáº¡t Ä‘á»™ng Ä‘á»•i tráº¡ng thÃ¡i Ticket
+        // Ghi log hoạt động đổi trạng thái Ticket
         if (status != oldStatus) {
             ActivityAction act = (status == TicketStatus.RESOLVED || status == TicketStatus.CLOSED) ? ActivityAction.CLOSE_TICKET : ActivityAction.UPDATE_TICKET_STATUS;
             activityLogService.log(
@@ -271,7 +271,7 @@ public class AdminTicketService {
                     "Ticket",
                     saved.getId().toString(),
                     saved.getCode(),
-                    "Cáº­p nháº­t tráº¡ng thÃ¡i Ticket " + saved.getCode() + " thÃ nh " + status,
+                    "Cập nhật trạng thái Ticket " + saved.getCode() + " thành " + status,
                     null
             );
         }
@@ -299,19 +299,19 @@ public class AdminTicketService {
     @Transactional
     public TicketResponseDto updateTicketAssignee(UUID id, UUID assigneeId) {
         Ticket ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("KhÃ´ng tÃ¬m tháº¥y Ticket há»— trá»£ vá»›i ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Ticket hỗ trợ với ID: " + id));
 
         AccountUser oldAssignee = ticket.getAssignee();
         AccountUser assignee = null;
         if (assigneeId != null) {
             assignee = accountUserRepository.findById(assigneeId)
-                    .orElseThrow(() -> new ResourceNotFoundException("KhÃ´ng tÃ¬m tháº¥y ngÆ°á»i dÃ¹ng vá»›i ID: " + assigneeId));
+                    .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy người dùng với ID: " + assigneeId));
         }
 
         ticket.setAssignee(assignee);
         Ticket saved = ticketRepository.save(ticket);
 
-        // Ghi log hoáº¡t Ä‘á»™ng phÃ¢n cÃ´ng ticket
+        // Ghi log hoạt động phân công ticket
         if (!java.util.Objects.equals(oldAssignee, assignee)) {
             activityLogService.log(
                     null,
@@ -322,12 +322,12 @@ public class AdminTicketService {
                     "Ticket",
                     saved.getId().toString(),
                     saved.getCode(),
-                    "PhÃ¢n cÃ´ng Ticket " + saved.getCode() + " cho " + (assignee == null ? "chÆ°a phÃ¢n cÃ´ng" : assignee.getEmail()),
+                    "Phân công Ticket " + saved.getCode() + " cho " + (assignee == null ? "chưa phân công" : assignee.getEmail()),
                     null
             );
         }
 
-        // Äá»“ng bá»™ ngÆ°á»£c láº¡i cho Incident náº¿u cÃ³ liÃªn káº¿t
+        // Đồng bộ ngược lại cho Incident nếu có liên kết
         if (saved.getIncident() != null) {
             Incident incident = saved.getIncident();
             String newAssigneeEmail = assignee != null ? assignee.getEmail() : null;
@@ -336,7 +336,7 @@ public class AdminTicketService {
                 incidentRepository.save(incident);
                 log.info("Synchronized assignee from Ticket {} to Incident {}", saved.getCode(), incident.getCode());
 
-                // Ghi log hoáº¡t Ä‘á»™ng Ä‘á»“ng bá»™
+                // Ghi log hoạt động đồng bộ
                 activityLogService.log(
                         null,
                         ActivityArea.SYSTEM,
@@ -346,11 +346,11 @@ public class AdminTicketService {
                         "Incident",
                         incident.getId().toString(),
                         incident.getCode(),
-                        "Há»‡ thá»‘ng tá»± Ä‘á»™ng phÃ¢n cÃ´ng sá»± cá»‘ liÃªn káº¿t " + incident.getCode() + " cho " + (newAssigneeEmail == null ? "chÆ°a phÃ¢n cÃ´ng" : newAssigneeEmail),
+                        "Hệ thống tự động phân công sự cố liên kết " + incident.getCode() + " cho " + (newAssigneeEmail == null ? "chưa phân công" : newAssigneeEmail),
                         null
                 );
 
-                // Gá»­i websocket cáº­p nháº­t incident
+                // Gửi websocket cập nhật incident
                 try {
                     IncidentResponseDto incDto = incidentMapper.toResponseDto(incident, null, saved.getCode());
                     messagingTemplate.convertAndSend("/topic/admin.incidents", incDto);
