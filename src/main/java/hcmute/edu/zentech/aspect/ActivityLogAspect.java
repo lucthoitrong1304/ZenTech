@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.node.TextNode;
 import hcmute.edu.zentech.dto.request.InventoryAdjustmentRequest;
 import hcmute.edu.zentech.dto.request.UpdateAccountStatusRequest;
 import hcmute.edu.zentech.dto.request.UpdateCustomerStatusRequest;
-import hcmute.edu.zentech.dto.response.AiAgentResponse;
 import hcmute.edu.zentech.dto.response.AiDatasetResponse;
 import hcmute.edu.zentech.dto.response.AiDocumentResponse;
 import hcmute.edu.zentech.dto.response.ApiResponse;
@@ -525,9 +524,6 @@ public class ActivityLogAspect {
             if (!label.isBlank()) return label;
         } else if (body instanceof ProductGroupResponse productGroup) {
             String label = productGroup.getGroupName();
-            if (label != null && !label.isBlank()) return label;
-        } else if (body instanceof AiAgentResponse aiAgent) {
-            String label = aiAgent.getName();
             if (label != null && !label.isBlank()) return label;
         } else if (body instanceof AiDatasetResponse aiDataset) {
             String label = aiDataset.getName();
