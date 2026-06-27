@@ -7,7 +7,6 @@ public enum ChatMessageType {
     FILE,
     MEDIA,
     SYSTEM,
-    CALL,
     TEXT_STREAM_CHUNK
 }
 
