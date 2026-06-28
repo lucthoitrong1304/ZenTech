@@ -238,6 +238,31 @@ public class AdminObservabilityService {
         };
     }
 
+    public hcmute.edu.zentech.dto.response.AdminPingResponse pingDependency(String name) {
+        String normalized = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
+        long start = System.nanoTime();
+        boolean up;
+        try {
+            up = switch (normalized) {
+                case "mysql" -> checkMysql();
+                case "rabbitmq", "rabbit" -> checkRabbit();
+                case "qdrant" -> checkHttpReady(qdrantUrl + "/readyz");
+                case "prometheus" -> prometheus.isReady();
+                case "loki" -> checkHttpReady(lokiUrl + "/ready");
+                case "alloy" -> checkHttpReady(alloyUrl + "/-/ready");
+                default -> throw new ResponseStatusException(NOT_FOUND, "Unsupported dependency: " + name);
+            };
+        } catch (Exception e) {
+            up = false;
+        }
+        double latencyMs = (System.nanoTime() - start) / 1_000_000.0;
+        latencyMs = Math.round(latencyMs * 10.0) / 10.0;
+        return hcmute.edu.zentech.dto.response.AdminPingResponse.builder()
+                .status(up ? "UP" : "DOWN")
+                .latencyMs(latencyMs)
+                .build();
+    }
+
     private AdminDependencyDetailResponse mysqlDetail() {
         boolean up = checkMysql();
         return AdminDependencyDetailResponse.builder()

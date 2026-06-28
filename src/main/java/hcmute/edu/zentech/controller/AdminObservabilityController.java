@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 
+import hcmute.edu.zentech.dto.response.AdminPingResponse;
+
 @RestController
 @RequestMapping("/api/admin/observability")
 @RequiredArgsConstructor
@@ -32,5 +34,10 @@ public class AdminObservabilityController {
     @GetMapping("/dependencies/{name}")
     public ResponseEntity<ApiResponse<AdminDependencyDetailResponse>> getDependencyDetail(@PathVariable String name) {
         return ResponseEntity.ok(ApiResponse.success(observabilityService.getDependencyDetail(name)));
+    }
+
+    @GetMapping("/dependencies/{name}/ping")
+    public ResponseEntity<ApiResponse<AdminPingResponse>> pingDependency(@PathVariable String name) {
+        return ResponseEntity.ok(ApiResponse.success(observabilityService.pingDependency(name)));
     }
 }
