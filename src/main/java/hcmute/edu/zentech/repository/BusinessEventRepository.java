@@ -49,4 +49,17 @@ public interface BusinessEventRepository extends JpaRepository<BusinessEvent, UU
             @Param("start") Instant start,
             @Param("end") Instant end
     );
+
+    @Query("""
+            SELECT COUNT(DISTINCT COALESCE(e.traceId, CAST(e.userId AS string)))
+            FROM BusinessEvent e
+            WHERE e.eventType = :eventType
+              AND e.createdAt >= :start
+              AND e.createdAt <= :end
+            """)
+    long countAffectedUsersByEventTypeBetween(
+            @Param("eventType") BusinessEventType eventType,
+            @Param("start") Instant start,
+            @Param("end") Instant end
+    );
 }
