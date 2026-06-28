@@ -16,6 +16,7 @@ import hcmute.edu.zentech.service.payment.MomoGatewayClient;
 import hcmute.edu.zentech.service.payment.VnpayGatewayClient;
 import hcmute.edu.zentech.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PaymentService {
     private final PaymentTransactionRepository paymentTransactionRepository;
     private final VnpayGatewayClient vnpayGatewayClient;
@@ -58,11 +60,11 @@ public class PaymentService {
         return paymentTransactionRepository.save(transaction);
     }
 
+    @Transactional
     public String buildVnpayReturnUrl(Map<String, String> params) {
         String orderId = params.get("vnp_TxnRef");
-        boolean valid = vnpayGatewayClient.verify(params);
-        boolean success = "00".equals(params.get("vnp_ResponseCode"));
-        return buildFrontendResultUrl(orderId, "VNPAY", valid ? (success ? "success" : "failed") : "invalid");
+        VnpayCallbackResult result = processVnpayCallback(params);
+        return buildFrontendResultUrl(orderId, "VNPAY", result.frontendStatus());
     }
 
     public String buildMomoReturnUrl(Map<String, String> params) {
@@ -74,23 +76,16 @@ public class PaymentService {
 
     @Transactional
     public Map<String, String> handleVnpayIpn(Map<String, String> params) {
-        if (!vnpayGatewayClient.verify(params)) {
+        VnpayCallbackResult result = processVnpayCallback(params);
+        if (result.responseCode().equals("97")) {
             return Map.of("RspCode", "97", "Message", "Invalid signature");
         }
-
-        String requestId = params.get("vnp_TxnRef");
-        PaymentTransaction transaction = paymentTransactionRepository
-                .findByGatewayAndRequestId(PaymentGateway.VNPAY, requestId)
-                .orElse(null);
-        if (transaction == null) {
+        if (result.responseCode().equals("01")) {
             return Map.of("RspCode", "01", "Message", "Order not found");
         }
-        if (!isAmountMatched(transaction, parseVnpayAmount(params.get("vnp_Amount")))) {
+        if (result.responseCode().equals("04")) {
             return Map.of("RspCode", "04", "Message", "Invalid amount");
         }
-
-        boolean success = "00".equals(params.get("vnp_ResponseCode"));
-        updateTransaction(transaction, success, params.get("vnp_TransactionNo"), toJson(params));
         return Map.of("RspCode", "00", "Message", "Confirm Success");
     }
 
@@ -169,6 +164,72 @@ public class PaymentService {
         return transaction.getAmount() == amount;
     }
 
+    private VnpayCallbackResult processVnpayCallback(Map<String, String> params) {
+        String requestId = params.get("vnp_TxnRef");
+        String responseCode = params.get("vnp_ResponseCode");
+        String transactionStatus = params.get("vnp_TransactionStatus");
+        String gatewayTransactionNo = params.get("vnp_TransactionNo");
+        long amount = parseVnpayAmount(params.get("vnp_Amount"));
+
+        if (!vnpayGatewayClient.verify(params)) {
+            log.warn(
+                    "VNPAY callback invalid signature: txnRef={}, responseCode={}, transactionStatus={}, amount={}, gatewayTransactionNo={}",
+                    requestId,
+                    responseCode,
+                    transactionStatus,
+                    amount,
+                    gatewayTransactionNo
+            );
+            return new VnpayCallbackResult("97", "invalid");
+        }
+
+        PaymentTransaction transaction = paymentTransactionRepository
+                .findByGatewayAndRequestId(PaymentGateway.VNPAY, requestId)
+                .orElse(null);
+        if (transaction == null) {
+            log.warn(
+                    "VNPAY callback transaction not found: txnRef={}, responseCode={}, transactionStatus={}, amount={}, gatewayTransactionNo={}",
+                    requestId,
+                    responseCode,
+                    transactionStatus,
+                    amount,
+                    gatewayTransactionNo
+            );
+            return new VnpayCallbackResult("01", "invalid");
+        }
+
+        if (!isAmountMatched(transaction, amount)) {
+            log.warn(
+                    "VNPAY callback amount mismatch: txnRef={}, expectedAmount={}, actualAmount={}, responseCode={}, transactionStatus={}, gatewayTransactionNo={}",
+                    requestId,
+                    transaction.getAmount(),
+                    amount,
+                    responseCode,
+                    transactionStatus,
+                    gatewayTransactionNo
+            );
+            return new VnpayCallbackResult("04", "invalid");
+        }
+
+        boolean success = isVnpaySuccessful(params);
+        updateTransaction(transaction, success, gatewayTransactionNo, toJson(params));
+        log.info(
+                "VNPAY callback processed: txnRef={}, responseCode={}, transactionStatus={}, amount={}, gatewayTransactionNo={}, result={}",
+                requestId,
+                responseCode,
+                transactionStatus,
+                amount,
+                gatewayTransactionNo,
+                success ? "SUCCESS" : "FAILED"
+        );
+        return new VnpayCallbackResult("00", success ? "success" : "failed");
+    }
+
+    private boolean isVnpaySuccessful(Map<String, String> params) {
+        return "00".equals(params.get("vnp_ResponseCode"))
+                && "00".equals(params.get("vnp_TransactionStatus"));
+    }
+
     private long parseVnpayAmount(String value) {
         return parseAmount(value) / 100;
     }
@@ -197,5 +258,8 @@ public class PaymentService {
         } catch (JsonProcessingException ex) {
             return params.toString();
         }
+    }
+
+    private record VnpayCallbackResult(String responseCode, String frontendStatus) {
     }
 }

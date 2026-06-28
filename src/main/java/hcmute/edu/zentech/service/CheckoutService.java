@@ -103,8 +103,12 @@ public class CheckoutService {
 
         // Notify Customer
         if (customer.getUserInfo() != null) {
-            String title = "Đặt hàng thành công";
-            String content = String.format("Đơn hàng #%s của bạn đã được đặt thành công.", savedOrder.getId());
+            boolean onlinePayment = savedOrder.getPaymentMethod() != PaymentMethod.CASH;
+            String title = onlinePayment ? "Đơn hàng đang chờ thanh toán" : "Đặt hàng thành công";
+            String content = onlinePayment
+                    ? String.format("Đơn hàng #%s đã được tạo và đang chờ thanh toán qua cổng %s.",
+                            savedOrder.getId(), savedOrder.getPaymentMethod())
+                    : String.format("Đơn hàng #%s của bạn đã được đặt thành công.", savedOrder.getId());
             notificationService.createNotification(
                     customer.getUserInfo().getId(),
                     title,
