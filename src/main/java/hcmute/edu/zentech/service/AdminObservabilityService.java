@@ -89,13 +89,46 @@ public class AdminObservabilityService {
                 .sorted(Comparator.comparing(AdminObservabilityResponse.MetricHistoryPoint::getTimestamp))
                 .toList();
 
+        Double cpu = host.cpuUsagePercent();
+        Long cores = host.cpuCoreCount() != null ? host.cpuCoreCount().longValue() : null;
+        Double ram = host.ramUsagePercent();
+        Long ramUsed = host.ramUsedBytes();
+        Long ramTotal = host.ramTotalBytes();
+        Double disk = host.diskUsagePercent();
+        Long diskUsed = host.diskUsedBytes();
+        Long diskTotal = host.diskTotalBytes();
+
+        if (prometheusAvailable) {
+            Double promCpu = prometheus.queryScalar("zentech_host_cpu_usage_percent");
+            if (promCpu != null) cpu = promCpu;
+            Double promCores = prometheus.queryScalar("zentech_host_cpu_cores");
+            if (promCores != null) cores = promCores.longValue();
+            Double promRam = prometheus.queryScalar("zentech_host_ram_usage_percent");
+            if (promRam != null) ram = promRam;
+            Double promRamUsed = prometheus.queryScalar("zentech_host_ram_used_bytes");
+            if (promRamUsed != null) ramUsed = promRamUsed.longValue();
+            Double promRamTotal = prometheus.queryScalar("zentech_host_ram_total_bytes");
+            if (promRamTotal != null) ramTotal = promRamTotal.longValue();
+            Double promDisk = prometheus.queryScalar("zentech_host_disk_usage_percent");
+            if (promDisk != null) disk = promDisk;
+            Double promDiskUsed = prometheus.queryScalar("zentech_host_disk_used_bytes");
+            if (promDiskUsed != null) diskUsed = promDiskUsed.longValue();
+            Double promDiskTotal = prometheus.queryScalar("zentech_host_disk_total_bytes");
+            if (promDiskTotal != null) diskTotal = promDiskTotal.longValue();
+        }
+
         return AdminObservabilityResponse.builder()
                 .period(range.period()).from(range.from()).to(range.to()).generatedAt(Instant.now())
                 .prometheusAvailable(prometheusAvailable)
                 .health(AdminObservabilityResponse.HealthOverview.builder()
-                        .cpuUsagePercent(host.cpuUsagePercent())
-                        .ramUsagePercent(host.ramUsagePercent())
-                        .diskUsagePercent(host.diskUsagePercent())
+                        .cpuUsagePercent(cpu)
+                        .cpuCoreCount(cores)
+                        .ramUsagePercent(ram)
+                        .ramUsedBytes(ramUsed)
+                        .ramTotalBytes(ramTotal)
+                        .diskUsagePercent(disk)
+                        .diskUsedBytes(diskUsed)
+                        .diskTotalBytes(diskTotal)
                         .jvmHeapUsagePercent(heapPercent)
                         .jvmHeapUsedBytes(toLong(heapUsed)).jvmHeapMaxBytes(toLong(heapMax))
                         .processCpuUsagePercent(processCpu)
