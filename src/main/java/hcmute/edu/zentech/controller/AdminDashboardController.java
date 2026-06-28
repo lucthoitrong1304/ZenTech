@@ -46,5 +46,7 @@ public class AdminDashboardController {
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to
     ) {
+        // Deprecated: use GET /api/admin/observability for system monitoring.
         return ResponseEntity.ok(ApiResponse.success(observabilityService.getObservability(period, from, to)));
-    }}
+    }
+}
