@@ -127,6 +127,8 @@ public class ProductMapper {
                 .customerId(review.getCustomer().getId())
                 .customerName(customerName)
                 .isOwner(isOwner)
+                .imageKeys(isOwner ? review.getImageKeys() : null)
+                .videoKey(isOwner ? review.getVideoKey() : null)
                 .imageUrls(imageUrls)
                 .videoUrl(videoUrl)
                 .build();

@@ -409,10 +409,11 @@ public class ProductService {
                     .comparing(ProductListingView::effectivePrice, Comparator.nullsLast(Comparator.reverseOrder()))
                     .thenComparing(productIdComparator);
             case RATING_ASC -> Comparator
-                    .comparing(ProductListingView::averageRating, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .comparingDouble(ProductService::ratingSortValue)
                     .thenComparing(productIdComparator);
             case RATING_DESC -> Comparator
-                    .comparing(ProductListingView::averageRating, Comparator.nullsLast(Comparator.reverseOrder()))
+                    .comparingDouble(ProductService::ratingSortValue)
+                    .reversed()
                     .thenComparing(productIdComparator);
             case OLDEST -> Comparator
                     .comparing(ProductListingView::createdAt, Comparator.nullsLast(Comparator.naturalOrder()))
@@ -421,6 +422,10 @@ public class ProductService {
                     .comparing(ProductListingView::createdAt, Comparator.nullsLast(Comparator.reverseOrder()))
                     .thenComparing(productIdComparator);
         };
+    }
+
+    private static double ratingSortValue(ProductListingView view) {
+        return view.averageRating() == null ? 0.0 : view.averageRating();
     }
 
     private PagedResponse<CategoryProductListItemResponse> buildPagedResponse(

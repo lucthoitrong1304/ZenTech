@@ -103,11 +103,15 @@ public class ProductReviewService {
         review.setRating(request.getRating());
         review.setComment(normalizeComment(request.getComment()));
 
-        List<String> imageKeys = validateReviewImageKeys(request.getImageKeys(), customer.getUserInfo().getId());
-        review.setImageKeys(new ArrayList<>(imageKeys));
+        if (request.getImageKeys() != null) {
+            List<String> imageKeys = validateReviewImageKeys(request.getImageKeys(), customer.getUserInfo().getId());
+            review.setImageKeys(new ArrayList<>(imageKeys));
+        }
 
-        String videoKey = validateReviewVideoKey(request.getVideoKey(), customer.getUserInfo().getId());
-        review.setVideoKey(videoKey);
+        if (request.getVideoKey() != null) {
+            String videoKey = validateReviewVideoKey(request.getVideoKey(), customer.getUserInfo().getId());
+            review.setVideoKey(videoKey);
+        }
 
         ProductReview updatedReview = productReviewRepository.save(review);
         return toReviewItemResponse(updatedReview, customer.getUserInfo().getId());
