@@ -26,6 +26,7 @@ public class HostResourceMetricsProvider {
             long freeRam = osBean.getFreeMemorySize();
             long usedRam = Math.max(0, totalRam - freeRam);
             double cpuLoad = osBean.getCpuLoad();
+            int cpuCores = osBean.getAvailableProcessors();
 
             Path applicationPath = Path.of("").toAbsolutePath().normalize();
             FileStore fileStore = Files.getFileStore(applicationPath);
@@ -36,6 +37,7 @@ public class HostResourceMetricsProvider {
             return new HostResourceSnapshot(
                     true,
                     cpuLoad >= 0 ? roundTwoDecimals(cpuLoad * 100) : null,
+                    cpuCores,
                     percent(usedRam, totalRam),
                     percent(usedDisk, totalDisk),
                     usedRam,
@@ -49,7 +51,7 @@ public class HostResourceMetricsProvider {
         } catch (Exception exception) {
             log.warn("Unable to read host resource metrics", exception);
             return new HostResourceSnapshot(
-                    false, null, null, null, null, null, null, null, null,
+                    false, null, null, null, null, null, null, null, null, null,
                     generatedAt,
                     "Khong the doc tai nguyen may chu tai thoi diem nay."
             );
@@ -67,6 +69,7 @@ public class HostResourceMetricsProvider {
     public record HostResourceSnapshot(
             boolean available,
             Double cpuUsagePercent,
+            Integer cpuCoreCount,
             Double ramUsagePercent,
             Double diskUsagePercent,
             Long ramUsedBytes,

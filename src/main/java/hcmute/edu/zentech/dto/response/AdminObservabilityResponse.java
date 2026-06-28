@@ -29,8 +29,13 @@ public class AdminObservabilityResponse {
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
     public static class HealthOverview {
         private Double cpuUsagePercent;
+        private Long cpuCoreCount;
         private Double ramUsagePercent;
+        private Long ramUsedBytes;
+        private Long ramTotalBytes;
         private Double diskUsagePercent;
+        private Long diskUsedBytes;
+        private Long diskTotalBytes;
         private Double jvmHeapUsagePercent;
         private Long jvmHeapUsedBytes;
         private Long jvmHeapMaxBytes;
