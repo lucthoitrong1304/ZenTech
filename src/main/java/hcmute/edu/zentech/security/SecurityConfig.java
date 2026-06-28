@@ -101,8 +101,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/management/inventory/**").hasAuthority("INVENTORY_UPDATE")
                         .requestMatchers(HttpMethod.GET, "/api/management/customers/**").hasAuthority("CUSTOMER_VIEW")
                         .requestMatchers("/api/management/customers/**").hasAuthority("CUSTOMER_UPDATE")
-                        .requestMatchers(HttpMethod.GET, "/api/management/leave-types/**").hasAnyRole("OWNER", "ADMIN")
-                        .requestMatchers("/api/management/leave-types/**").hasAnyRole("OWNER", "ADMIN")
+                        .requestMatchers("/api/management/leave-types/**").hasAuthority("EMPLOYEE_UPDATE")
                         .requestMatchers(HttpMethod.GET, "/api/management/employees/**").hasAuthority("EMPLOYEE_VIEW")
                         .requestMatchers(HttpMethod.POST, "/api/management/employees/**").hasAuthority("EMPLOYEE_CREATE")
                         .requestMatchers(HttpMethod.PATCH, "/api/management/employees/**").hasAuthority("EMPLOYEE_UPDATE")
@@ -127,8 +126,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/management/ai/**").hasAuthority("AI_CREATE")
                         .requestMatchers(HttpMethod.PATCH, "/api/management/ai/**").hasAuthority("AI_UPDATE")
                         .requestMatchers(HttpMethod.DELETE, "/api/management/ai/**").hasAuthority("AI_DELETE")
-                        .requestMatchers(HttpMethod.GET, "/api/shifts/**", "/api/attendance/report").hasAuthority("SCHEDULE_VIEW")
+                        .requestMatchers(HttpMethod.GET, "/api/shifts/**", "/api/attendance/report", "/api/attendance/location-policy").hasAuthority("SCHEDULE_VIEW")
                         .requestMatchers("/api/shifts/**").hasAuthority("SCHEDULE_UPDATE")
+                        .requestMatchers(HttpMethod.PUT, "/api/attendance/location-policy").hasAuthority("SCHEDULE_UPDATE")
                         .requestMatchers(HttpMethod.GET, "/api/management/leaves/**", "/api/management/attendance/adjustments/**", "/api/management/schedules/swaps/**").hasAuthority("APPROVAL_VIEW")
                         .requestMatchers("/api/management/leaves/**", "/api/management/attendance/adjustments/**", "/api/management/schedules/swaps/**").hasAuthority("APPROVAL_APPROVE")
                         .requestMatchers(HttpMethod.GET, "/api/management/pay-periods/**").hasAuthority("PAY_PERIOD_VIEW")
@@ -138,7 +138,6 @@ public class SecurityConfig {
                                 "ORDER_VIEW",
                                 "CUSTOMER_VIEW"
                         )
-                        .requestMatchers("/api/attendance/location-policy").hasAnyRole("OWNER", "MANAGER", "ADMIN")
 
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
@@ -173,4 +172,3 @@ public class SecurityConfig {
                 .toList();
     }
 }
-

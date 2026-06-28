@@ -44,10 +44,10 @@ public enum PermissionCode {
     CHAT_VIEW("CHAT", "Tư vấn khách hàng", "VIEW", "Xem hội thoại và ticket hỗ trợ"),
     CHAT_UPDATE("CHAT", "Tư vấn khách hàng", "UPDATE", "Tiếp nhận, chuyển và xử lý hội thoại"),
 
-    AI_VIEW("AI_MANAGEMENT", "Quản lý AI", "VIEW", "Xem agent, dataset và tài liệu AI"),
-    AI_CREATE("AI_MANAGEMENT", "Quản lý AI", "CREATE", "Tạo agent, dataset và tài liệu AI"),
-    AI_UPDATE("AI_MANAGEMENT", "Quản lý AI", "UPDATE", "Cập nhật cấu hình AI"),
-    AI_DELETE("AI_MANAGEMENT", "Quản lý AI", "DELETE", "Xóa agent, dataset và tài liệu AI"),
+    AI_VIEW("AI_MANAGEMENT", "Quản lý AI", "VIEW", "Xem dataset, tài liệu AI và trạng thái đồng bộ sản phẩm"),
+    AI_CREATE("AI_MANAGEMENT", "Quản lý AI", "CREATE", "Tạo dataset và upload tài liệu AI"),
+    AI_UPDATE("AI_MANAGEMENT", "Quản lý AI", "UPDATE", "Cập nhật dataset, reingest tài liệu, sync/verify dữ liệu AI"),
+    AI_DELETE("AI_MANAGEMENT", "Quản lý AI", "DELETE", "Xóa dataset hoặc tài liệu AI"),
 
     PAY_PERIOD_VIEW("PAY_PERIODS", "Kỳ công", "VIEW", "Xem kỳ công"),
     PAY_PERIOD_UPDATE("PAY_PERIODS", "Kỳ công", "UPDATE", "Tạo, khóa và mở kỳ công");
