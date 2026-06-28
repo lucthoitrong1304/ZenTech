@@ -62,6 +62,8 @@ public class BusinessImpactManagementService {
         int expectedOrders = 0;
         double expectedRevenue = 0.0;
         int affectedUsers = 0;
+        long checkoutAttempts = 0;
+        double attemptedRevenue = 0.0;
 
         // Kịch bản MoMo gateway error 30 phút - Demo Protection
         boolean isMomoDemo = (incident.getApiPath() != null && incident.getApiPath().contains("/payments/momo/ipn"))
@@ -94,8 +96,15 @@ public class BusinessImpactManagementService {
             actualOrders = orders.size();
             actualRevenue = orders.stream().mapToDouble(Order::getFinalPrice).sum();
 
-            // 2. Tính số lượng affected users từ business_events
-            long affectedCount = businessEventRepository.countAffectedUsersBetween(eventStart, end);
+            // 2. Uu tien bang chung checkout thuc te trong cua so su co.
+            checkoutAttempts = businessEventRepository.countByEventTypeAndCreatedAtBetween(
+                    BusinessEventType.CHECKOUT_START, eventStart, end);
+            attemptedRevenue = businessEventRepository.sumAmountByEventTypeAndCreatedAtBetween(
+                    BusinessEventType.CHECKOUT_START, eventStart, end);
+
+            // 3. Tinh affected users tu CHECKOUT_START, khong dem lan cac event khong lien quan.
+            long affectedCount = businessEventRepository.countAffectedUsersByEventTypeBetween(
+                    BusinessEventType.CHECKOUT_START, eventStart, end);
             if (affectedCount == 0) {
                 // fallback to distinct traceIds of occurrences of this incident
                 try {
@@ -106,6 +115,7 @@ public class BusinessImpactManagementService {
                 }
             }
             affectedUsers = (int) affectedCount;
+            boolean hasDirectBusinessEvidence = affectedUsers > 0 || checkoutAttempts > 0 || attemptedRevenue > 0;
 
             // 3. Tính expected baseline (lấy trùng khung giờ của 3 ngày trước)
             double totalHistoricalRevenue = 0.0;
@@ -123,15 +133,14 @@ public class BusinessImpactManagementService {
                 }
             }
 
-            if (daysWithData > 0) {
+            if (daysWithData > 0 && hasDirectBusinessEvidence) {
                 expectedOrders = totalHistoricalOrders / daysWithData;
                 expectedRevenue = totalHistoricalRevenue / daysWithData;
-            } else {
+            } else if (affectedUsers > 0) {
                 // Fallback nếu chưa có dữ liệu lịch sử (active users * conversion rate * AOV)
                 double conversionRate = 0.05; // 5% conversion rate
                 double aov = 500000.0; // 500k AOV
                 expectedOrders = (int) Math.round(affectedUsers * conversionRate);
-                if (expectedOrders < 1) expectedOrders = 1;
                 expectedRevenue = expectedOrders * aov;
             }
         }
@@ -140,14 +149,10 @@ public class BusinessImpactManagementService {
             // Dùng cùng eventStart (đã hiệu chỉnh ở trên) để bắt CHECKOUT_START xảy ra trước incident
 
             // Mỗi CHECKOUT_START = 1 lần cố đặt hàng thực tế → dùng làm minimum cho expectedOrders
-            long checkoutAttempts = businessEventRepository.countByEventTypeAndCreatedAtBetween(
-                    BusinessEventType.CHECKOUT_START, eventStart, end);
             if (checkoutAttempts > 0) {
                 expectedOrders = Math.max(expectedOrders, actualOrders + (int) checkoutAttempts);
             }
 
-            double attemptedRevenue = businessEventRepository.sumAmountByEventTypeAndCreatedAtBetween(
-                    BusinessEventType.CHECKOUT_START, eventStart, end);
             if (attemptedRevenue > 0) {
                 expectedRevenue = Math.max(expectedRevenue, actualRevenue + attemptedRevenue);
             }
