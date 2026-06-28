@@ -24,6 +24,8 @@ public class ProductReviewItemResponse {
     private UUID customerId;
     private String customerName;
     private Boolean isOwner;
+    private List<String> imageKeys;
+    private String videoKey;
     private List<String> imageUrls;
     private String videoUrl;
 }
