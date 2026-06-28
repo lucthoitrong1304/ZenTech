@@ -32,7 +32,7 @@ public class LokiService {
     // Regex để bóc tách level (INFO/WARN/ERROR/DEBUG) trong câu log
     private static final Pattern LEVEL_PATTERN = Pattern.compile("\\b(INFO|WARN|ERROR|DEBUG)\\b");
     // Regex để bóc tách traceId dạng ZT-xxxxxxx
-    private static final Pattern TRACE_ID_PATTERN = Pattern.compile("(?<=\\[|\\s|^)(ZT-[A-Fa-f0-9a-zA-Z]{8})(?=\\]|\\s|$)");
+    private static final Pattern TRACE_ID_PATTERN = Pattern.compile("(?<=\\[|\\s|^)(ZT-(?:FE-)?[A-Fa-f0-9a-zA-Z]{8})(?=\\]|\\s|$)");
 
     public List<Map<String, Object>> queryLogs(String level, String search, String traceId, int limit) {
         return queryLogs(level, search, traceId, limit, null, null);
