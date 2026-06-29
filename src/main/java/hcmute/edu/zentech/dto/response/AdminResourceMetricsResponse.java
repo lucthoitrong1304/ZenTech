@@ -17,6 +17,7 @@ public class AdminResourceMetricsResponse {
     private String source;
     private boolean historyAvailable;
     private Double cpuUsagePercent;
+    private Long cpuCoreCount;
     private Double ramUsagePercent;
     private Double diskUsagePercent;
     private Long ramUsedBytes;

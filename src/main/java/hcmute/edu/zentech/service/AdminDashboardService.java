@@ -146,17 +146,71 @@ public class AdminDashboardService {
         );
         boolean hasHistory = historyResult.available() && !historyResult.history().isEmpty();
 
+        Double cpuUsagePercent = snapshot.cpuUsagePercent();
+        Long cpuCoreCount = snapshot.cpuCoreCount() != null ? snapshot.cpuCoreCount().longValue() : null;
+        Double ramUsagePercent = snapshot.ramUsagePercent();
+        Double diskUsagePercent = snapshot.diskUsagePercent();
+        Long ramUsedBytes = snapshot.ramUsedBytes();
+        Long ramTotalBytes = snapshot.ramTotalBytes();
+        Long diskUsedBytes = snapshot.diskUsedBytes();
+        Long diskTotalBytes = snapshot.diskTotalBytes();
+        boolean hasPrometheusCurrent = false;
+
+        if (prometheusQueryService.isReady()) {
+            Double prometheusCpu = prometheusQueryService.queryScalar("zentech_host_cpu_usage_percent");
+            if (prometheusCpu != null) {
+                cpuUsagePercent = prometheusCpu;
+                hasPrometheusCurrent = true;
+            }
+            Double prometheusCores = prometheusQueryService.queryScalar("zentech_host_cpu_cores");
+            if (prometheusCores != null) {
+                cpuCoreCount = prometheusCores.longValue();
+                hasPrometheusCurrent = true;
+            }
+            Double prometheusRam = prometheusQueryService.queryScalar("zentech_host_ram_usage_percent");
+            if (prometheusRam != null) {
+                ramUsagePercent = prometheusRam;
+                hasPrometheusCurrent = true;
+            }
+            Double prometheusDisk = prometheusQueryService.queryScalar("zentech_host_disk_usage_percent");
+            if (prometheusDisk != null) {
+                diskUsagePercent = prometheusDisk;
+                hasPrometheusCurrent = true;
+            }
+            Double prometheusRamUsed = prometheusQueryService.queryScalar("zentech_host_ram_used_bytes");
+            if (prometheusRamUsed != null) {
+                ramUsedBytes = prometheusRamUsed.longValue();
+                hasPrometheusCurrent = true;
+            }
+            Double prometheusRamTotal = prometheusQueryService.queryScalar("zentech_host_ram_total_bytes");
+            if (prometheusRamTotal != null) {
+                ramTotalBytes = prometheusRamTotal.longValue();
+                hasPrometheusCurrent = true;
+            }
+            Double prometheusDiskUsed = prometheusQueryService.queryScalar("zentech_host_disk_used_bytes");
+            if (prometheusDiskUsed != null) {
+                diskUsedBytes = prometheusDiskUsed.longValue();
+                hasPrometheusCurrent = true;
+            }
+            Double prometheusDiskTotal = prometheusQueryService.queryScalar("zentech_host_disk_total_bytes");
+            if (prometheusDiskTotal != null) {
+                diskTotalBytes = prometheusDiskTotal.longValue();
+                hasPrometheusCurrent = true;
+            }
+        }
+
         return AdminResourceMetricsResponse.builder()
-                .status(snapshot.available() ? "AVAILABLE" : "UNAVAILABLE")
-                .source(hasHistory ? "PROMETHEUS" : "DIRECT")
+                .status(snapshot.available() || hasPrometheusCurrent ? "AVAILABLE" : "UNAVAILABLE")
+                .source(hasHistory || hasPrometheusCurrent ? "PROMETHEUS" : "DIRECT")
                 .historyAvailable(hasHistory)
-                .cpuUsagePercent(snapshot.cpuUsagePercent())
-                .ramUsagePercent(snapshot.ramUsagePercent())
-                .diskUsagePercent(snapshot.diskUsagePercent())
-                .ramUsedBytes(snapshot.ramUsedBytes())
-                .ramTotalBytes(snapshot.ramTotalBytes())
-                .diskUsedBytes(snapshot.diskUsedBytes())
-                .diskTotalBytes(snapshot.diskTotalBytes())
+                .cpuUsagePercent(cpuUsagePercent)
+                .cpuCoreCount(cpuCoreCount)
+                .ramUsagePercent(ramUsagePercent)
+                .diskUsagePercent(diskUsagePercent)
+                .ramUsedBytes(ramUsedBytes)
+                .ramTotalBytes(ramTotalBytes)
+                .diskUsedBytes(diskUsedBytes)
+                .diskTotalBytes(diskTotalBytes)
                 .diskPath(snapshot.diskPath())
                 .generatedAt(snapshot.generatedAt())
                 .message(snapshot.message())
