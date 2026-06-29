@@ -32,8 +32,10 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -57,7 +59,12 @@ public class ChatBotService {
     private final ObjectMapper objectMapper;
 
     @Async
-    public void handleCustomerMessage(UUID conversationId, ChatMessageResponse message) {
+    public void handleCustomerMessage(
+            UUID conversationId,
+            ChatMessageResponse message,
+            Map<String, Object> pageContext,
+            UUID accountId
+    ) {
         log.info("Starting async handleCustomerMessage for conversation: {}, messageId: {}", conversationId, message.getId());
         String customerContent = normalizeContent(message.getContent());
         List<AiAgentRuntimeRequest.Attachment> attachments = buildAnalyzableAttachments(message);
@@ -115,7 +122,7 @@ public class ChatBotService {
                 prompt,
                 history,
                 attachments,
-                java.util.Map.of("conversationId", conversationId.toString())
+                buildBusinessContext(conversationId, role, accountId, pageContext)
         );
 
         if (streamResponseOpt.isEmpty()) {
@@ -277,12 +284,67 @@ public class ChatBotService {
                     customerContent,
                     history,
                     attachments,
-                    java.util.Map.of("conversationId", conversationId.toString())
+                    buildBusinessContext(conversationId, role, null, null)
             );
         } catch (Exception ex) {
             log.warn("AI service failed for conversation {}", conversationId, ex);
             return Optional.empty();
         }
+    }
+
+    private Map<String, Object> buildBusinessContext(
+            UUID conversationId,
+            Role role,
+            UUID accountId,
+            Map<String, Object> pageContext
+    ) {
+        Map<String, Object> context = new HashMap<>();
+        context.put("conversationId", conversationId.toString());
+        context.put("role", role == null ? Role.CUSTOMER.name() : role.name());
+        context.put("userId", accountId == null ? "" : accountId.toString());
+        context.put("generatedAt", Instant.now().toString());
+
+        Map<String, Object> safePageContext = sanitizePageContext(pageContext);
+        if (!safePageContext.isEmpty()) {
+            context.put("pageContext", safePageContext);
+            copyIfPresent(safePageContext, context, "currentProductId");
+            copyIfPresent(safePageContext, context, "productName");
+            copyIfPresent(safePageContext, context, "route");
+        }
+        return context;
+    }
+
+    private Map<String, Object> sanitizePageContext(Map<String, Object> pageContext) {
+        if (pageContext == null || pageContext.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, Object> safe = new HashMap<>();
+        copyString(pageContext, safe, "route", 200);
+        copyString(pageContext, safe, "currentProductId", 80);
+        copyString(pageContext, safe, "productName", 200);
+        copyString(pageContext, safe, "productSlug", 200);
+        copyString(pageContext, safe, "selectedVariantId", 80);
+        return safe;
+    }
+
+    private void copyIfPresent(Map<String, Object> source, Map<String, Object> target, String key) {
+        Object value = source.get(key);
+        if (value != null) {
+            target.put(key, value);
+        }
+    }
+
+    private void copyString(Map<String, Object> source, Map<String, Object> target, String key, int maxLength) {
+        Object value = source.get(key);
+        if (!(value instanceof String raw)) {
+            return;
+        }
+        String normalized = normalizeContent(raw);
+        if (normalized == null) {
+            return;
+        }
+        target.put(key, normalized.length() > maxLength ? normalized.substring(0, maxLength) : normalized);
     }
 
     private Role determineRole(ParticipantType participantType) {

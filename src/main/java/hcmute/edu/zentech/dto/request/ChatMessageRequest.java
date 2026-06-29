@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
+import java.util.Map;
 
 @Getter
 @Setter
@@ -22,4 +23,6 @@ public class ChatMessageRequest {
 
     @Size(max = 10, message = "attachments must not exceed 10 files")
     private List<@NotNull(message = "attachment is required") @Valid ChatAttachmentRequest> attachments;
+
+    private Map<String, Object> pageContext;
 }
