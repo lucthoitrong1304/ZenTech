@@ -7,10 +7,14 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
 public interface OrderDetailRepository extends JpaRepository<OrderDetail, UUID> {
     @EntityGraph(attributePaths = {"order", "productVariant", "productVariant.product"})
     List<OrderDetail> findByOrder_IdIn(Collection<UUID> orderIds);
+
+    @EntityGraph(attributePaths = {"order", "productVariant", "productVariant.product"})
+    Optional<OrderDetail> findByIdAndOrder_Customer_Id(UUID orderDetailId, UUID customerId);
 }

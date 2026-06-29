@@ -3,6 +3,7 @@ import hcmute.edu.zentech.dto.response.ProductDetailResponse;
 import hcmute.edu.zentech.dto.response.ProductGroupItemResponse;
 import hcmute.edu.zentech.dto.response.CategoryProductListItemResponse;
 import hcmute.edu.zentech.service.ProductService;
+import hcmute.edu.zentech.service.R2StorageService;
 
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.model.*;
@@ -14,6 +15,8 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -35,6 +38,9 @@ public class InternalAiController {
     private final OrderDetailRepository orderDetailRepository;
     private final CustomerRepository customerRepository;
     private final CustomerVoucherRepository customerVoucherRepository;
+    private final ProductReviewRepository productReviewRepository;
+    private final ReturnRequestRepository returnRequestRepository;
+    private final R2StorageService r2StorageService;
     private final ProductService productService;
 
     @Value("${app.ai.internal-token:zentech_internal_secret_token_123!@}")
@@ -51,13 +57,23 @@ public class InternalAiController {
         if (context == null) {
             throw new IllegalArgumentException("Context is required");
         }
-        String userIdStr = (String) context.get("userId");
+        Object userIdValue = context.get("userId");
+        String userIdStr = userIdValue == null ? null : String.valueOf(userIdValue);
         if (userIdStr == null || userIdStr.isBlank()) {
             throw new IllegalArgumentException("Context userId is required");
         }
         UUID accountId = UUID.fromString(userIdStr);
         return customerRepository.findByUserInfo_Id(accountId)
                 .orElseThrow(() -> new NoSuchElementException("Customer not found for account " + accountId));
+    }
+
+    private Customer resolveCustomerForPath(UUID requestedUserId, Map<String, Object> context) {
+        Customer customer = resolveCustomer(context);
+        String contextUserId = String.valueOf(context.get("userId"));
+        if (!requestedUserId.equals(UUID.fromString(contextUserId))) {
+            throw new SecurityException("Requested customer does not match authenticated AI context");
+        }
+        return customer;
     }
 
     @PostMapping("/products/resolve")
@@ -218,6 +234,57 @@ public class InternalAiController {
                 .orElse(null);
     }
 
+    @GetMapping("/products/{productId}/reviews")
+    public ResponseEntity<ApiResponse<List<ProductReviewDto>>> getProductReviews(
+            @RequestHeader(value = "X-Internal-Token", required = false) String token,
+            @PathVariable UUID productId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "5") int size
+    ) {
+        verifyToken(token);
+        if (!productRepository.existsByIdAndDeletedFalse(productId)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.<List<ProductReviewDto>>builder().success(false).message("Product not found").build());
+        }
+
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.max(1, Math.min(size, 10));
+        PageRequest pageRequest = PageRequest.of(
+                safePage,
+                safeSize,
+                Sort.by(Sort.Direction.DESC, "createdAt", "id")
+        );
+
+        List<ProductReviewDto> reviews = productReviewRepository.findByProduct_Id(productId, pageRequest)
+                .getContent()
+                .stream()
+                .map(this::mapToProductReviewDto)
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(reviews));
+    }
+
+    private ProductReviewDto mapToProductReviewDto(ProductReview review) {
+        List<String> imageUrls = review.getImageKeys() == null ? List.of() : review.getImageKeys().stream()
+                .map(r2StorageService::getPresignedGetUrl)
+                .filter(Objects::nonNull)
+                .toList();
+
+        String videoUrl = review.getVideoKey() == null || review.getVideoKey().isBlank()
+                ? null
+                : r2StorageService.getPresignedGetUrl(review.getVideoKey());
+
+        return ProductReviewDto.builder()
+                .reviewId(review.getId())
+                .rating(review.getRating())
+                .comment(review.getComment())
+                .customerName(review.getCustomer() != null ? review.getCustomer().getFullName() : null)
+                .createdAt(review.getCreatedAt())
+                .imageUrls(imageUrls)
+                .videoUrl(videoUrl)
+                .build();
+    }
+
     @PostMapping("/orders/resolve")
     public ResponseEntity<ApiResponse<Object>> resolveOrders(
             @RequestHeader(value = "X-Internal-Token", required = false) String token,
@@ -237,7 +304,8 @@ public class InternalAiController {
             return ResponseEntity.ok(ApiResponse.success(mapToOrderDetailsDto(orderOpt.get())));
         } else {
             // Return recent orders of the customer
-            List<Order> orders = orderRepository.findByCustomerId(customer.getId(), org.springframework.data.domain.Pageable.unpaged()).getContent();
+            PageRequest pageRequest = PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt"));
+            List<Order> orders = orderRepository.findByCustomerId(customer.getId(), pageRequest).getContent();
             List<OrderSummaryDto> summaries = orders.stream().map(this::mapToOrderSummaryDto).toList();
             return ResponseEntity.ok(ApiResponse.success(summaries));
         }
@@ -251,10 +319,29 @@ public class InternalAiController {
                 .paymentMethod(order.getPaymentMethod().name())
                 .paymentStatus(order.getPaymentStatus().name())
                 .orderStatus(order.getOrderStatus().name())
+                .items(mapToOrderItemDtos(order))
+                .coupons(mapToOrderCouponDtos(order))
                 .build();
     }
 
     private OrderDetailsDto mapToOrderDetailsDto(Order order) {
+        return OrderDetailsDto.builder()
+                .orderId(order.getId())
+                .createdAt(order.getCreatedAt())
+                .originalTotalPrice(BigDecimal.valueOf(order.getOriginalTotalPrice()))
+                .discountAmount(BigDecimal.valueOf(order.getDiscountAmount()))
+                .shippingFee(BigDecimal.valueOf(order.getShippingFee()))
+                .finalPrice(BigDecimal.valueOf(order.getFinalPrice()))
+                .paymentMethod(order.getPaymentMethod().name())
+                .paymentStatus(order.getPaymentStatus().name())
+                .orderStatus(order.getOrderStatus().name())
+                .shippingAddress(order.getAddress() != null ? order.getAddress().getStreet() + ", " + order.getAddress().getWard() + ", " + order.getAddress().getProvince() : null)
+                .items(mapToOrderItemDtos(order))
+                .coupons(mapToOrderCouponDtos(order))
+                .build();
+    }
+
+    private List<OrderItemDto> mapToOrderItemDtos(Order order) {
         List<OrderItemDto> items = new ArrayList<>();
         if (order.getOrderItems() != null) {
             for (OrderDetail item : order.getOrderItems()) {
@@ -267,20 +354,23 @@ public class InternalAiController {
                         .build());
             }
         }
+        return items;
+    }
 
-        return OrderDetailsDto.builder()
-                .orderId(order.getId())
-                .createdAt(order.getCreatedAt())
-                .originalTotalPrice(BigDecimal.valueOf(order.getOriginalTotalPrice()))
-                .discountAmount(BigDecimal.valueOf(order.getDiscountAmount()))
-                .shippingFee(BigDecimal.valueOf(order.getShippingFee()))
-                .finalPrice(BigDecimal.valueOf(order.getFinalPrice()))
-                .paymentMethod(order.getPaymentMethod().name())
-                .paymentStatus(order.getPaymentStatus().name())
-                .orderStatus(order.getOrderStatus().name())
-                .shippingAddress(order.getAddress() != null ? order.getAddress().getStreet() + ", " + order.getAddress().getWard() + ", " + order.getAddress().getProvince() : null)
-                .items(items)
-                .build();
+    private List<OrderCouponDto> mapToOrderCouponDtos(Order order) {
+        if (order.getOrderCoupons() == null) {
+            return List.of();
+        }
+
+        return order.getOrderCoupons().stream()
+                .map(coupon -> OrderCouponDto.builder()
+                        .couponCode(coupon.getCouponCode())
+                        .couponType(coupon.getCouponType() != null ? coupon.getCouponType().name() : null)
+                        .discountValue(coupon.getDiscountValue() == null ? null : BigDecimal.valueOf(coupon.getDiscountValue()))
+                        .maxDiscount(coupon.getMaxDiscount() == null ? null : BigDecimal.valueOf(coupon.getMaxDiscount()))
+                        .appliedAmount(coupon.getAppliedAmount() == null ? null : BigDecimal.valueOf(coupon.getAppliedAmount()))
+                        .build())
+                .toList();
     }
 
     @GetMapping("/customers/{userId}/profile")
@@ -290,6 +380,7 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
+        resolveCustomerForPath(userId, context);
         Customer customer = customerRepository.findDetailByUserInfo_Id(userId)
                 .orElseThrow(() -> new NoSuchElementException("Customer profile not found"));
         
@@ -298,8 +389,39 @@ public class InternalAiController {
                 .fullName(customer.getFullName())
                 .email(customer.getUserInfo().getEmail())
                 .imageUrl(customer.getImageUrl())
+                .registeredAt(customer.getUserInfo().getCreatedAt())
                 .build();
         return ResponseEntity.ok(ApiResponse.success(dto));
+    }
+
+    @GetMapping("/customers/{userId}/addresses")
+    public ResponseEntity<ApiResponse<List<AddressDto>>> getCustomerAddresses(
+            @RequestHeader(value = "X-Internal-Token", required = false) String token,
+            @PathVariable UUID userId,
+            @RequestParam Map<String, Object> context
+    ) {
+        verifyToken(token);
+        resolveCustomerForPath(userId, context);
+        Customer customer = customerRepository.findDetailByUserInfo_Id(userId)
+                .orElseThrow(() -> new NoSuchElementException("Customer profile not found"));
+
+        List<AddressDto> addresses = customer.getAddressList() == null ? List.of() : customer.getAddressList().stream()
+                .filter(address -> !address.isDeleted())
+                .sorted(Comparator.comparing(Address::isDefault).reversed()
+                        .thenComparing(Address::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(address -> AddressDto.builder()
+                        .addressId(address.getId())
+                        .phoneNumber(address.getPhoneNumber())
+                        .province(address.getProvince())
+                        .ward(address.getWard())
+                        .street(address.getStreet())
+                        .isDefault(address.isDefault())
+                        .createdAt(address.getCreatedAt())
+                        .updatedAt(address.getUpdatedAt())
+                        .build())
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(addresses));
     }
 
     @GetMapping("/customers/{userId}/vouchers")
@@ -309,8 +431,7 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
-        Customer customer = customerRepository.findByUserInfo_Id(userId)
-                .orElseThrow(() -> new NoSuchElementException("Customer not found"));
+        Customer customer = resolveCustomerForPath(userId, context);
 
         List<CustomerVoucher> vouchers = customerVoucherRepository.findAvailableByCustomerId(
                 customer.getId(), Instant.now(), org.springframework.data.domain.Pageable.unpaged()
@@ -327,7 +448,15 @@ public class InternalAiController {
                     .discountValue(BigDecimal.valueOf(coupon.getDiscountValue()))
                     .couponType(coupon.getType() != null ? coupon.getType().name() : "PERCENTAGE")
                     .description(desc)
+                    .maxDiscount(BigDecimal.valueOf(coupon.getMaxDiscount()))
+                    .minOrderAmount(BigDecimal.valueOf(coupon.getMinOrderAmount()))
+                    .startAt(coupon.getStartAt())
                     .endAt(coupon.getEndAt())
+                    .issuedAt(cv.getIssuedAt())
+                    .usedAt(cv.getUsedAt())
+                    .active(coupon.isActive())
+                    .usageLimit(coupon.getUsageLimit())
+                    .usedCount(coupon.getUsedCount())
                     .build();
         }).toList();
 
@@ -341,8 +470,7 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
-        Customer customer = customerRepository.findByUserInfo_Id(userId)
-                .orElseThrow(() -> new NoSuchElementException("Customer not found"));
+        Customer customer = resolveCustomerForPath(userId, context);
 
         // Simulate loyalty points for the demo since points are not mapped in DB
         LoyaltyPointsDto dto = LoyaltyPointsDto.builder()
@@ -363,7 +491,8 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
-        Order order = orderRepository.findById(orderId)
+        Customer customer = resolveCustomer(context);
+        Order order = orderRepository.findByIdAndCustomer_Id(orderId, customer.getId())
                 .orElseThrow(() -> new NoSuchElementException("Order not found"));
 
         List<TrackingEventDto> events = new ArrayList<>();
@@ -406,7 +535,8 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
-        OrderDetail item = orderDetailRepository.findById(orderItemId)
+        Customer customer = resolveCustomer(context);
+        OrderDetail item = orderDetailRepository.findByIdAndOrder_Customer_Id(orderItemId, customer.getId())
                 .orElseThrow(() -> new NoSuchElementException("Order item not found"));
 
         Instant purchaseDate = item.getOrder().getCreatedAt();
@@ -424,6 +554,31 @@ public class InternalAiController {
                 .build();
 
         return ResponseEntity.ok(ApiResponse.success(dto));
+    }
+
+    @GetMapping("/customers/{userId}/returns")
+    public ResponseEntity<ApiResponse<List<ReturnRequestDto>>> getCustomerReturns(
+            @RequestHeader(value = "X-Internal-Token", required = false) String token,
+            @PathVariable UUID userId,
+            @RequestParam Map<String, Object> context
+    ) {
+        verifyToken(token);
+        Customer customer = resolveCustomerForPath(userId, context);
+
+        List<ReturnRequestDto> returns = returnRequestRepository.findByOrder_Customer_IdOrderByCreatedAtDesc(customer.getId())
+                .stream()
+                .map(request -> ReturnRequestDto.builder()
+                        .returnRequestId(request.getId())
+                        .orderId(request.getOrder() != null ? request.getOrder().getId() : null)
+                        .reason(request.getReason())
+                        .details(request.getDetails())
+                        .status(request.getStatus() != null ? request.getStatus().name() : null)
+                        .resellable(request.isResellable())
+                        .createdAt(request.getCreatedAt())
+                        .build())
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(returns));
     }
 
     // DTO Definitions
@@ -478,6 +633,18 @@ public class InternalAiController {
 
     @Data
     @Builder
+    public static class ProductReviewDto {
+        private UUID reviewId;
+        private Integer rating;
+        private String comment;
+        private String customerName;
+        private Instant createdAt;
+        private List<String> imageUrls;
+        private String videoUrl;
+    }
+
+    @Data
+    @Builder
     public static class OrderSummaryDto {
         private UUID orderId;
         private Instant createdAt;
@@ -485,6 +652,8 @@ public class InternalAiController {
         private String paymentMethod;
         private String paymentStatus;
         private String orderStatus;
+        private List<OrderItemDto> items;
+        private List<OrderCouponDto> coupons;
     }
 
     @Data
@@ -501,6 +670,7 @@ public class InternalAiController {
         private String orderStatus;
         private String shippingAddress;
         private List<OrderItemDto> items;
+        private List<OrderCouponDto> coupons;
     }
 
     @Data
@@ -515,11 +685,35 @@ public class InternalAiController {
 
     @Data
     @Builder
+    public static class OrderCouponDto {
+        private String couponCode;
+        private String couponType;
+        private BigDecimal discountValue;
+        private BigDecimal maxDiscount;
+        private BigDecimal appliedAmount;
+    }
+
+    @Data
+    @Builder
     public static class CustomerProfileDto {
         private UUID customerId;
         private String fullName;
         private String email;
         private String imageUrl;
+        private Instant registeredAt;
+    }
+
+    @Data
+    @Builder
+    public static class AddressDto {
+        private UUID addressId;
+        private String phoneNumber;
+        private String province;
+        private String ward;
+        private String street;
+        private boolean isDefault;
+        private Instant createdAt;
+        private Instant updatedAt;
     }
 
     @Data
@@ -530,7 +724,15 @@ public class InternalAiController {
         private BigDecimal discountValue;
         private String couponType;
         private String description;
+        private BigDecimal maxDiscount;
+        private BigDecimal minOrderAmount;
+        private Instant startAt;
         private Instant endAt;
+        private Instant issuedAt;
+        private Instant usedAt;
+        private boolean active;
+        private int usageLimit;
+        private int usedCount;
     }
 
     @Data
@@ -569,6 +771,18 @@ public class InternalAiController {
         private Instant purchaseDate;
         private Instant warrantyEndDate;
         private String status;
+    }
+
+    @Data
+    @Builder
+    public static class ReturnRequestDto {
+        private UUID returnRequestId;
+        private UUID orderId;
+        private String reason;
+        private String details;
+        private String status;
+        private boolean resellable;
+        private Instant createdAt;
     }
 
     @ExceptionHandler(SecurityException.class)

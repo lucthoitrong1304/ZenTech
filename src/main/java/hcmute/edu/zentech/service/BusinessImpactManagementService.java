@@ -7,6 +7,7 @@ import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -309,6 +310,7 @@ public class BusinessImpactManagementService {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
+            addTraceIdHeader(headers);
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(payload, headers);
 
             ResponseEntity<Map> response = restTemplate.postForEntity(analyzeUrl, entity, Map.class);
@@ -513,6 +515,14 @@ public class BusinessImpactManagementService {
         list.sort((o1, o2) -> o2.getLastEventAt().compareTo(o1.getLastEventAt()));
 
         return list;
+    }
+
+
+    private void addTraceIdHeader(HttpHeaders headers) {
+        String traceId = MDC.get("traceId");
+        if (traceId != null && !traceId.isBlank()) {
+            headers.set("X-Trace-Id", traceId.trim());
+        }
     }
 
     private String resolveImageUrl(String imageUrl) {

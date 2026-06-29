@@ -35,6 +35,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -137,7 +138,12 @@ public class ChatMessageService {
 
         if (persistedMessage.shouldTriggerBot()) {
             try {
-                chatBotService.handleCustomerMessage(conversationId, persistedMessage.message());
+                chatBotService.handleCustomerMessage(
+                        conversationId,
+                        persistedMessage.message(),
+                        persistedMessage.pageContext(),
+                        accountId
+                );
             } catch (RuntimeException ex) {
                 log.warn("Failed to trigger bot response for conversation {}", conversationId, ex);
             }
@@ -184,7 +190,7 @@ public class ChatMessageService {
         boolean shouldTriggerBot = savedConversation.getStatus() == ConversationStatus.BOT_CONSULTING
                 && participant.getUserType() == ParticipantType.CUSTOMER;
 
-        return new PersistedMessage(response, convResponse, participant.getId(), shouldTriggerBot);
+        return new PersistedMessage(response, convResponse, participant.getId(), shouldTriggerBot, request.getPageContext());
     }
 
     private void broadcastMessage(UUID conversationId, ChatMessageResponse response) {
@@ -226,7 +232,8 @@ public class ChatMessageService {
             ChatMessageResponse message,
             ConversationResponse conversation,
             UUID senderParticipantId,
-            boolean shouldTriggerBot
+            boolean shouldTriggerBot,
+            Map<String, Object> pageContext
     ) {
     }
 

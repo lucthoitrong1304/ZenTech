@@ -4,12 +4,16 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
 import java.io.RandomAccessFile;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -21,6 +25,9 @@ import java.util.regex.Pattern;
 public class AiLogTailer {
 
     private final SimpMessagingTemplate messagingTemplate;
+
+    @Value("${app.dashboard.zone-id:Asia/Ho_Chi_Minh}")
+    private String dashboardZoneId;
     private Thread tailerThread;
     private volatile boolean running = true;
 
@@ -28,6 +35,7 @@ public class AiLogTailer {
     private static final Pattern LOG_LINE_PATTERN = Pattern.compile(
             "^(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2},\\d{3})\\s+\\[(INFO|WARN|ERROR|DEBUG)\\]\\s+\\[([^\\]]+)\\]\\s+\\[([^\\]]*)\\]\\s+-\\s+(.*)$"
     );
+    private static final DateTimeFormatter AI_LOG_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss,SSS");
 
     @PostConstruct
     public void startTailing() {
@@ -98,6 +106,19 @@ public class AiLogTailer {
         }
     }
 
+    private Instant parseAiLogTimestamp(String rawTime) {
+        LocalDateTime localDateTime = LocalDateTime.parse(rawTime, AI_LOG_TIME_FORMATTER);
+        return localDateTime.atZone(resolveDashboardZone()).toInstant();
+    }
+
+    private ZoneId resolveDashboardZone() {
+        try {
+            return ZoneId.of(dashboardZoneId);
+        } catch (Exception ignored) {
+            return ZoneId.of("Asia/Ho_Chi_Minh");
+        }
+    }
+
     private void processLogLine(String rawLine) {
         if (rawLine == null || rawLine.trim().isEmpty()) {
             return;
@@ -112,10 +133,8 @@ public class AiLogTailer {
             String message = rawLine;
 
             if (matcher.matches()) {
-                String rawTime = matcher.group(1).replace(",", "."); // format to match ISO parse
                 try {
-                    String isoTime = rawTime.replace(" ", "T") + "Z";
-                    timestampStr = Instant.parse(isoTime).toString();
+                    timestampStr = parseAiLogTimestamp(matcher.group(1)).toString();
                 } catch (Exception ignored) {
                     timestampStr = Instant.now().toString();
                 }

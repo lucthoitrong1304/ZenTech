@@ -759,6 +759,7 @@ public class AdminIncidentService {
         try {
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+            addTraceIdHeader(headers);
             org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(payload, headers);
 
             ResponseEntity<Map> response = restTemplate.postForEntity(analyzeUrl, entity, Map.class);
@@ -797,6 +798,14 @@ public class AdminIncidentService {
         }
 
         throw new RuntimeException("Phản hồi từ AI Service không hợp lệ.");
+    }
+
+
+    private void addTraceIdHeader(org.springframework.http.HttpHeaders headers) {
+        String traceId = org.slf4j.MDC.get("traceId");
+        if (traceId != null && !traceId.isBlank()) {
+            headers.set("X-Trace-Id", traceId.trim());
+        }
     }
 
     private String getStackTraceAsString(Throwable throwable) {
