@@ -3,6 +3,7 @@ import hcmute.edu.zentech.dto.response.ProductDetailResponse;
 import hcmute.edu.zentech.dto.response.ProductGroupItemResponse;
 import hcmute.edu.zentech.dto.response.CategoryProductListItemResponse;
 import hcmute.edu.zentech.service.ProductService;
+import hcmute.edu.zentech.service.R2StorageService;
 
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.model.*;
@@ -14,6 +15,8 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -35,6 +38,8 @@ public class InternalAiController {
     private final OrderDetailRepository orderDetailRepository;
     private final CustomerRepository customerRepository;
     private final CustomerVoucherRepository customerVoucherRepository;
+    private final ProductReviewRepository productReviewRepository;
+    private final R2StorageService r2StorageService;
     private final ProductService productService;
 
     @Value("${app.ai.internal-token:zentech_internal_secret_token_123!@}")
@@ -218,6 +223,57 @@ public class InternalAiController {
                 .orElse(null);
     }
 
+    @GetMapping("/products/{productId}/reviews")
+    public ResponseEntity<ApiResponse<List<ProductReviewDto>>> getProductReviews(
+            @RequestHeader(value = "X-Internal-Token", required = false) String token,
+            @PathVariable UUID productId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "5") int size
+    ) {
+        verifyToken(token);
+        if (!productRepository.existsByIdAndDeletedFalse(productId)) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.<List<ProductReviewDto>>builder().success(false).message("Product not found").build());
+        }
+
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.max(1, Math.min(size, 10));
+        PageRequest pageRequest = PageRequest.of(
+                safePage,
+                safeSize,
+                Sort.by(Sort.Direction.DESC, "createdAt", "id")
+        );
+
+        List<ProductReviewDto> reviews = productReviewRepository.findByProduct_Id(productId, pageRequest)
+                .getContent()
+                .stream()
+                .map(this::mapToProductReviewDto)
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(reviews));
+    }
+
+    private ProductReviewDto mapToProductReviewDto(ProductReview review) {
+        List<String> imageUrls = review.getImageKeys() == null ? List.of() : review.getImageKeys().stream()
+                .map(r2StorageService::getPresignedGetUrl)
+                .filter(Objects::nonNull)
+                .toList();
+
+        String videoUrl = review.getVideoKey() == null || review.getVideoKey().isBlank()
+                ? null
+                : r2StorageService.getPresignedGetUrl(review.getVideoKey());
+
+        return ProductReviewDto.builder()
+                .reviewId(review.getId())
+                .rating(review.getRating())
+                .comment(review.getComment())
+                .customerName(review.getCustomer() != null ? review.getCustomer().getFullName() : null)
+                .createdAt(review.getCreatedAt())
+                .imageUrls(imageUrls)
+                .videoUrl(videoUrl)
+                .build();
+    }
+
     @PostMapping("/orders/resolve")
     public ResponseEntity<ApiResponse<Object>> resolveOrders(
             @RequestHeader(value = "X-Internal-Token", required = false) String token,
@@ -251,10 +307,29 @@ public class InternalAiController {
                 .paymentMethod(order.getPaymentMethod().name())
                 .paymentStatus(order.getPaymentStatus().name())
                 .orderStatus(order.getOrderStatus().name())
+                .items(mapToOrderItemDtos(order))
+                .coupons(mapToOrderCouponDtos(order))
                 .build();
     }
 
     private OrderDetailsDto mapToOrderDetailsDto(Order order) {
+        return OrderDetailsDto.builder()
+                .orderId(order.getId())
+                .createdAt(order.getCreatedAt())
+                .originalTotalPrice(BigDecimal.valueOf(order.getOriginalTotalPrice()))
+                .discountAmount(BigDecimal.valueOf(order.getDiscountAmount()))
+                .shippingFee(BigDecimal.valueOf(order.getShippingFee()))
+                .finalPrice(BigDecimal.valueOf(order.getFinalPrice()))
+                .paymentMethod(order.getPaymentMethod().name())
+                .paymentStatus(order.getPaymentStatus().name())
+                .orderStatus(order.getOrderStatus().name())
+                .shippingAddress(order.getAddress() != null ? order.getAddress().getStreet() + ", " + order.getAddress().getWard() + ", " + order.getAddress().getProvince() : null)
+                .items(mapToOrderItemDtos(order))
+                .coupons(mapToOrderCouponDtos(order))
+                .build();
+    }
+
+    private List<OrderItemDto> mapToOrderItemDtos(Order order) {
         List<OrderItemDto> items = new ArrayList<>();
         if (order.getOrderItems() != null) {
             for (OrderDetail item : order.getOrderItems()) {
@@ -267,20 +342,23 @@ public class InternalAiController {
                         .build());
             }
         }
+        return items;
+    }
 
-        return OrderDetailsDto.builder()
-                .orderId(order.getId())
-                .createdAt(order.getCreatedAt())
-                .originalTotalPrice(BigDecimal.valueOf(order.getOriginalTotalPrice()))
-                .discountAmount(BigDecimal.valueOf(order.getDiscountAmount()))
-                .shippingFee(BigDecimal.valueOf(order.getShippingFee()))
-                .finalPrice(BigDecimal.valueOf(order.getFinalPrice()))
-                .paymentMethod(order.getPaymentMethod().name())
-                .paymentStatus(order.getPaymentStatus().name())
-                .orderStatus(order.getOrderStatus().name())
-                .shippingAddress(order.getAddress() != null ? order.getAddress().getStreet() + ", " + order.getAddress().getWard() + ", " + order.getAddress().getProvince() : null)
-                .items(items)
-                .build();
+    private List<OrderCouponDto> mapToOrderCouponDtos(Order order) {
+        if (order.getOrderCoupons() == null) {
+            return List.of();
+        }
+
+        return order.getOrderCoupons().stream()
+                .map(coupon -> OrderCouponDto.builder()
+                        .couponCode(coupon.getCouponCode())
+                        .couponType(coupon.getCouponType() != null ? coupon.getCouponType().name() : null)
+                        .discountValue(coupon.getDiscountValue() == null ? null : BigDecimal.valueOf(coupon.getDiscountValue()))
+                        .maxDiscount(coupon.getMaxDiscount() == null ? null : BigDecimal.valueOf(coupon.getMaxDiscount()))
+                        .appliedAmount(coupon.getAppliedAmount() == null ? null : BigDecimal.valueOf(coupon.getAppliedAmount()))
+                        .build())
+                .toList();
     }
 
     @GetMapping("/customers/{userId}/profile")
@@ -327,7 +405,15 @@ public class InternalAiController {
                     .discountValue(BigDecimal.valueOf(coupon.getDiscountValue()))
                     .couponType(coupon.getType() != null ? coupon.getType().name() : "PERCENTAGE")
                     .description(desc)
+                    .maxDiscount(BigDecimal.valueOf(coupon.getMaxDiscount()))
+                    .minOrderAmount(BigDecimal.valueOf(coupon.getMinOrderAmount()))
+                    .startAt(coupon.getStartAt())
                     .endAt(coupon.getEndAt())
+                    .issuedAt(cv.getIssuedAt())
+                    .usedAt(cv.getUsedAt())
+                    .active(coupon.isActive())
+                    .usageLimit(coupon.getUsageLimit())
+                    .usedCount(coupon.getUsedCount())
                     .build();
         }).toList();
 
@@ -478,6 +564,18 @@ public class InternalAiController {
 
     @Data
     @Builder
+    public static class ProductReviewDto {
+        private UUID reviewId;
+        private Integer rating;
+        private String comment;
+        private String customerName;
+        private Instant createdAt;
+        private List<String> imageUrls;
+        private String videoUrl;
+    }
+
+    @Data
+    @Builder
     public static class OrderSummaryDto {
         private UUID orderId;
         private Instant createdAt;
@@ -485,6 +583,8 @@ public class InternalAiController {
         private String paymentMethod;
         private String paymentStatus;
         private String orderStatus;
+        private List<OrderItemDto> items;
+        private List<OrderCouponDto> coupons;
     }
 
     @Data
@@ -501,6 +601,7 @@ public class InternalAiController {
         private String orderStatus;
         private String shippingAddress;
         private List<OrderItemDto> items;
+        private List<OrderCouponDto> coupons;
     }
 
     @Data
@@ -511,6 +612,16 @@ public class InternalAiController {
         private String variantName;
         private int quantity;
         private BigDecimal priceAtPurchase;
+    }
+
+    @Data
+    @Builder
+    public static class OrderCouponDto {
+        private String couponCode;
+        private String couponType;
+        private BigDecimal discountValue;
+        private BigDecimal maxDiscount;
+        private BigDecimal appliedAmount;
     }
 
     @Data
@@ -530,7 +641,15 @@ public class InternalAiController {
         private BigDecimal discountValue;
         private String couponType;
         private String description;
+        private BigDecimal maxDiscount;
+        private BigDecimal minOrderAmount;
+        private Instant startAt;
         private Instant endAt;
+        private Instant issuedAt;
+        private Instant usedAt;
+        private boolean active;
+        private int usageLimit;
+        private int usedCount;
     }
 
     @Data

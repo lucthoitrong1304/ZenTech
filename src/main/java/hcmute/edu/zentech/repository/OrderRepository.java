@@ -26,6 +26,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     @Query("SELECT o FROM Order o WHERE o.id = :id")
     Optional<Order> findByIdForUpdate(@Param("id") UUID id);
 
+    @EntityGraph(attributePaths = {"address", "orderCoupons", "orderItems", "orderItems.productVariant", "orderItems.productVariant.product"})
     @Query("""
             SELECT o
             FROM Order o
@@ -45,7 +46,7 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
             Pageable pageable
     );
 
-    @EntityGraph(attributePaths = {"address", "orderCoupons"})
+    @EntityGraph(attributePaths = {"address", "orderCoupons", "orderItems", "orderItems.productVariant", "orderItems.productVariant.product"})
     Optional<Order> findByIdAndCustomer_Id(UUID orderId, UUID customerId);
 
     @Query("""
