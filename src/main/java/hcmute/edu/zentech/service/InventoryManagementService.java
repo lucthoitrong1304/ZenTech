@@ -296,6 +296,7 @@ public class InventoryManagementService {
         try {
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+            addTraceIdHeader(headers);
             org.springframework.http.HttpEntity<AiInventoryRecommendRequest> entity = new org.springframework.http.HttpEntity<>(requestPayload, headers);
             
             org.springframework.http.ResponseEntity<AiInventoryRecommendResponse> response = restTemplate.postForEntity(
@@ -315,6 +316,14 @@ public class InventoryManagementService {
         return AiInventoryRecommendResponse.builder()
                 .content("### ⚠️ Phản hồi trống từ AI\n\nHệ thống AI không phản hồi kết quả phân tích. Vui lòng thử lại sau.")
                 .build();
+    }
+
+
+    private void addTraceIdHeader(org.springframework.http.HttpHeaders headers) {
+        String traceId = org.slf4j.MDC.get("traceId");
+        if (traceId != null && !traceId.isBlank()) {
+            headers.set("X-Trace-Id", traceId.trim());
+        }
     }
 
     private InventorySummaryResponse toSummaryResponse(ProductVariant variant) {

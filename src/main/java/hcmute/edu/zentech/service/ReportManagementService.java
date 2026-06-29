@@ -5,6 +5,12 @@ import hcmute.edu.zentech.dto.request.ReportManagementAIAnalyzeRequest;
 import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
@@ -33,6 +39,8 @@ public class ReportManagementService {
     private final ProductVariantRepository productVariantRepository;
     private final R2StorageService r2StorageService;
 
+    @Value("${app.ai.base-url:http://localhost:8000}")
+    private String aiBaseUrl;
 
     public ReportManagementSummaryResponse getReportsSummary(Instant startDate, Instant endDate) {
         Instant[] range = normalizeDates(startDate, endDate);
@@ -461,7 +469,16 @@ public class ReportManagementService {
                     .build();
 
             RestTemplate restTemplate = new RestTemplate();
-            ReportManagementAIAnalyzeResponse aiResponse = restTemplate.postForObject("http://localhost:8000/management/analyze/report", aiRequest, ReportManagementAIAnalyzeResponse.class);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            addTraceIdHeader(headers);
+            HttpEntity<ReportManagementAIAnalyzeRequest> entity = new HttpEntity<>(aiRequest, headers);
+            ResponseEntity<ReportManagementAIAnalyzeResponse> response = restTemplate.postForEntity(
+                    normalizeAiBaseUrl(aiBaseUrl) + "/management/analyze/report",
+                    entity,
+                    ReportManagementAIAnalyzeResponse.class
+            );
+            ReportManagementAIAnalyzeResponse aiResponse = response.getBody();
             
             // De-anonymize (Khôi phục định danh)
             if (aiResponse != null && aiResponse.getContent() != null && !anonymizeDictionary.isEmpty()) {
@@ -475,6 +492,18 @@ public class ReportManagementService {
         } catch (Exception e) {
             throw new RuntimeException("Failed to analyze report using AI module", e);
         }
+    }
+
+    private void addTraceIdHeader(HttpHeaders headers) {
+        String traceId = MDC.get("traceId");
+        if (traceId != null && !traceId.isBlank()) {
+            headers.set("X-Trace-Id", traceId.trim());
+        }
+    }
+
+    private String normalizeAiBaseUrl(String baseUrl) {
+        String normalized = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8000" : baseUrl.trim();
+        return normalized.endsWith("/") ? normalized.substring(0, normalized.length() - 1) : normalized;
     }
 
     public List<ReportManagementPaymentMethodShareResponse> getPaymentMethodShare(Instant startDate, Instant endDate) {
