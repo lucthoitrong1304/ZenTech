@@ -44,4 +44,6 @@ public class AttendanceEvent {
     private Double accuracyMeters;
 
     private Boolean locationValid;
+
+    private String faceImageKey;
 }

@@ -97,6 +97,10 @@ public class ShiftService {
                     dailyDto.setLeave(eff.isLeave());
                     dailyDto.setWfh(eff.isWfh());
                     dailyDto.setSwap(eff.isSwap());
+                    dailyDto.setOriginalShiftName(eff.originalShift() != null ? eff.originalShift().getName() : null);
+                    dailyDto.setOriginalStartTime(eff.originalShift() != null ? eff.originalShift().getStartTime() : null);
+                    dailyDto.setOriginalEndTime(eff.originalShift() != null ? eff.originalShift().getEndTime() : null);
+                    dailyDto.setChangeDescription(eff.changeDescription());
                     
                     if (eff.isLeave()) {
                         dailyDto.setStatusLabel("[Nghỉ phép]");
@@ -311,6 +315,16 @@ public class ShiftService {
         EmployeeShift assignment = employeeShiftRepository.findByIdWithShift(employeeShiftId)
                 .orElseThrow(() -> new RuntimeException("Schedule assignment not found"));
 
+        LocalDateTime start = assignment.getWorkDate().atStartOfDay();
+        LocalDateTime end = assignment.getWorkDate().atTime(LocalTime.MAX);
+        List<AttendanceEvent> events = attendanceEventRepository
+                .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(assignment.getEmployee().getId(), start, end);
+        boolean hasEvents = events.stream()
+                .anyMatch(event -> event.getEmployeeShift() != null && event.getEmployeeShift().getId().equals(employeeShiftId));
+        if (hasEvents) {
+            throw new RuntimeException("Không thể gỡ ca vì đã phát sinh sự kiện chấm công (check-in/check-out) cho ca này.");
+        }
+
         validateAndApplyScheduleAdjustment(
                 assignment.getEmployee(),
                 assignment.getWorkDate(),
@@ -382,6 +396,10 @@ public class ShiftService {
                 dailyDto.setLeave(eff.isLeave());
                 dailyDto.setWfh(eff.isWfh());
                 dailyDto.setSwap(eff.isSwap());
+                dailyDto.setOriginalShiftName(eff.originalShift() != null ? eff.originalShift().getName() : null);
+                dailyDto.setOriginalStartTime(eff.originalShift() != null ? eff.originalShift().getStartTime() : null);
+                dailyDto.setOriginalEndTime(eff.originalShift() != null ? eff.originalShift().getEndTime() : null);
+                dailyDto.setChangeDescription(eff.changeDescription());
                 
                 if (eff.isLeave()) {
                     dailyDto.setStatusLabel("[Nghỉ phép]");

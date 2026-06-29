@@ -781,4 +781,14 @@ public class R2StorageService {
             return new ArrayList<>();
         }
     }
+
+    public void uploadFileBytes(String fileKey, byte[] bytes, String contentType) {
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(bucketName)
+                .key(fileKey)
+                .contentType(contentType)
+                .build();
+        s3Client.putObject(putObjectRequest, software.amazon.awssdk.core.sync.RequestBody.fromBytes(bytes));
+        log.info("Uploaded file bytes to R2 key: {}", fileKey);
+    }
 }

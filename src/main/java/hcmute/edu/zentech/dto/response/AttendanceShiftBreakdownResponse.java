@@ -36,5 +36,9 @@ public class AttendanceShiftBreakdownResponse {
     @JsonProperty("isAfk")
     private boolean isAfk;
     private double afkHours;
+    @JsonProperty("isSwap")
+    private boolean isSwap;
+    private String originalShiftName;
+    private String changeDescription;
     private List<AttendanceEventTimelineResponse> events;
 }

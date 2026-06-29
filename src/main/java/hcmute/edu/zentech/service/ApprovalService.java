@@ -140,24 +140,60 @@ public class ApprovalService {
             throw new RuntimeException("Không tìm thấy thông tin nhân viên yêu cầu.");
         }
 
+        Employee targetEmployee = employeeRepository.findById(request.getTargetEmployee().getId())
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên làm thay/đổi ca."));
+
+        Shift shift = shiftRepository.findById(request.getShift().getId())
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy ca yêu cầu."));
+
+        Shift targetShift = null;
+        if (request.getTargetShift() != null && request.getTargetShift().getId() != null) {
+            targetShift = shiftRepository.findById(request.getTargetShift().getId())
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy ca đổi."));
+        }
+
+        // 1. Time constraints check (must request before shift start time)
+        LocalDateTime now = LocalDateTime.now();
+        if (shift.getStartTime() != null) {
+            LocalDateTime shiftStart = LocalDateTime.of(request.getWorkDate(), shift.getStartTime());
+            if (!now.isBefore(shiftStart)) {
+                throw new RuntimeException("Không thể tạo yêu cầu cho ca làm việc đã bắt đầu hoặc đã qua.");
+            }
+        }
+        if (request.getType() == SwapRequestType.SWAP && targetShift != null && targetShift.getStartTime() != null && request.getTargetWorkDate() != null) {
+            LocalDateTime targetShiftStart = LocalDateTime.of(request.getTargetWorkDate(), targetShift.getStartTime());
+            if (!now.isBefore(targetShiftStart)) {
+                throw new RuntimeException("Không thể tạo yêu cầu cho ca làm việc đối ứng đã bắt đầu hoặc đã qua.");
+            }
+        }
+
+        // 2. Overlap checks
+        // Target employee must not have overlapping shift on workDate with shift
+        validateNoOverlap(targetEmployee.getId(), request.getWorkDate(), shift);
+
+        // For SWAP, requester must not have overlapping shift on targetWorkDate with targetShift
+        if (request.getType() == SwapRequestType.SWAP && targetShift != null && request.getTargetWorkDate() != null) {
+            validateNoOverlap(employee.getId(), request.getTargetWorkDate(), targetShift);
+        }
+
         request.setRequester(employee);
+        request.setTargetEmployee(targetEmployee);
+        request.setShift(shift);
+        request.setTargetShift(targetShift);
         request.setRequestedAt(LocalDateTime.now());
         request.setStatus(ApprovalStatus.PENDING);
 
         ShiftSwapRequest saved = shiftSwapRequestRepository.save(request);
 
-        Employee reqEmp = employeeRepository.findById(saved.getRequester().getId()).orElse(null);
-        Employee tgtEmp = employeeRepository.findById(saved.getTargetEmployee().getId()).orElse(null);
-
-        String reqName = reqEmp != null ? reqEmp.getFullName() : "Nhân viên";
-        String tgtName = tgtEmp != null ? tgtEmp.getFullName() : "Nhân viên";
+        String reqName = employee.getFullName();
+        String tgtName = targetEmployee.getFullName();
 
         // 1. Notify target employee
-        if (tgtEmp != null && tgtEmp.getUserInfo() != null) {
+        if (targetEmployee.getUserInfo() != null) {
             String title = "Yêu cầu đổi ca từ đồng nghiệp";
             String content = String.format("Đồng nghiệp %s muốn đổi ca với bạn vào ngày %s.", reqName, saved.getWorkDate());
             notificationService.createNotification(
-                    tgtEmp.getUserInfo().getId(),
+                    targetEmployee.getUserInfo().getId(),
                     title,
                     content,
                     NotificationType.REQUEST_SUBMITTED,
@@ -419,6 +455,30 @@ public class ApprovalService {
         }
         if (!request.getEndTime().isAfter(request.getStartTime())) {
             throw new RuntimeException("Giờ kết thúc phải sau giờ bắt đầu.");
+        }
+    }
+
+    private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift) {
+        if (newShift.getType() == ShiftType.OFF || newShift.getStartTime() == null || newShift.getEndTime() == null) {
+            return;
+        }
+
+        List<EmployeeShift> existingAssignments = employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate);
+        for (EmployeeShift existing : existingAssignments) {
+            Shift existingShift = existing.getShift();
+            if (existingShift == null || existingShift.getType() == ShiftType.OFF
+                    || existingShift.getStartTime() == null || existingShift.getEndTime() == null) {
+                continue;
+            }
+            boolean overlaps = newShift.getStartTime().isBefore(existingShift.getEndTime())
+                    && newShift.getEndTime().isAfter(existingShift.getStartTime());
+            if (overlaps) {
+                throw new RuntimeException(String.format(
+                        "Ca làm việc mới bị trùng thời gian với ca %s của nhân viên ngày %s.",
+                        existingShift.getName(),
+                        workDate
+                ));
+            }
         }
     }
 }

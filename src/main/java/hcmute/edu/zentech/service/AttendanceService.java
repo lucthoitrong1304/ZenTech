@@ -39,6 +39,7 @@ public class AttendanceService {
     private final FaceEncryptionUtils faceEncryptionUtils;
     private final AdminActivityLogService adminActivityLogService;
     private final AttendanceLocationPolicyService attendanceLocationPolicyService;
+    private final LeaveRequestRepository leaveRequestRepository;
 
 
     @Value("${zentech.attendance.face-match-threshold:0.5}")
@@ -104,8 +105,15 @@ public class AttendanceService {
             throw new RuntimeException("Bạn đã được duyệt nghỉ phép ca " + selectedShift.shift().getName() + ".");
         }
 
+        // WFH bypass check
+        boolean hasWfhRequest = !leaveRequestRepository.findWfhRequestsForEmployeeOnDate(
+                employee.getId(),
+                now.toLocalDate(),
+                List.of(ApprovalStatus.PENDING, ApprovalStatus.APPROVED)
+        ).isEmpty();
+
         boolean locationValid = true;
-        if (!selectedShift.isWfh()) {
+        if (!selectedShift.isWfh() && !hasWfhRequest) {
             locationValid = attendanceLocationPolicyService.isLocationAllowed(
                     request.getLatitude(),
                     request.getLongitude()
@@ -162,18 +170,36 @@ public class AttendanceService {
         // Thành công: Reset rate limit
         resetFailedCheckIn(accountId);
 
+        // Upload face image if provided
+        String faceImageKey = null;
+        if (request.getFaceImage() != null && !request.getFaceImage().isEmpty()) {
+            try {
+                String base64Image = request.getFaceImage();
+                if (base64Image.contains(",")) {
+                    base64Image = base64Image.split(",")[1];
+                }
+                byte[] decodedBytes = Base64.getDecoder().decode(base64Image.trim());
+                String uniqueFilename = "checkin-" + UUID.randomUUID() + ".jpg";
+                faceImageKey = "uploads/attendance-faces/" + employee.getId() + "/" + uniqueFilename;
+                r2StorageService.uploadFileBytes(faceImageKey, decodedBytes, "image/jpeg");
+            } catch (Exception e) {
+                System.err.println("Failed to upload face image to R2: " + e.getMessage());
+            }
+        }
+
         AttendanceEvent event = new AttendanceEvent();
         event.setEmployee(employee);
         event.setEmployeeShift(selectedShift.assignment());
         event.setTimestamp(now);
         event.setEventType(type);
         event.setSource("FACE");
-        event.setDetails((selectedShift.isWfh() ? "[WFH] " : "") + "Xác thực khuôn mặt thành công. Ca: " + selectedShift.shift().getName()
+        event.setDetails(((selectedShift.isWfh() || hasWfhRequest) ? "[WFH] " : "") + "Xác thực khuôn mặt thành công. Ca: " + selectedShift.shift().getName()
                 + ". (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
         event.setLatitude(request.getLatitude());
         event.setLongitude(request.getLongitude());
         event.setAccuracyMeters(request.getAccuracyMeters());
         event.setLocationValid(locationValid);
+        event.setFaceImageKey(faceImageKey);
         attendanceEventRepository.save(event);
 
         // Ghi audit log thành công
@@ -209,18 +235,29 @@ public class AttendanceService {
 
         if (nextType == AttendanceEventType.CHECK_OUT) {
             AttendanceEvent openCheckIn = todayEvents.isEmpty() ? null : todayEvents.get(todayEvents.size() - 1);
+            AttendanceCalculator.EffectiveShift resolved = null;
             if (openCheckIn != null && openCheckIn.getEmployeeShift() != null) {
                 UUID openAssignmentId = openCheckIn.getEmployeeShift().getId();
-                return shifts.stream()
+                resolved = shifts.stream()
                         .filter(item -> item.assignment() != null && item.assignment().getId().equals(openAssignmentId))
                         .findFirst()
                         .orElseGet(() -> new AttendanceCalculator.EffectiveShift(openCheckIn.getEmployeeShift(), openCheckIn.getEmployeeShift().getShift()));
+            } else {
+                resolved = shifts.stream()
+                        .filter(item -> isInCaptureRange(now, item.shift()))
+                        .findFirst()
+                        .orElse(shifts.get(shifts.size() - 1));
             }
 
-            return shifts.stream()
-                    .filter(item -> isInCaptureRange(now, item.shift()))
-                    .findFirst()
-                    .orElse(shifts.get(shifts.size() - 1));
+            // Check if checkout is too late
+            Shift shift = resolved.shift();
+            if (shift.getEndTime() != null) {
+                LocalTime allowedEnd = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
+                if (now.isAfter(allowedEnd)) {
+                    throw new RuntimeException("Đã quá giờ check-out cho phép của ca " + shift.getName() + ". Vui lòng gửi yêu cầu chỉnh công.");
+                }
+            }
+            return resolved;
         }
 
         Set<UUID> checkedInAssignmentIds = todayEvents.stream()
@@ -230,10 +267,19 @@ public class AttendanceService {
                 .map(EmployeeShift::getId)
                 .collect(Collectors.toSet());
 
+        // Find shift by matching current capture range first (allows multiple CI/CO in same shift)
         AttendanceCalculator.EffectiveShift nextShift = shifts.stream()
-                .filter(item -> item.assignment() == null || !checkedInAssignmentIds.contains(item.assignment().getId()))
+                .filter(item -> isInCaptureRange(now, item.shift()))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("Các ca hôm nay đã được check-in. Vui lòng checkout ca đang mở hoặc kiểm tra lại lịch."));
+                .orElse(null);
+
+        if (nextShift == null) {
+            // Fallback to first unchecked shift
+            nextShift = shifts.stream()
+                    .filter(item -> item.assignment() == null || !checkedInAssignmentIds.contains(item.assignment().getId()))
+                    .findFirst()
+                    .orElse(shifts.get(shifts.size() - 1));
+        }
 
         Shift shift = nextShift.shift();
         if (shift.getStartTime() == null || shift.getEndTime() == null) {

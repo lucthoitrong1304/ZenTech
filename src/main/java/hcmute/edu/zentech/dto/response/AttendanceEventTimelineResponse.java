@@ -15,4 +15,5 @@ public class AttendanceEventTimelineResponse {
     private String type;
     private LocalDateTime timestamp;
     private String source;
+    private String faceImageUrl;
 }

@@ -24,6 +24,7 @@ public class AttendanceCalculator {
     private final AttendanceEventRepository attendanceEventRepository;
     private final AttendanceAdjustmentRepository attendanceAdjustmentRepository;
     private final LeaveRequestRepository leaveRequestRepository;
+    private final R2StorageService r2StorageService;
 
     public Shift resolveEffectiveShift(UUID employeeId, LocalDate date) {
         return resolveEffectiveShifts(employeeId, date).stream()
@@ -70,6 +71,19 @@ public class AttendanceCalculator {
                 }
             }
 
+            String desc = candidate.changeDescription();
+            Shift orig = candidate.originalShift();
+            if (isLeave) {
+                orig = candidate.shift();
+                desc = "Nghỉ phép được duyệt: " + (leaveReq.getReason() != null ? leaveReq.getReason() : "");
+            } else if (isWfh) {
+                orig = candidate.shift();
+                desc = "WFH được duyệt: " + (leaveReq.getReason() != null ? leaveReq.getReason() : "");
+            } else if (isAfk) {
+                orig = candidate.shift();
+                desc = "Đi muộn/về sớm được duyệt: " + (leaveReq.getReason() != null ? leaveReq.getReason() : "");
+            }
+
             result.add(new EffectiveShift(
                     candidate.assignment(),
                     candidate.shift(),
@@ -77,7 +91,9 @@ public class AttendanceCalculator {
                     isWfh,
                     isAfk,
                     candidate.isSwap(),
-                    leaveReq
+                    leaveReq,
+                    orig,
+                    desc
             ));
         }
 
@@ -89,11 +105,27 @@ public class AttendanceCalculator {
                 .findByEmployeeIdAndWorkDateBetween(employeeId, date, date);
         List<EffectiveShift> approvedAdjustments = adjustments.stream()
                 .filter(sa -> sa.getStatus() == ApprovalStatus.APPROVED)
-                .map(ScheduleAdjustment::getAdjustedShift)
-                .filter(Objects::nonNull)
-                .filter(shift -> shift.getType() != ShiftType.OFF)
-                .map(shift -> new EffectiveShift(null, shift))
-                .sorted(Comparator.comparing(item -> item.shift().getStartTime(), Comparator.nullsLast(Comparator.naturalOrder())))
+                .map(sa -> {
+                    Shift adjusted = sa.getAdjustedShift();
+                    if (adjusted == null) {
+                        adjusted = new Shift();
+                        adjusted.setName("Nghỉ (Đã xóa ca)");
+                        adjusted.setType(ShiftType.OFF);
+                        adjusted.setColorCode("#6B7280");
+                    }
+                    return new EffectiveShift(
+                            null,
+                            adjusted,
+                            false,
+                            false,
+                            false,
+                            false,
+                            null,
+                            sa.getOriginalShift(),
+                            "Điều chỉnh lịch: " + sa.getReason()
+                    );
+                })
+                .sorted(Comparator.comparing(item -> item.shift() != null ? item.shift().getStartTime() : null, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
         if (!approvedAdjustments.isEmpty()) {
             return approvedAdjustments;
@@ -104,9 +136,7 @@ public class AttendanceCalculator {
         for (ShiftSwapRequest req : swapRequests) {
             List<EffectiveShift> swapResult = resolveSwap(employeeId, date, req);
             if (swapResult != null) {
-                return swapResult.stream()
-                        .map(item -> new EffectiveShift(item.assignment(), item.shift(), false, false, false, true, null))
-                        .toList();
+                return swapResult;
             }
         }
 
@@ -196,23 +226,33 @@ public class AttendanceCalculator {
             boolean isWfh,
             boolean isAfk,
             boolean isSwap,
-            LeaveRequest leaveRequest
+            LeaveRequest leaveRequest,
+            Shift originalShift,
+            String changeDescription
     ) {
         public EffectiveShift(EmployeeShift assignment, Shift shift) {
-            this(assignment, shift, false, false, false, false, null);
+            this(assignment, shift, false, false, false, false, null, null, null);
         }
 
         public EffectiveShift(EmployeeShift assignment, Shift shift, boolean isLeave, boolean isWfh, boolean isAfk, LeaveRequest leaveRequest) {
-            this(assignment, shift, isLeave, isWfh, isAfk, false, leaveRequest);
+            this(assignment, shift, isLeave, isWfh, isAfk, false, leaveRequest, null, null);
+        }
+
+        public EffectiveShift(EmployeeShift assignment, Shift shift, boolean isLeave, boolean isWfh, boolean isAfk, LeaveRequest leaveRequest, Shift originalShift, String changeDescription) {
+            this(assignment, shift, isLeave, isWfh, isAfk, false, leaveRequest, originalShift, changeDescription);
         }
     }
     private List<EffectiveShift> resolveSwap(UUID employeeId, LocalDate date, ShiftSwapRequest req) {
         if (req.getType() == SwapRequestType.COVER) {
             if (req.getTargetEmployee().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
-                return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift()));
+                return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift(), false, false, false, true, null, null, "Làm thay cho " + req.getRequester().getFullName()));
             }
             if (req.getRequester().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
-                return List.of();
+                Shift offShift = new Shift();
+                offShift.setName("Nghỉ (Làm thay)");
+                offShift.setType(ShiftType.OFF);
+                offShift.setColorCode("#6B7280");
+                return List.of(new EffectiveShift(null, offShift, false, false, false, true, null, req.getShift(), "Đồng nghiệp " + req.getTargetEmployee().getFullName() + " làm thay"));
             }
         }
 
@@ -221,27 +261,35 @@ public class AttendanceCalculator {
         }
 
         if (req.getWorkDate().equals(req.getTargetWorkDate())) {
-            if (req.getRequester().getId().equals(employeeId)) {
-                return req.getTargetShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getTargetShift()));
+            if (req.getRequester().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
+                return req.getTargetShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getTargetShift(), false, false, false, true, null, req.getShift(), "Đổi ca với " + req.getTargetEmployee().getFullName()));
             }
-            if (req.getTargetEmployee().getId().equals(employeeId)) {
-                return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift()));
+            if (req.getTargetEmployee().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
+                return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift(), false, false, false, true, null, req.getTargetShift(), "Đổi ca với " + req.getRequester().getFullName()));
             }
         } else {
             if (req.getWorkDate().equals(date)) {
                 if (req.getRequester().getId().equals(employeeId)) {
-                    return List.of();
+                    Shift offShift = new Shift();
+                    offShift.setName("Nghỉ (Đổi ca)");
+                    offShift.setType(ShiftType.OFF);
+                    offShift.setColorCode("#6B7280");
+                    return List.of(new EffectiveShift(null, offShift, false, false, false, true, null, req.getShift(), "Đổi ca ngày " + req.getTargetWorkDate() + " với " + req.getTargetEmployee().getFullName()));
                 }
                 if (req.getTargetEmployee().getId().equals(employeeId)) {
-                    return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift()));
+                    return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift(), false, false, false, true, null, null, "Đổi ca với " + req.getRequester().getFullName()));
                 }
             }
             if (req.getTargetWorkDate() != null && req.getTargetWorkDate().equals(date)) {
                 if (req.getRequester().getId().equals(employeeId)) {
-                    return req.getTargetShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getTargetShift()));
+                    return req.getTargetShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getTargetShift(), false, false, false, true, null, null, "Đổi ca với " + req.getTargetEmployee().getFullName()));
                 }
                 if (req.getTargetEmployee().getId().equals(employeeId)) {
-                    return List.of();
+                    Shift offShift = new Shift();
+                    offShift.setName("Nghỉ (Đổi ca)");
+                    offShift.setType(ShiftType.OFF);
+                    offShift.setColorCode("#6B7280");
+                    return List.of(new EffectiveShift(null, offShift, false, false, false, true, null, req.getTargetShift(), "Đổi ca ngày " + req.getWorkDate() + " với " + req.getRequester().getFullName()));
                 }
             }
         }
@@ -261,15 +309,42 @@ public class AttendanceCalculator {
                         .type(entry.type())
                         .timestamp(entry.timestamp())
                         .source(entry.source())
+                        .faceImageUrl(entry.faceImageKey() != null ? r2StorageService.getPresignedGetUrl(entry.faceImageKey()) : null)
                         .build())
                 .toList();
 
-        LocalDateTime checkIn = entries.isEmpty() ? null : entries.get(0).timestamp();
-        LocalDateTime checkOut = entries.size() > 1 ? entries.get(entries.size() - 1).timestamp() : null;
+        LocalDateTime activeCheckIn = null;
+        LocalDateTime firstCheckIn = null;
+        LocalDateTime lastCheckOut = null;
         double workingHours = 0.0;
+        boolean provisional = false;
+
+        for (TimeEntry entry : entries) {
+            if ("CHECK_IN".equals(entry.type())) {
+                if (firstCheckIn == null) {
+                    firstCheckIn = entry.timestamp();
+                }
+                activeCheckIn = entry.timestamp();
+            } else if ("CHECK_OUT".equals(entry.type())) {
+                if (activeCheckIn != null) {
+                    workingHours += Math.max(0.0, Duration.between(activeCheckIn, entry.timestamp()).toMinutes() / 60.0);
+                    activeCheckIn = null;
+                }
+                lastCheckOut = entry.timestamp();
+            }
+        }
+
+        if (activeCheckIn != null) {
+            if (date.equals(LocalDate.now())) {
+                workingHours += Math.max(0.0, Duration.between(activeCheckIn, LocalDateTime.now()).toMinutes() / 60.0);
+                provisional = true;
+            }
+        }
+
+        LocalDateTime checkIn = firstCheckIn;
+        LocalDateTime checkOut = lastCheckOut;
         long lateMinutes = 0;
         long earlyMinutes = 0;
-        boolean provisional = false;
         String status;
 
         if (checkIn == null) {
@@ -288,13 +363,8 @@ public class AttendanceCalculator {
             }
 
             if (checkOut == null) {
-                if (date.equals(LocalDate.now())) {
-                    workingHours = Math.max(0.0, Duration.between(checkIn, LocalDateTime.now()).toMinutes() / 60.0);
-                    provisional = true;
-                }
                 status = effectiveShift.isWfh() ? "WFH_MISSING_CHECK_OUT" : "MISSING_CHECK_OUT";
             } else {
-                workingHours = Math.max(0.0, Duration.between(checkIn, checkOut).toMinutes() / 60.0);
                 String outStatus = classifyCheckOut(shift, checkOut.toLocalTime());
                 if ("EARLY_CHECKOUT".equals(outStatus) && shift.getEndTime() != null) {
                     LocalTime onTimeStart = shift.getEndTime().minusMinutes(defaultInt(shift.getOnTimeCheckOutStartMinutes(), 5));
@@ -332,6 +402,9 @@ public class AttendanceCalculator {
                 .isLeave(effectiveShift.isLeave())
                 .isWfh(effectiveShift.isWfh())
                 .isAfk(effectiveShift.isAfk())
+                .isSwap(effectiveShift.isSwap())
+                .originalShiftName(effectiveShift.originalShift() != null ? effectiveShift.originalShift().getName() : null)
+                .changeDescription(effectiveShift.changeDescription())
                 .afkHours(afkHours)
                 .events(events)
                 .build();
@@ -348,15 +421,15 @@ public class AttendanceCalculator {
         for (AttendanceEvent event : rawEvents) {
             if (assignmentId != null && event.getEmployeeShift() != null
                     && assignmentId.equals(event.getEmployeeShift().getId())) {
-                entries.add(new TimeEntry(event.getTimestamp(), event.getEventType().name(), event.getSource()));
+                entries.add(new TimeEntry(event.getTimestamp(), event.getEventType().name(), event.getSource(), event.getFaceImageKey()));
             } else if (event.getEmployeeShift() == null && isWithinShiftCaptureRange(event.getTimestamp().toLocalTime(), shift)) {
-                entries.add(new TimeEntry(event.getTimestamp(), event.getEventType().name(), event.getSource()));
+                entries.add(new TimeEntry(event.getTimestamp(), event.getEventType().name(), event.getSource(), event.getFaceImageKey()));
             }
         }
 
         for (AttendanceAdjustment adjustment : adjustments) {
             if (isWithinShiftCaptureRange(adjustment.getProposedTime(), shift)) {
-                entries.add(new TimeEntry(LocalDateTime.of(date, adjustment.getProposedTime()), "ADJUSTMENT", "APPROVED_ADJUSTMENT"));
+                entries.add(new TimeEntry(LocalDateTime.of(date, adjustment.getProposedTime()), adjustment.getType().name(), "APPROVED_ADJUSTMENT", null));
             }
         }
 
@@ -510,6 +583,6 @@ public class AttendanceCalculator {
         return value == null ? fallback : Math.max(0, value);
     }
 
-    private record TimeEntry(LocalDateTime timestamp, String type, String source) {
+    private record TimeEntry(LocalDateTime timestamp, String type, String source, String faceImageKey) {
     }
 }

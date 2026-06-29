@@ -38,5 +38,9 @@ public class EmployeeWeeklyScheduleDto {
         @JsonProperty("isSwap")
         private boolean isSwap;
         private String statusLabel;
+        private String originalShiftName;
+        private LocalTime originalStartTime;
+        private LocalTime originalEndTime;
+        private String changeDescription;
     }
 }
