@@ -3,6 +3,7 @@ package hcmute.edu.zentech.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import hcmute.edu.zentech.model.Order;
+import hcmute.edu.zentech.model.OrderStatus;
 import hcmute.edu.zentech.model.PaymentGateway;
 import hcmute.edu.zentech.model.PaymentStatus;
 import hcmute.edu.zentech.model.PaymentTransaction;
@@ -124,9 +125,10 @@ public class PaymentService {
 
         if (success) {
             transaction.setPaidAt(Instant.now());
-            transaction.getOrder().setPaymentStatus(PaymentStatus.SUCCESS);
-
             Order order = transaction.getOrder();
+            order.setPaymentStatus(PaymentStatus.SUCCESS);
+            confirmCreatedOrderAfterOnlinePayment(order);
+
             // Notify Customer
             if (order.getCustomer() != null && order.getCustomer().getUserInfo() != null) {
                 String title = "Thanh toán thành công";
@@ -157,6 +159,12 @@ public class PaymentService {
                         order.getId()
                 );
             }
+        }
+    }
+
+    private void confirmCreatedOrderAfterOnlinePayment(Order order) {
+        if (order.getOrderStatus() == OrderStatus.CREATED) {
+            order.setOrderStatus(OrderStatus.CONFIRMED);
         }
     }
 
