@@ -31,6 +31,7 @@ import hcmute.edu.zentech.security.CustomUserDetails;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -252,8 +253,7 @@ public class AiManagementService {
         try {
             AiAgentRuntimeRequest runtimeRequest = buildRuntimeRequest(role, message, history, attachments, businessContext);
 
-            java.net.http.HttpRequest httpRequest = java.net.http.HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/agents/respond/stream"))
+            java.net.http.HttpRequest httpRequest = aiRequestBuilder("/agents/respond/stream")
                     .header("Content-Type", "application/json")
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(runtimeRequest)))
                     .build();
@@ -315,9 +315,7 @@ public class AiManagementService {
         try {
             AiAgentRuntimeRequest runtimeRequest = buildRuntimeRequest(role, message, history, attachments, businessContext);
 
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/agents/respond"))
-                    .timeout(Duration.ofMillis(aiTimeoutMs))
+            HttpRequest httpRequest = aiRequestBuilder("/agents/respond")
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(runtimeRequest)))
                     .build();
@@ -391,9 +389,7 @@ public class AiManagementService {
                     .contentBase64(document.getContentBase64())
                     .build();
 
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/knowledge/documents/ingest"))
-                    .timeout(Duration.ofMillis(aiTimeoutMs))
+            HttpRequest httpRequest = aiRequestBuilder("/knowledge/documents/ingest")
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(request)))
                     .build();
@@ -422,9 +418,7 @@ public class AiManagementService {
 
     private void deleteDocumentFromAiService(UUID documentId) {
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/knowledge/documents/" + documentId))
-                    .timeout(Duration.ofMillis(aiTimeoutMs))
+            HttpRequest request = aiRequestBuilder("/knowledge/documents/" + documentId)
                     .DELETE()
                     .build();
             HttpClient.newBuilder()
@@ -464,9 +458,7 @@ public class AiManagementService {
 
         try {
             Map<String, Object> payload = Map.of("variants", variantsPayload);
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/api/internal/products/sync"))
-                    .timeout(Duration.ofMillis(aiTimeoutMs))
+            HttpRequest httpRequest = aiRequestBuilder("/api/internal/products/sync")
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(payload)))
                     .build();
@@ -497,9 +489,7 @@ public class AiManagementService {
     @Transactional
     public void reindexProductsToAi() {
         try {
-            HttpRequest reindexRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/api/internal/products/reindex"))
-                    .timeout(Duration.ofMillis(aiTimeoutMs))
+            HttpRequest reindexRequest = aiRequestBuilder("/api/internal/products/reindex")
                     .POST(HttpRequest.BodyPublishers.noBody())
                     .build();
 
@@ -581,9 +571,7 @@ public class AiManagementService {
                                     .build())
                             .toList())
                     .build();
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + "/api/internal/products/verify"))
-                    .timeout(Duration.ofMillis(aiTimeoutMs))
+            HttpRequest httpRequest = aiRequestBuilder("/api/internal/products/verify")
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(request)))
                     .build();
@@ -773,6 +761,18 @@ public class AiManagementService {
     private String resolveContentType(MultipartFile file) {
         String contentType = file.getContentType();
         return contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType;
+    }
+
+
+    private HttpRequest.Builder aiRequestBuilder(String path) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(normalizeBaseUrl(aiBaseUrl) + path))
+                .timeout(Duration.ofMillis(aiTimeoutMs));
+        String traceId = MDC.get("traceId");
+        if (traceId != null && !traceId.isBlank()) {
+            builder.header("X-Trace-Id", traceId.trim());
+        }
+        return builder;
     }
 
     private String normalizeBaseUrl(String baseUrl) {
