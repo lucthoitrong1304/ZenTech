@@ -74,6 +74,7 @@ public class TraceIdFilter extends OncePerRequestFilter {
                 || uri.startsWith("/api/health")
                 || uri.startsWith("/api/admin/logs")
                 || uri.startsWith("/api/admin/activity-logs")
-                || uri.startsWith("/api/admin/incidents/issue-links");
+                || uri.startsWith("/api/admin/incidents/issue-links")
+                || uri.startsWith("/actuator");
     }
 }
