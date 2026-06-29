@@ -2,6 +2,7 @@ package hcmute.edu.zentech.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import hcmute.edu.zentech.model.Order;
+import hcmute.edu.zentech.model.OrderStatus;
 import hcmute.edu.zentech.model.PaymentGateway;
 import hcmute.edu.zentech.model.PaymentStatus;
 import hcmute.edu.zentech.model.PaymentTransaction;
@@ -80,6 +81,7 @@ class PaymentServiceVnpayTest {
         assertEquals("00", response.get("RspCode"));
         assertEquals(PaymentTransactionStatus.SUCCESS, transaction.getStatus());
         assertEquals(PaymentStatus.SUCCESS, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.CONFIRMED, transaction.getOrder().getOrderStatus());
         assertEquals("VNP123", transaction.getGatewayTransactionId());
         assertNotNull(transaction.getPaidAt());
     }
@@ -97,6 +99,7 @@ class PaymentServiceVnpayTest {
         assertEquals("00", response.get("RspCode"));
         assertEquals(PaymentTransactionStatus.FAILED, transaction.getStatus());
         assertEquals(PaymentStatus.PENDING, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.CREATED, transaction.getOrder().getOrderStatus());
         assertNull(transaction.getPaidAt());
     }
 
@@ -113,6 +116,7 @@ class PaymentServiceVnpayTest {
         assertEquals("00", response.get("RspCode"));
         assertEquals(PaymentTransactionStatus.FAILED, transaction.getStatus());
         assertEquals(PaymentStatus.PENDING, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.CREATED, transaction.getOrder().getOrderStatus());
     }
 
     @Test
@@ -140,6 +144,7 @@ class PaymentServiceVnpayTest {
         assertEquals("04", response.get("RspCode"));
         assertEquals(PaymentTransactionStatus.PENDING, transaction.getStatus());
         assertEquals(PaymentStatus.PENDING, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.CREATED, transaction.getOrder().getOrderStatus());
         assertNull(transaction.getRawPayload());
     }
 
@@ -169,6 +174,7 @@ class PaymentServiceVnpayTest {
 
         assertEquals(PaymentTransactionStatus.SUCCESS, transaction.getStatus());
         assertEquals(PaymentStatus.SUCCESS, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.CONFIRMED, transaction.getOrder().getOrderStatus());
         org.assertj.core.api.Assertions.assertThat(redirectUrl)
                 .contains("/checkout/result")
                 .contains("orderId=" + REQUEST_ID)
@@ -189,16 +195,74 @@ class PaymentServiceVnpayTest {
 
         assertEquals(PaymentTransactionStatus.SUCCESS, transaction.getStatus());
         assertEquals(PaymentStatus.SUCCESS, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.CONFIRMED, transaction.getOrder().getOrderStatus());
         verify(accountUserRepository).findByRoleInAndIsActiveTrue(any());
     }
 
+    @Test
+    void handleMomoIpnMarksSuccessfulCreatedOrderAsConfirmed() {
+        PaymentTransaction transaction = pendingTransaction(PaymentGateway.MOMO);
+        Map<String, String> params = momoParams("0", ORDER_AMOUNT);
+        when(momoGatewayClient.verify(params)).thenReturn(true);
+        when(paymentTransactionRepository.findByGatewayAndRequestId(PaymentGateway.MOMO, REQUEST_ID))
+                .thenReturn(Optional.of(transaction));
+        when(accountUserRepository.findByRoleInAndIsActiveTrue(any())).thenReturn(List.of());
+
+        paymentService.handleMomoIpn(params);
+
+        assertEquals(PaymentTransactionStatus.SUCCESS, transaction.getStatus());
+        assertEquals(PaymentStatus.SUCCESS, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.CONFIRMED, transaction.getOrder().getOrderStatus());
+        assertEquals("MOMO123", transaction.getGatewayTransactionId());
+        assertNotNull(transaction.getPaidAt());
+    }
+
+    @Test
+    void successfulPaymentDoesNotReopenCancelledOrder() {
+        PaymentTransaction transaction = pendingTransaction();
+        transaction.getOrder().setOrderStatus(OrderStatus.CANCELLED);
+        Map<String, String> params = vnpayParams("00", "00", ORDER_AMOUNT);
+        when(vnpayGatewayClient.verify(params)).thenReturn(true);
+        when(paymentTransactionRepository.findByGatewayAndRequestId(PaymentGateway.VNPAY, REQUEST_ID))
+                .thenReturn(Optional.of(transaction));
+        when(accountUserRepository.findByRoleInAndIsActiveTrue(any())).thenReturn(List.of());
+
+        paymentService.handleVnpayIpn(params);
+
+        assertEquals(PaymentTransactionStatus.SUCCESS, transaction.getStatus());
+        assertEquals(PaymentStatus.SUCCESS, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.CANCELLED, transaction.getOrder().getOrderStatus());
+    }
+
+    @Test
+    void successfulPaymentDoesNotReopenReturnedOrder() {
+        PaymentTransaction transaction = pendingTransaction();
+        transaction.getOrder().setOrderStatus(OrderStatus.RETURNED);
+        Map<String, String> params = vnpayParams("00", "00", ORDER_AMOUNT);
+        when(vnpayGatewayClient.verify(params)).thenReturn(true);
+        when(paymentTransactionRepository.findByGatewayAndRequestId(PaymentGateway.VNPAY, REQUEST_ID))
+                .thenReturn(Optional.of(transaction));
+        when(accountUserRepository.findByRoleInAndIsActiveTrue(any())).thenReturn(List.of());
+
+        paymentService.handleVnpayIpn(params);
+
+        assertEquals(PaymentTransactionStatus.SUCCESS, transaction.getStatus());
+        assertEquals(PaymentStatus.SUCCESS, transaction.getOrder().getPaymentStatus());
+        assertEquals(OrderStatus.RETURNED, transaction.getOrder().getOrderStatus());
+    }
+
     private PaymentTransaction pendingTransaction() {
+        return pendingTransaction(PaymentGateway.VNPAY);
+    }
+
+    private PaymentTransaction pendingTransaction(PaymentGateway gateway) {
         Order order = new Order();
         order.setPaymentStatus(PaymentStatus.PENDING);
+        order.setOrderStatus(OrderStatus.CREATED);
 
         PaymentTransaction transaction = new PaymentTransaction();
         transaction.setOrder(order);
-        transaction.setGateway(PaymentGateway.VNPAY);
+        transaction.setGateway(gateway);
         transaction.setRequestId(REQUEST_ID);
         transaction.setAmount(ORDER_AMOUNT);
         transaction.setStatus(PaymentTransactionStatus.PENDING);
@@ -213,6 +277,15 @@ class PaymentServiceVnpayTest {
                 "vnp_TransactionNo", "VNP123",
                 "vnp_Amount", String.valueOf(amount * 100),
                 "vnp_SecureHash", "signed"
+        );
+    }
+
+    private Map<String, String> momoParams(String resultCode, long amount) {
+        return Map.of(
+                "requestId", REQUEST_ID,
+                "resultCode", resultCode,
+                "transId", "MOMO123",
+                "amount", String.valueOf(amount)
         );
     }
 }
