@@ -6,8 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,20 +15,19 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AttendanceRecordResponse {
-    private UUID id;
-    private UUID employeeId;
-    private String employeeName;
-    private LocalDate workDate;
+public class AttendanceShiftBreakdownResponse {
+    private UUID shiftId;
+    private UUID employeeShiftId;
     private String shiftName;
+    private LocalTime scheduledStartTime;
+    private LocalTime scheduledEndTime;
     private LocalDateTime checkInTime;
     private LocalDateTime checkOutTime;
     private double workingHours;
     private long lateMinutes;
     private long earlyMinutes;
-    private String status; // e.g. ON_TIME, LATE, EARLY, ABSENT_UNEXCUSED, ABSENT_EXCUSED, MISSING_CHECK_IN, MISSING_CHECK_OUT, OFF
-    private List<LocalDateTime> detailTimes;
+    private String status;
     @JsonProperty("isProvisional")
     private boolean isProvisional;
-    private List<AttendanceShiftBreakdownResponse> shiftBreakdowns;
+    private List<AttendanceEventTimelineResponse> events;
 }
