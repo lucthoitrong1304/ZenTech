@@ -39,6 +39,7 @@ public class InternalAiController {
     private final CustomerRepository customerRepository;
     private final CustomerVoucherRepository customerVoucherRepository;
     private final ProductReviewRepository productReviewRepository;
+    private final ReturnRequestRepository returnRequestRepository;
     private final R2StorageService r2StorageService;
     private final ProductService productService;
 
@@ -56,13 +57,23 @@ public class InternalAiController {
         if (context == null) {
             throw new IllegalArgumentException("Context is required");
         }
-        String userIdStr = (String) context.get("userId");
+        Object userIdValue = context.get("userId");
+        String userIdStr = userIdValue == null ? null : String.valueOf(userIdValue);
         if (userIdStr == null || userIdStr.isBlank()) {
             throw new IllegalArgumentException("Context userId is required");
         }
         UUID accountId = UUID.fromString(userIdStr);
         return customerRepository.findByUserInfo_Id(accountId)
                 .orElseThrow(() -> new NoSuchElementException("Customer not found for account " + accountId));
+    }
+
+    private Customer resolveCustomerForPath(UUID requestedUserId, Map<String, Object> context) {
+        Customer customer = resolveCustomer(context);
+        String contextUserId = String.valueOf(context.get("userId"));
+        if (!requestedUserId.equals(UUID.fromString(contextUserId))) {
+            throw new SecurityException("Requested customer does not match authenticated AI context");
+        }
+        return customer;
     }
 
     @PostMapping("/products/resolve")
@@ -293,7 +304,8 @@ public class InternalAiController {
             return ResponseEntity.ok(ApiResponse.success(mapToOrderDetailsDto(orderOpt.get())));
         } else {
             // Return recent orders of the customer
-            List<Order> orders = orderRepository.findByCustomerId(customer.getId(), org.springframework.data.domain.Pageable.unpaged()).getContent();
+            PageRequest pageRequest = PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt"));
+            List<Order> orders = orderRepository.findByCustomerId(customer.getId(), pageRequest).getContent();
             List<OrderSummaryDto> summaries = orders.stream().map(this::mapToOrderSummaryDto).toList();
             return ResponseEntity.ok(ApiResponse.success(summaries));
         }
@@ -368,6 +380,7 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
+        resolveCustomerForPath(userId, context);
         Customer customer = customerRepository.findDetailByUserInfo_Id(userId)
                 .orElseThrow(() -> new NoSuchElementException("Customer profile not found"));
         
@@ -376,8 +389,39 @@ public class InternalAiController {
                 .fullName(customer.getFullName())
                 .email(customer.getUserInfo().getEmail())
                 .imageUrl(customer.getImageUrl())
+                .registeredAt(customer.getUserInfo().getCreatedAt())
                 .build();
         return ResponseEntity.ok(ApiResponse.success(dto));
+    }
+
+    @GetMapping("/customers/{userId}/addresses")
+    public ResponseEntity<ApiResponse<List<AddressDto>>> getCustomerAddresses(
+            @RequestHeader(value = "X-Internal-Token", required = false) String token,
+            @PathVariable UUID userId,
+            @RequestParam Map<String, Object> context
+    ) {
+        verifyToken(token);
+        resolveCustomerForPath(userId, context);
+        Customer customer = customerRepository.findDetailByUserInfo_Id(userId)
+                .orElseThrow(() -> new NoSuchElementException("Customer profile not found"));
+
+        List<AddressDto> addresses = customer.getAddressList() == null ? List.of() : customer.getAddressList().stream()
+                .filter(address -> !address.isDeleted())
+                .sorted(Comparator.comparing(Address::isDefault).reversed()
+                        .thenComparing(Address::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(address -> AddressDto.builder()
+                        .addressId(address.getId())
+                        .phoneNumber(address.getPhoneNumber())
+                        .province(address.getProvince())
+                        .ward(address.getWard())
+                        .street(address.getStreet())
+                        .isDefault(address.isDefault())
+                        .createdAt(address.getCreatedAt())
+                        .updatedAt(address.getUpdatedAt())
+                        .build())
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(addresses));
     }
 
     @GetMapping("/customers/{userId}/vouchers")
@@ -387,8 +431,7 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
-        Customer customer = customerRepository.findByUserInfo_Id(userId)
-                .orElseThrow(() -> new NoSuchElementException("Customer not found"));
+        Customer customer = resolveCustomerForPath(userId, context);
 
         List<CustomerVoucher> vouchers = customerVoucherRepository.findAvailableByCustomerId(
                 customer.getId(), Instant.now(), org.springframework.data.domain.Pageable.unpaged()
@@ -427,8 +470,7 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
-        Customer customer = customerRepository.findByUserInfo_Id(userId)
-                .orElseThrow(() -> new NoSuchElementException("Customer not found"));
+        Customer customer = resolveCustomerForPath(userId, context);
 
         // Simulate loyalty points for the demo since points are not mapped in DB
         LoyaltyPointsDto dto = LoyaltyPointsDto.builder()
@@ -449,7 +491,8 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
-        Order order = orderRepository.findById(orderId)
+        Customer customer = resolveCustomer(context);
+        Order order = orderRepository.findByIdAndCustomer_Id(orderId, customer.getId())
                 .orElseThrow(() -> new NoSuchElementException("Order not found"));
 
         List<TrackingEventDto> events = new ArrayList<>();
@@ -492,7 +535,8 @@ public class InternalAiController {
             @RequestParam Map<String, Object> context
     ) {
         verifyToken(token);
-        OrderDetail item = orderDetailRepository.findById(orderItemId)
+        Customer customer = resolveCustomer(context);
+        OrderDetail item = orderDetailRepository.findByIdAndOrder_Customer_Id(orderItemId, customer.getId())
                 .orElseThrow(() -> new NoSuchElementException("Order item not found"));
 
         Instant purchaseDate = item.getOrder().getCreatedAt();
@@ -510,6 +554,31 @@ public class InternalAiController {
                 .build();
 
         return ResponseEntity.ok(ApiResponse.success(dto));
+    }
+
+    @GetMapping("/customers/{userId}/returns")
+    public ResponseEntity<ApiResponse<List<ReturnRequestDto>>> getCustomerReturns(
+            @RequestHeader(value = "X-Internal-Token", required = false) String token,
+            @PathVariable UUID userId,
+            @RequestParam Map<String, Object> context
+    ) {
+        verifyToken(token);
+        Customer customer = resolveCustomerForPath(userId, context);
+
+        List<ReturnRequestDto> returns = returnRequestRepository.findByOrder_Customer_IdOrderByCreatedAtDesc(customer.getId())
+                .stream()
+                .map(request -> ReturnRequestDto.builder()
+                        .returnRequestId(request.getId())
+                        .orderId(request.getOrder() != null ? request.getOrder().getId() : null)
+                        .reason(request.getReason())
+                        .details(request.getDetails())
+                        .status(request.getStatus() != null ? request.getStatus().name() : null)
+                        .resellable(request.isResellable())
+                        .createdAt(request.getCreatedAt())
+                        .build())
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(returns));
     }
 
     // DTO Definitions
@@ -631,6 +700,20 @@ public class InternalAiController {
         private String fullName;
         private String email;
         private String imageUrl;
+        private Instant registeredAt;
+    }
+
+    @Data
+    @Builder
+    public static class AddressDto {
+        private UUID addressId;
+        private String phoneNumber;
+        private String province;
+        private String ward;
+        private String street;
+        private boolean isDefault;
+        private Instant createdAt;
+        private Instant updatedAt;
     }
 
     @Data
@@ -688,6 +771,18 @@ public class InternalAiController {
         private Instant purchaseDate;
         private Instant warrantyEndDate;
         private String status;
+    }
+
+    @Data
+    @Builder
+    public static class ReturnRequestDto {
+        private UUID returnRequestId;
+        private UUID orderId;
+        private String reason;
+        private String details;
+        private String status;
+        private boolean resellable;
+        private Instant createdAt;
     }
 
     @ExceptionHandler(SecurityException.class)
