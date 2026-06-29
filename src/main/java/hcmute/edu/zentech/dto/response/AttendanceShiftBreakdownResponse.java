@@ -29,5 +29,12 @@ public class AttendanceShiftBreakdownResponse {
     private String status;
     @JsonProperty("isProvisional")
     private boolean isProvisional;
+    @JsonProperty("isLeave")
+    private boolean isLeave;
+    @JsonProperty("isWfh")
+    private boolean isWfh;
+    @JsonProperty("isAfk")
+    private boolean isAfk;
+    private double afkHours;
     private List<AttendanceEventTimelineResponse> events;
 }

@@ -39,6 +39,7 @@ public class ApprovalRequestMapper {
                 .reason(request.getReason())
                 .status(request.getStatus())
                 .requestedAt(request.getRequestedAt())
+                .targetShifts(request.getTargetShifts() == null ? null : request.getTargetShifts().stream().map(this::toShiftResponse).toList())
                 .build();
     }
 

@@ -29,6 +29,8 @@ public class ApprovalService {
     private final LeaveTypeRepository leaveTypeRepository;
     private final LeaveManagementService leaveManagementService;
     private final NotificationService notificationService;
+    private final ShiftRepository shiftRepository;
+    private final EmployeeShiftRepository employeeShiftRepository;
 
     private void checkLock(LocalDate date) {
         Optional<PayPeriod> p = payPeriodRepository.findPeriodActiveAt(date);
@@ -258,16 +260,6 @@ public class ApprovalService {
                 .orElseThrow(() -> new RuntimeException("Loại phép không tồn tại."));
         validateLeaveRequestShape(leaveType, request);
 
-        leaveManagementService.ensureQuotas(employee, request.getStartDate().getYear());
-        BigDecimal requestedAmount = leaveManagementService.calculateAmount(
-                leaveType,
-                request.getStartDate(),
-                request.getEndDate(),
-                request.getStartTime(),
-                request.getEndTime()
-        );
-        leaveManagementService.assertWithinQuota(employee, leaveType, request.getStartDate().getYear(), requestedAmount, null, true);
-
         LeaveRequest entity = new LeaveRequest();
         entity.setEmployee(employee);
         entity.setLeaveType(leaveType);
@@ -278,6 +270,21 @@ public class ApprovalService {
         entity.setReason(request.getReason().trim());
         entity.setRequestedAt(LocalDateTime.now());
         entity.setStatus(ApprovalStatus.PENDING);
+
+        if (request.getShiftIds() != null && !request.getShiftIds().isEmpty()) {
+            if (!request.getStartDate().equals(request.getEndDate())) {
+                throw new RuntimeException("Chỉ hỗ trợ chọn ca nghỉ khi nghỉ phép trong cùng một ngày.");
+            }
+            List<Shift> shifts = shiftRepository.findAllById(request.getShiftIds());
+            if (shifts.size() != request.getShiftIds().size()) {
+                throw new RuntimeException("Một số ca làm việc không tồn tại.");
+            }
+            entity.setTargetShifts(shifts);
+        }
+
+        leaveManagementService.ensureQuotas(employee, request.getStartDate().getYear());
+        BigDecimal requestedAmount = leaveManagementService.calculateAmount(entity);
+        leaveManagementService.assertWithinQuota(employee, leaveType, request.getStartDate().getYear(), requestedAmount, null, true);
 
         LeaveRequest saved = leaveRequestRepository.save(entity);
 

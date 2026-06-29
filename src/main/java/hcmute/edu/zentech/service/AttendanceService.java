@@ -80,19 +80,42 @@ public class AttendanceService {
         Employee employee = employeeRepository.findByUserInfo_Id(accountId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
 
-        boolean locationValid = attendanceLocationPolicyService.isLocationAllowed(
-                request.getLatitude(),
-                request.getLongitude()
-        );
-        if (!locationValid) {
-            String message = attendanceLocationPolicyService.isPolicyEnabled()
-                    ? "Vị trí hiện tại nằm ngoài phạm vi check-in hợp lệ."
-                    : "Vị trí check-in không hợp lệ.";
-            throw new RuntimeException(message);
-        }
-
         if (employee.getFaceDescriptors() == null || employee.getFaceDescriptors().isEmpty()) {
             throw new RuntimeException("Nhân viên chưa đăng ký khuôn mặt.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime endOfDay = LocalDate.now().atTime(LocalTime.MAX);
+        List<AttendanceEvent> todayEvents = attendanceEventRepository
+                .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
+        
+        AttendanceEventType type = AttendanceEventType.CHECK_IN;
+        if (!todayEvents.isEmpty()) {
+            AttendanceEvent lastEvent = todayEvents.get(todayEvents.size() - 1);
+            if (lastEvent.getEventType() == AttendanceEventType.CHECK_IN) {
+                type = AttendanceEventType.CHECK_OUT;
+            }
+        }
+
+        AttendanceCalculator.EffectiveShift selectedShift = resolveAttendanceShift(employee, now, type, todayEvents);
+
+        if (selectedShift.isLeave()) {
+            throw new RuntimeException("Bạn đã được duyệt nghỉ phép ca " + selectedShift.shift().getName() + ".");
+        }
+
+        boolean locationValid = true;
+        if (!selectedShift.isWfh()) {
+            locationValid = attendanceLocationPolicyService.isLocationAllowed(
+                    request.getLatitude(),
+                    request.getLongitude()
+            );
+            if (!locationValid) {
+                String message = attendanceLocationPolicyService.isPolicyEnabled()
+                        ? "Vị trí hiện tại nằm ngoài phạm vi check-in hợp lệ."
+                        : "Vị trí check-in không hợp lệ.";
+                throw new RuntimeException(message);
+            }
         }
 
         double minDistance = Double.MAX_VALUE;
@@ -139,31 +162,13 @@ public class AttendanceService {
         // Thành công: Reset rate limit
         resetFailedCheckIn(accountId);
 
-        LocalDateTime now = LocalDateTime.now();
-        
-        // Xác định loại sự kiện CHECK_IN hay CHECK_OUT dựa trên lịch sử hôm nay
-        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
-        LocalDateTime endOfDay = LocalDate.now().atTime(LocalTime.MAX);
-        List<AttendanceEvent> todayEvents = attendanceEventRepository
-                .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
-        
-        AttendanceEventType type = AttendanceEventType.CHECK_IN;
-        if (!todayEvents.isEmpty()) {
-            AttendanceEvent lastEvent = todayEvents.get(todayEvents.size() - 1);
-            if (lastEvent.getEventType() == AttendanceEventType.CHECK_IN) {
-                type = AttendanceEventType.CHECK_OUT;
-            }
-        }
-
-        AttendanceCalculator.EffectiveShift selectedShift = resolveAttendanceShift(employee, now, type, todayEvents);
-
         AttendanceEvent event = new AttendanceEvent();
         event.setEmployee(employee);
         event.setEmployeeShift(selectedShift.assignment());
         event.setTimestamp(now);
         event.setEventType(type);
         event.setSource("FACE");
-        event.setDetails("Xác thực khuôn mặt thành công. Ca: " + selectedShift.shift().getName()
+        event.setDetails((selectedShift.isWfh() ? "[WFH] " : "") + "Xác thực khuôn mặt thành công. Ca: " + selectedShift.shift().getName()
                 + ". (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
         event.setLatitude(request.getLatitude());
         event.setLongitude(request.getLongitude());

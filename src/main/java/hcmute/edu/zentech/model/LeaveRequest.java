@@ -7,6 +7,8 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -52,4 +54,12 @@ public class LeaveRequest {
     private AccountUser approvedBy;
 
     private LocalDateTime approvedAt;
+
+    @ManyToMany
+    @JoinTable(
+        name = "leave_request_shifts",
+        joinColumns = @JoinColumn(name = "leave_request_id"),
+        inverseJoinColumns = @JoinColumn(name = "shift_id")
+    )
+    private List<Shift> targetShifts = new ArrayList<>();
 }

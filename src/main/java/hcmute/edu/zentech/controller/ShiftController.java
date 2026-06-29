@@ -73,4 +73,12 @@ public class ShiftController {
         shiftService.deleteScheduleAssignment(employeeShiftId, reason);
         return ResponseEntity.ok(ApiResponse.success(null));
     }
+
+    @GetMapping("/my-schedules")
+    public ResponseEntity<ApiResponse<List<EmployeeWeeklyScheduleDto.DailyShiftDto>>> getMyDailyShifts(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(shiftService.getMyDailyShifts(startDate, endDate)));
+    }
 }

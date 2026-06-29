@@ -33,6 +33,58 @@ public class AttendanceCalculator {
     }
 
     public List<EffectiveShift> resolveEffectiveShifts(UUID employeeId, LocalDate date) {
+        List<EffectiveShift> candidates = getRawEffectiveShifts(employeeId, date);
+        List<LeaveRequest> approvedLeaves = leaveRequestRepository
+                .findApprovedLeavesForEmployeeInRange(employeeId, date, date, ApprovalStatus.APPROVED);
+
+        List<EffectiveShift> result = new ArrayList<>();
+        for (EffectiveShift candidate : candidates) {
+            boolean isLeave = false;
+            boolean isWfh = false;
+            boolean isAfk = false;
+            LeaveRequest leaveReq = null;
+
+            if (approvedLeaves != null) {
+                for (LeaveRequest leave : approvedLeaves) {
+                    boolean coversShift = false;
+                    if (leave.getTargetShifts() == null || leave.getTargetShifts().isEmpty()) {
+                        coversShift = true;
+                    } else {
+                        coversShift = leave.getTargetShifts().stream()
+                                .anyMatch(s -> s.getId().equals(candidate.shift().getId()));
+                    }
+
+                    if (coversShift) {
+                        String code = leave.getLeaveType().getCode();
+                        if ("NGHI".equals(code)) {
+                            isLeave = true;
+                            leaveReq = leave;
+                        } else if ("WFH".equals(code)) {
+                            isWfh = true;
+                            leaveReq = leave;
+                        } else if ("AFK".equals(code)) {
+                            isAfk = true;
+                            leaveReq = leave;
+                        }
+                    }
+                }
+            }
+
+            result.add(new EffectiveShift(
+                    candidate.assignment(),
+                    candidate.shift(),
+                    isLeave,
+                    isWfh,
+                    isAfk,
+                    candidate.isSwap(),
+                    leaveReq
+            ));
+        }
+
+        return result;
+    }
+
+    private List<EffectiveShift> getRawEffectiveShifts(UUID employeeId, LocalDate date) {
         List<ScheduleAdjustment> adjustments = scheduleAdjustmentRepository
                 .findByEmployeeIdAndWorkDateBetween(employeeId, date, date);
         List<EffectiveShift> approvedAdjustments = adjustments.stream()
@@ -52,7 +104,9 @@ public class AttendanceCalculator {
         for (ShiftSwapRequest req : swapRequests) {
             List<EffectiveShift> swapResult = resolveSwap(employeeId, date, req);
             if (swapResult != null) {
-                return swapResult;
+                return swapResult.stream()
+                        .map(item -> new EffectiveShift(item.assignment(), item.shift(), false, false, false, true, null))
+                        .toList();
             }
         }
 
@@ -135,10 +189,23 @@ public class AttendanceCalculator {
                 .shiftBreakdowns(breakdowns)
                 .build();
     }
+    public record EffectiveShift(
+            EmployeeShift assignment,
+            Shift shift,
+            boolean isLeave,
+            boolean isWfh,
+            boolean isAfk,
+            boolean isSwap,
+            LeaveRequest leaveRequest
+    ) {
+        public EffectiveShift(EmployeeShift assignment, Shift shift) {
+            this(assignment, shift, false, false, false, false, null);
+        }
 
-    public record EffectiveShift(EmployeeShift assignment, Shift shift) {
+        public EffectiveShift(EmployeeShift assignment, Shift shift, boolean isLeave, boolean isWfh, boolean isAfk, LeaveRequest leaveRequest) {
+            this(assignment, shift, isLeave, isWfh, isAfk, false, leaveRequest);
+        }
     }
-
     private List<EffectiveShift> resolveSwap(UUID employeeId, LocalDate date, ShiftSwapRequest req) {
         if (req.getType() == SwapRequestType.COVER) {
             if (req.getTargetEmployee().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
@@ -206,7 +273,7 @@ public class AttendanceCalculator {
         String status;
 
         if (checkIn == null) {
-            if (!approvedLeaves.isEmpty()) {
+            if (effectiveShift.isLeave() || !approvedLeaves.isEmpty()) {
                 status = "ABSENT_EXCUSED";
             } else if (date.equals(LocalDate.now()) && !hasShiftEnded(shift, LocalTime.now())) {
                 status = "NOT_STARTED";
@@ -225,7 +292,7 @@ public class AttendanceCalculator {
                     workingHours = Math.max(0.0, Duration.between(checkIn, LocalDateTime.now()).toMinutes() / 60.0);
                     provisional = true;
                 }
-                status = "MISSING_CHECK_OUT";
+                status = effectiveShift.isWfh() ? "WFH_MISSING_CHECK_OUT" : "MISSING_CHECK_OUT";
             } else {
                 workingHours = Math.max(0.0, Duration.between(checkIn, checkOut).toMinutes() / 60.0);
                 String outStatus = classifyCheckOut(shift, checkOut.toLocalTime());
@@ -234,6 +301,18 @@ public class AttendanceCalculator {
                     earlyMinutes = Math.max(0, Duration.between(checkOut.toLocalTime(), onTimeStart).toMinutes());
                 }
                 status = combineShiftStatus(inStatus, outStatus);
+                if (effectiveShift.isWfh()) {
+                    status = "WFH_" + status;
+                }
+            }
+        }
+
+        double afkHours = 0.0;
+        if (effectiveShift.isAfk() && effectiveShift.leaveRequest() != null) {
+            LeaveRequest afkReq = effectiveShift.leaveRequest();
+            if (afkReq.getStartTime() != null && afkReq.getEndTime() != null) {
+                afkHours = Duration.between(afkReq.getStartTime(), afkReq.getEndTime()).toMinutes() / 60.0;
+                workingHours = Math.max(0.0, workingHours - afkHours);
             }
         }
 
@@ -250,6 +329,10 @@ public class AttendanceCalculator {
                 .earlyMinutes(earlyMinutes)
                 .status(status)
                 .isProvisional(provisional)
+                .isLeave(effectiveShift.isLeave())
+                .isWfh(effectiveShift.isWfh())
+                .isAfk(effectiveShift.isAfk())
+                .afkHours(afkHours)
                 .events(events)
                 .build();
     }

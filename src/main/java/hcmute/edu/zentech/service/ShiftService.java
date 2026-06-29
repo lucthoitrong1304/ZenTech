@@ -32,6 +32,7 @@ public class ShiftService {
     private final ScheduleAdjustmentRepository scheduleAdjustmentRepository;
     private final AccountUserRepository accountUserRepository;
     private final NotificationService notificationService;
+    private final AttendanceCalculator attendanceCalculator;
 
 
     @Transactional
@@ -61,7 +62,6 @@ public class ShiftService {
         return shiftMapper.toDtoList(updatedShifts);
     }
 
-    @Transactional(readOnly = true)
     public Page<EmployeeWeeklyScheduleDto> getWeeklySchedules(LocalDate startDate, LocalDate endDate, String keyword, Pageable pageable) {
         Page<Employee> employeePage = employeeRepository.searchEmployees(keyword, null, null, pageable);
         
@@ -69,38 +69,45 @@ public class ShiftService {
             return new PageImpl<>(Collections.emptyList(), pageable, employeePage.getTotalElements());
         }
         
-        List<UUID> employeeIds = employeePage.getContent().stream().map(Employee::getId).collect(Collectors.toList());
-        
-        List<EmployeeWeeklyScheduleProjection> projections = employeeShiftRepository.findProjectionsByEmployeeIdsAndDateRange(employeeIds, startDate, endDate);
-        
-        Map<UUID, List<EmployeeWeeklyScheduleProjection>> schedulesByEmployee = projections.stream()
-                .collect(Collectors.groupingBy(EmployeeWeeklyScheduleProjection::getEmployeeId));
-                
         List<EmployeeWeeklyScheduleDto> dtos = employeePage.getContent().stream().map(emp -> {
             EmployeeWeeklyScheduleDto dto = new EmployeeWeeklyScheduleDto();
             dto.setEmployeeId(emp.getId());
             dto.setEmployeeName(emp.getFullName());
             
             List<EmployeeWeeklyScheduleDto.DailyShiftDto> dailyShifts = new ArrayList<>();
-            List<EmployeeWeeklyScheduleProjection> empSchedules = schedulesByEmployee.getOrDefault(emp.getId(), Collections.emptyList());
-            
-            for (EmployeeWeeklyScheduleProjection p : empSchedules) {
-                EmployeeWeeklyScheduleDto.DailyShiftDto dailyDto = new EmployeeWeeklyScheduleDto.DailyShiftDto();
-                dailyDto.setEmployeeShiftId(p.getEmployeeShiftId());
-                dailyDto.setShiftId(p.getShiftId());
-                dailyDto.setShiftName(p.getShiftName());
-                dailyDto.setColorCode(p.getColorCode());
-                dailyDto.setWorkDate(p.getWorkDate());
-                dailyDto.setStartTime(p.getStartTime());
-                dailyDto.setEndTime(p.getEndTime());
-                dailyDto.setShiftType(p.getShiftType());
-                dailyDto.setEarlyCheckInMinutes(defaultInt(p.getEarlyCheckInMinutes(), 30));
-                dailyDto.setLateCheckOutMinutes(defaultInt(p.getLateCheckOutMinutes(), 60));
-                dailyDto.setOnTimeCheckInStartMinutes(defaultInt(p.getOnTimeCheckInStartMinutes(), 15));
-                dailyDto.setOnTimeCheckInEndMinutes(defaultInt(p.getOnTimeCheckInEndMinutes(), 5));
-                dailyDto.setOnTimeCheckOutStartMinutes(defaultInt(p.getOnTimeCheckOutStartMinutes(), 5));
-                dailyDto.setOnTimeCheckOutEndMinutes(defaultInt(p.getOnTimeCheckOutEndMinutes(), 15));
-                dailyShifts.add(dailyDto);
+            for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
+                List<AttendanceCalculator.EffectiveShift> effShifts = attendanceCalculator.resolveEffectiveShifts(emp.getId(), date);
+                for (AttendanceCalculator.EffectiveShift eff : effShifts) {
+                    EmployeeWeeklyScheduleDto.DailyShiftDto dailyDto = new EmployeeWeeklyScheduleDto.DailyShiftDto();
+                    dailyDto.setEmployeeShiftId(eff.assignment() != null ? eff.assignment().getId() : null);
+                    dailyDto.setShiftId(eff.shift().getId());
+                    dailyDto.setShiftName(eff.shift().getName());
+                    dailyDto.setColorCode(eff.shift().getColorCode());
+                    dailyDto.setWorkDate(date);
+                    dailyDto.setStartTime(eff.shift().getStartTime());
+                    dailyDto.setEndTime(eff.shift().getEndTime());
+                    dailyDto.setShiftType(eff.shift().getType());
+                    dailyDto.setEarlyCheckInMinutes(defaultInt(eff.shift().getEarlyCheckInMinutes(), 30));
+                    dailyDto.setLateCheckOutMinutes(defaultInt(eff.shift().getLateCheckOutMinutes(), 60));
+                    dailyDto.setOnTimeCheckInStartMinutes(defaultInt(eff.shift().getOnTimeCheckInStartMinutes(), 15));
+                    dailyDto.setOnTimeCheckInEndMinutes(defaultInt(eff.shift().getOnTimeCheckInEndMinutes(), 5));
+                    dailyDto.setOnTimeCheckOutStartMinutes(defaultInt(eff.shift().getOnTimeCheckOutStartMinutes(), 5));
+                    dailyDto.setOnTimeCheckOutEndMinutes(defaultInt(eff.shift().getOnTimeCheckOutEndMinutes(), 15));
+                    
+                    dailyDto.setLeave(eff.isLeave());
+                    dailyDto.setWfh(eff.isWfh());
+                    dailyDto.setSwap(eff.isSwap());
+                    
+                    if (eff.isLeave()) {
+                        dailyDto.setStatusLabel("[Nghỉ phép]");
+                    } else if (eff.isWfh()) {
+                        dailyDto.setStatusLabel("[WFH]");
+                    } else if (eff.isSwap()) {
+                        dailyDto.setStatusLabel("[Đổi ca]");
+                    }
+                    
+                    dailyShifts.add(dailyDto);
+                }
             }
             
             dto.setShifts(dailyShifts);
@@ -109,7 +116,6 @@ public class ShiftService {
         
         return new PageImpl<>(dtos, pageable, employeePage.getTotalElements());
     }
-
     private void validateAndApplyScheduleAdjustment(Employee employee, LocalDate workDate, Shift newShift, String reason) {
         Optional<PayPeriod> periodOpt = payPeriodRepository.findPeriodActiveAt(workDate);
         if (periodOpt.isPresent() && periodOpt.get().isLocked()) {
@@ -345,5 +351,49 @@ public class ShiftService {
 
     private int defaultInt(Integer value, int fallback) {
         return value == null ? fallback : value;
+    }
+
+    @Transactional(readOnly = true)
+    public List<EmployeeWeeklyScheduleDto.DailyShiftDto> getMyDailyShifts(LocalDate startDate, LocalDate endDate) {
+        UUID accountId = SecurityContextUtils.getCurrentUserId();
+        Employee employee = employeeRepository.findByUserInfo_Id(accountId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
+        
+        List<EmployeeWeeklyScheduleDto.DailyShiftDto> dailyShifts = new ArrayList<>();
+        for (LocalDate date = startDate; !date.isAfter(endDate); date = date.plusDays(1)) {
+            List<AttendanceCalculator.EffectiveShift> effShifts = attendanceCalculator.resolveEffectiveShifts(employee.getId(), date);
+            for (AttendanceCalculator.EffectiveShift eff : effShifts) {
+                EmployeeWeeklyScheduleDto.DailyShiftDto dailyDto = new EmployeeWeeklyScheduleDto.DailyShiftDto();
+                dailyDto.setEmployeeShiftId(eff.assignment() != null ? eff.assignment().getId() : null);
+                dailyDto.setShiftId(eff.shift().getId());
+                dailyDto.setShiftName(eff.shift().getName());
+                dailyDto.setColorCode(eff.shift().getColorCode());
+                dailyDto.setWorkDate(date);
+                dailyDto.setStartTime(eff.shift().getStartTime());
+                dailyDto.setEndTime(eff.shift().getEndTime());
+                dailyDto.setShiftType(eff.shift().getType());
+                dailyDto.setEarlyCheckInMinutes(defaultInt(eff.shift().getEarlyCheckInMinutes(), 30));
+                dailyDto.setLateCheckOutMinutes(defaultInt(eff.shift().getLateCheckOutMinutes(), 60));
+                dailyDto.setOnTimeCheckInStartMinutes(defaultInt(eff.shift().getOnTimeCheckInStartMinutes(), 15));
+                dailyDto.setOnTimeCheckInEndMinutes(defaultInt(eff.shift().getOnTimeCheckInEndMinutes(), 5));
+                dailyDto.setOnTimeCheckOutStartMinutes(defaultInt(eff.shift().getOnTimeCheckOutStartMinutes(), 5));
+                dailyDto.setOnTimeCheckOutEndMinutes(defaultInt(eff.shift().getOnTimeCheckOutEndMinutes(), 15));
+                
+                dailyDto.setLeave(eff.isLeave());
+                dailyDto.setWfh(eff.isWfh());
+                dailyDto.setSwap(eff.isSwap());
+                
+                if (eff.isLeave()) {
+                    dailyDto.setStatusLabel("[Nghỉ phép]");
+                } else if (eff.isWfh()) {
+                    dailyDto.setStatusLabel("[WFH]");
+                } else if (eff.isSwap()) {
+                    dailyDto.setStatusLabel("[Đổi ca]");
+                }
+                
+                dailyShifts.add(dailyDto);
+            }
+        }
+        return dailyShifts;
     }
 }

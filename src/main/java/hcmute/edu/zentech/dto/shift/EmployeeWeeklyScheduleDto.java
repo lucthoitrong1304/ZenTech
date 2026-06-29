@@ -1,5 +1,6 @@
 package hcmute.edu.zentech.dto.shift;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import hcmute.edu.zentech.model.ShiftType;
 import lombok.Data;
 
@@ -30,5 +31,12 @@ public class EmployeeWeeklyScheduleDto {
         private Integer onTimeCheckInEndMinutes;
         private Integer onTimeCheckOutStartMinutes;
         private Integer onTimeCheckOutEndMinutes;
+        @JsonProperty("isLeave")
+        private boolean isLeave;
+        @JsonProperty("isWfh")
+        private boolean isWfh;
+        @JsonProperty("isSwap")
+        private boolean isSwap;
+        private String statusLabel;
     }
 }

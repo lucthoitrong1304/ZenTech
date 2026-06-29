@@ -126,6 +126,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/management/ai/**").hasAuthority("AI_CREATE")
                         .requestMatchers(HttpMethod.PATCH, "/api/management/ai/**").hasAuthority("AI_UPDATE")
                         .requestMatchers(HttpMethod.DELETE, "/api/management/ai/**").hasAuthority("AI_DELETE")
+                        .requestMatchers(HttpMethod.GET, "/api/shifts/my-schedules").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/shifts/**", "/api/attendance/report", "/api/attendance/location-policy").hasAuthority("SCHEDULE_VIEW")
                         .requestMatchers("/api/shifts/**").hasAuthority("SCHEDULE_UPDATE")
                         .requestMatchers(HttpMethod.PUT, "/api/attendance/location-policy").hasAuthority("SCHEDULE_UPDATE")
