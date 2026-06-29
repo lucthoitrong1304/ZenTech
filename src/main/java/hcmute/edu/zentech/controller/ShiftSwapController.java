@@ -44,4 +44,10 @@ public class ShiftSwapController {
     public ResponseEntity<ApiResponse<List<ShiftSwapRequestResponse>>> getMySwaps() {
         return ResponseEntity.ok(ApiResponse.success(approvalRequestMapper.toShiftSwapResponses(approvalService.getMySwaps())));
     }
+
+    @PostMapping("/api/schedules/swaps/{id}/cancel")
+    public ResponseEntity<ApiResponse<Void>> cancelSwapRequest(@PathVariable UUID id) {
+        approvalService.cancelShiftSwapRequest(id);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
 }

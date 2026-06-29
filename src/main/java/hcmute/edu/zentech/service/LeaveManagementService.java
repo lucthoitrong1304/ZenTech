@@ -219,8 +219,8 @@ public class LeaveManagementService {
     @Transactional(readOnly = true)
     public BigDecimal sumUsage(UUID employeeId, UUID leaveTypeId, int year, UUID excludingRequestId, boolean includePending) {
         List<ApprovalStatus> statuses = includePending
-                ? List.of(ApprovalStatus.APPROVED, ApprovalStatus.PENDING)
-                : List.of(ApprovalStatus.APPROVED);
+                ? List.of(ApprovalStatus.APPROVED, ApprovalStatus.PENDING, ApprovalStatus.CANCEL_PENDING)
+                : List.of(ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING);
         LocalDate start = LocalDate.of(year, 1, 1);
         LocalDate end = LocalDate.of(year, 12, 31);
         return leaveRequestRepository

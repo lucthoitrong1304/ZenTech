@@ -386,18 +386,7 @@ public class AttendanceService {
         AccountUser accountUser = accountUserRepository.findById(accountId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy người dùng."));
 
-        List<Employee> targetEmployees = new ArrayList<>();
-        boolean isManager = accountUser.getRole() == Role.OWNER || accountUser.getRole() == Role.MANAGER || accountUser.getRole() == Role.ADMIN;
-
-        if (isManager) {
-            targetEmployees = employeeRepository.findAll();
-        } else if (accountUser.getRole() == Role.EMPLOYEE) {
-            Employee employee = employeeRepository.findByUserInfo_Id(accountId)
-                    .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
-            targetEmployees.add(employee);
-        } else {
-            throw new RuntimeException("Bạn không có quyền truy cập báo cáo này.");
-        }
+        List<Employee> targetEmployees = employeeRepository.findAll();
 
         List<LocalDate> allDates = new ArrayList<>();
         LocalDate curr = startDate;

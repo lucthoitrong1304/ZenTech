@@ -36,7 +36,7 @@ public class AttendanceCalculator {
     public List<EffectiveShift> resolveEffectiveShifts(UUID employeeId, LocalDate date) {
         List<EffectiveShift> candidates = getRawEffectiveShifts(employeeId, date);
         List<LeaveRequest> approvedLeaves = leaveRequestRepository
-                .findApprovedLeavesForEmployeeInRange(employeeId, date, date, ApprovalStatus.APPROVED);
+                .findLeavesForEmployeeInRangeWithStatuses(employeeId, date, date, List.of(ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING));
 
         List<EffectiveShift> result = new ArrayList<>();
         for (EffectiveShift candidate : candidates) {
@@ -132,7 +132,7 @@ public class AttendanceCalculator {
         }
 
         List<ShiftSwapRequest> swapRequests = shiftSwapRequestRepository
-                .findApprovedSwapsForEmployeeInRange(employeeId, date, date, ApprovalStatus.APPROVED);
+                .findSwapsForEmployeeInRangeWithStatuses(employeeId, date, date, List.of(ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING));
         for (ShiftSwapRequest req : swapRequests) {
             List<EffectiveShift> swapResult = resolveSwap(employeeId, date, req);
             if (swapResult != null) {
@@ -162,7 +162,7 @@ public class AttendanceCalculator {
         List<AttendanceEvent> rawEvents = attendanceEventRepository
                 .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
         List<AttendanceAdjustment> adjustments = attendanceAdjustmentRepository
-                .findByEmployeeIdAndWorkDateBetweenAndStatus(employee.getId(), date, date, ApprovalStatus.APPROVED);
+                .findByEmployeeIdAndWorkDateBetweenAndStatusIn(employee.getId(), date, date, List.of(ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING));
 
         List<LocalDateTime> detailTimes = uniqueTimes(rawEvents.stream()
                 .map(AttendanceEvent::getTimestamp)
@@ -171,7 +171,7 @@ public class AttendanceCalculator {
         List<AttendanceShiftBreakdownResponse> breakdowns = new ArrayList<>();
         if (!shifts.isEmpty()) {
             List<LeaveRequest> approvedLeaves = leaveRequestRepository
-                    .findApprovedLeavesForEmployeeInRange(employee.getId(), date, date, ApprovalStatus.APPROVED);
+                    .findLeavesForEmployeeInRangeWithStatuses(employee.getId(), date, date, List.of(ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING));
             if (approvedLeaves == null) {
                 approvedLeaves = Collections.emptyList();
             }
@@ -437,7 +437,7 @@ public class AttendanceCalculator {
     }
 
     private String classifyCheckIn(Shift shift, LocalTime checkIn) {
-        if (shift.getStartTime() == null) {
+        if (shift.getType() == ShiftType.OFF || shift.getStartTime() == null) {
             return "ON_TIME";
         }
         LocalTime onTimeStart = shift.getStartTime().minusMinutes(defaultInt(shift.getOnTimeCheckInStartMinutes(), 15));
@@ -452,7 +452,7 @@ public class AttendanceCalculator {
     }
 
     private String classifyCheckOut(Shift shift, LocalTime checkOut) {
-        if (shift.getEndTime() == null) {
+        if (shift.getType() == ShiftType.OFF || shift.getEndTime() == null) {
             return "ON_TIME";
         }
         LocalTime onTimeStart = shift.getEndTime().minusMinutes(defaultInt(shift.getOnTimeCheckOutStartMinutes(), 5));

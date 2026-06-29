@@ -38,8 +38,22 @@ public class ShiftService {
     @Transactional
     public ShiftDto createShift(ShiftCreateDto dto) {
         Shift shift = shiftMapper.toEntity(dto);
+        if (shift.getType() == ShiftType.OFF) {
+            clearOffShiftFields(shift);
+        }
         shift = shiftRepository.save(shift);
         return shiftMapper.toDto(shift);
+    }
+
+    private void clearOffShiftFields(Shift shift) {
+        shift.setStartTime(null);
+        shift.setEndTime(null);
+        shift.setEarlyCheckInMinutes(null);
+        shift.setLateCheckOutMinutes(null);
+        shift.setOnTimeCheckInStartMinutes(null);
+        shift.setOnTimeCheckInEndMinutes(null);
+        shift.setOnTimeCheckOutStartMinutes(null);
+        shift.setOnTimeCheckOutEndMinutes(null);
     }
 
     @Transactional(readOnly = true)
@@ -55,6 +69,9 @@ public class ShiftService {
                 Shift shift = shiftRepository.findById(dto.getId()).orElse(null);
                 if (shift != null) {
                     shiftMapper.applyDto(shift, dto);
+                    if (shift.getType() == ShiftType.OFF) {
+                        clearOffShiftFields(shift);
+                    }
                     updatedShifts.add(shiftRepository.save(shift));
                 }
             }
@@ -62,8 +79,15 @@ public class ShiftService {
         return shiftMapper.toDtoList(updatedShifts);
     }
 
-    public Page<EmployeeWeeklyScheduleDto> getWeeklySchedules(LocalDate startDate, LocalDate endDate, String keyword, Pageable pageable) {
-        Page<Employee> employeePage = employeeRepository.searchEmployees(keyword, null, null, pageable);
+    public Page<EmployeeWeeklyScheduleDto> getWeeklySchedules(LocalDate startDate, LocalDate endDate, String keyword, UUID employeeId, Pageable pageable) {
+        Page<Employee> employeePage;
+        if (employeeId != null) {
+            Optional<Employee> empOpt = employeeRepository.findById(employeeId);
+            List<Employee> list = empOpt.map(List::of).orElse(Collections.emptyList());
+            employeePage = new PageImpl<>(list, pageable, list.size());
+        } else {
+            employeePage = employeeRepository.searchEmployees(keyword, null, null, pageable);
+        }
         
         if (employeePage.isEmpty()) {
             return new PageImpl<>(Collections.emptyList(), pageable, employeePage.getTotalElements());

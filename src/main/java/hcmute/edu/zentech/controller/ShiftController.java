@@ -41,8 +41,9 @@ public class ShiftController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) UUID employeeId,
             Pageable pageable) {
-        Page<EmployeeWeeklyScheduleDto> schedules = shiftService.getWeeklySchedules(startDate, endDate, keyword, pageable);
+        Page<EmployeeWeeklyScheduleDto> schedules = shiftService.getWeeklySchedules(startDate, endDate, keyword, employeeId, pageable);
         WeeklyScheduleResponse response = new WeeklyScheduleResponse(schedules);
         return ResponseEntity.ok(ApiResponse.success(response));
     }

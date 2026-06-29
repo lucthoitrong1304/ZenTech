@@ -45,7 +45,7 @@ public class ShiftSwapRequest {
     private SwapRequestType type;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(nullable = false, length = 30)
     private ApprovalStatus status;
 
     @Column(nullable = false)

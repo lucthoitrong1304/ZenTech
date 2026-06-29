@@ -85,4 +85,10 @@ public class LeaveRequestController {
         int targetYear = year == null ? LocalDate.now().getYear() : year;
         return ResponseEntity.ok(ApiResponse.success(approvalService.getMyLeaveQuotas(targetYear)));
     }
+
+    @PostMapping("/api/leaves/{id}/cancel")
+    public ResponseEntity<ApiResponse<Void>> cancelLeaveRequest(@PathVariable UUID id) {
+        approvalService.cancelLeaveRequest(id);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
 }
