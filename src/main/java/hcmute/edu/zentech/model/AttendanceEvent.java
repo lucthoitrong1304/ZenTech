@@ -22,6 +22,10 @@ public class AttendanceEvent {
     @JoinColumn(name = "employee_id", nullable = false)
     private Employee employee;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "employee_shift_id")
+    private EmployeeShift employeeShift;
+
     @Column(nullable = false)
     private LocalDateTime timestamp;
 

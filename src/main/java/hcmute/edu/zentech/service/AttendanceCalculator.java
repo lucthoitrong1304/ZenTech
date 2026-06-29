@@ -11,6 +11,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -23,171 +24,119 @@ public class AttendanceCalculator {
     private final LeaveRequestRepository leaveRequestRepository;
 
     public Shift resolveEffectiveShift(UUID employeeId, LocalDate date) {
-        // 1. Check Schedule Adjustments (highest direct priority from manager)
-        List<ScheduleAdjustment> adjustments = scheduleAdjustmentRepository
-                .findByEmployeeIdAndWorkDateBetween(employeeId, date, date);
-        for (ScheduleAdjustment sa : adjustments) {
-            if (sa.getStatus() == ApprovalStatus.APPROVED) {
-                return sa.getAdjustedShift();
-            }
-        }
-
-        // 2. Check Approved Shift Swaps / Covers
-        List<ShiftSwapRequest> swapRequests = shiftSwapRequestRepository
-                .findApprovedSwapsForEmployeeInRange(employeeId, date, date, ApprovalStatus.APPROVED);
-        for (ShiftSwapRequest req : swapRequests) {
-            if (req.getType() == SwapRequestType.COVER) {
-                if (req.getTargetEmployee().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
-                    // This employee covered someone else's shift
-                    return req.getShift();
-                } else if (req.getRequester().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
-                    // This employee was covered by someone else -> they are OFF
-                    return null;
-                }
-            } else if (req.getType() == SwapRequestType.SWAP) {
-                if (req.getWorkDate().equals(req.getTargetWorkDate())) {
-                    // Same day swap
-                    if (req.getRequester().getId().equals(employeeId)) {
-                        return req.getTargetShift();
-                    } else if (req.getTargetEmployee().getId().equals(employeeId)) {
-                        return req.getShift();
-                    }
-                } else {
-                    // Different days swap
-                    if (req.getWorkDate().equals(date)) {
-                        if (req.getRequester().getId().equals(employeeId)) {
-                            return null;
-                        } else if (req.getTargetEmployee().getId().equals(employeeId)) {
-                            return req.getShift();
-                        }
-                    } else if (req.getTargetWorkDate() != null && req.getTargetWorkDate().equals(date)) {
-                        if (req.getRequester().getId().equals(employeeId)) {
-                            return req.getTargetShift();
-                        } else if (req.getTargetEmployee().getId().equals(employeeId)) {
-                            return null;
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Fallback to default/base shift from EmployeeShift
-        return employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, date)
-                .map(EmployeeShift::getShift)
+        return resolveEffectiveShifts(employeeId, date).stream()
+                .map(EffectiveShift::shift)
+                .findFirst()
                 .orElse(null);
     }
 
-    public AttendanceRecordResponse calculateDayAttendance(Employee employee, LocalDate date) {
-        Shift shift = resolveEffectiveShift(employee.getId(), date);
-        String shiftName = (shift != null) ? shift.getName() : "Nghỉ";
+    public List<EffectiveShift> resolveEffectiveShifts(UUID employeeId, LocalDate date) {
+        List<ScheduleAdjustment> adjustments = scheduleAdjustmentRepository
+                .findByEmployeeIdAndWorkDateBetween(employeeId, date, date);
+        List<EffectiveShift> approvedAdjustments = adjustments.stream()
+                .filter(sa -> sa.getStatus() == ApprovalStatus.APPROVED)
+                .map(ScheduleAdjustment::getAdjustedShift)
+                .filter(Objects::nonNull)
+                .filter(shift -> shift.getType() != ShiftType.OFF)
+                .map(shift -> new EffectiveShift(null, shift))
+                .sorted(Comparator.comparing(item -> item.shift().getStartTime(), Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+        if (!approvedAdjustments.isEmpty()) {
+            return approvedAdjustments;
+        }
 
-        // Get raw events
+        List<ShiftSwapRequest> swapRequests = shiftSwapRequestRepository
+                .findApprovedSwapsForEmployeeInRange(employeeId, date, date, ApprovalStatus.APPROVED);
+        for (ShiftSwapRequest req : swapRequests) {
+            List<EffectiveShift> swapResult = resolveSwap(employeeId, date, req);
+            if (swapResult != null) {
+                return swapResult;
+            }
+        }
+
+        return employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, date).stream()
+                .map(assignment -> new EffectiveShift(assignment, assignment.getShift()))
+                .filter(item -> item.shift() != null)
+                .filter(item -> item.shift().getType() != ShiftType.OFF)
+                .sorted(Comparator.comparing(item -> item.shift().getStartTime(), Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    public AttendanceRecordResponse calculateDayAttendance(Employee employee, LocalDate date) {
+        List<EffectiveShift> shifts = resolveEffectiveShifts(employee.getId(), date);
+        String shiftName = shifts.isEmpty()
+                ? "Nghỉ"
+                : shifts.stream()
+                .map(item -> item.shift().getName())
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining(", "));
+
         LocalDateTime startOfDay = date.atStartOfDay();
         LocalDateTime endOfDay = date.atTime(LocalTime.MAX);
         List<AttendanceEvent> rawEvents = attendanceEventRepository
                 .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
-
-        // Get approved attendance adjustments
         List<AttendanceAdjustment> adjustments = attendanceAdjustmentRepository
                 .findByEmployeeIdAndWorkDateBetweenAndStatus(employee.getId(), date, date, ApprovalStatus.APPROVED);
 
-        // Get all timestamps from raw events
-        List<LocalDateTime> times = new ArrayList<>();
-        for (AttendanceEvent event : rawEvents) {
-            times.add(event.getTimestamp());
-        }
-
-        // Get all timestamps from approved adjustments
-        for (AttendanceAdjustment adj : adjustments) {
-            times.add(LocalDateTime.of(date, adj.getProposedTime()));
-        }
-
-        // Sort and de-duplicate (remove events within 10 seconds of each other)
-        Collections.sort(times);
-        List<LocalDateTime> uniqueTimes = new ArrayList<>();
-        for (LocalDateTime t : times) {
-            if (uniqueTimes.isEmpty()) {
-                uniqueTimes.add(t);
-            } else {
-                LocalDateTime lastAdded = uniqueTimes.get(uniqueTimes.size() - 1);
-                if (Duration.between(lastAdded, t).abs().toSeconds() > 10) {
-                    uniqueTimes.add(t);
-                }
-            }
-        }
+        List<LocalDateTime> detailTimes = uniqueTimes(rawEvents.stream()
+                .map(AttendanceEvent::getTimestamp)
+                .collect(Collectors.toCollection(ArrayList::new)));
 
         double totalHours = 0.0;
         LocalDateTime firstCheckIn = null;
         LocalDateTime lastCheckOut = null;
-
-        // Pair sequentially: odd index are Check-in, even index are Check-out
-        for (int i = 0; i < uniqueTimes.size(); i += 2) {
-            LocalDateTime in = uniqueTimes.get(i);
-            if (firstCheckIn == null) firstCheckIn = in;
-
-            if (i + 1 < uniqueTimes.size()) {
-                LocalDateTime out = uniqueTimes.get(i + 1);
-                lastCheckOut = out;
-                Duration duration = Duration.between(in, out);
-                totalHours += Math.max(0.0, duration.toMinutes() / 60.0);
-            }
-        }
-
         long lateMinutes = 0;
         long earlyMinutes = 0;
+        List<String> shiftStatuses = new ArrayList<>();
         String status = "OFF";
 
-        if (shift == null || shift.getType() == ShiftType.OFF) {
-            status = "OFF";
-        } else {
-            LocalTime shiftStart = shift.getStartTime();
-            LocalTime shiftEnd = shift.getEndTime();
+        if (!shifts.isEmpty()) {
+            for (EffectiveShift effectiveShift : shifts) {
+                Shift shift = effectiveShift.shift();
+                List<LocalDateTime> shiftTimes = uniqueTimes(resolveTimesForShift(effectiveShift, rawEvents, adjustments, date));
 
-            if (uniqueTimes.isEmpty()) {
+                if (shiftTimes.isEmpty()) {
+                    shiftStatuses.add("ABSENT_UNEXCUSED");
+                    continue;
+                }
+
+                LocalDateTime checkIn = shiftTimes.get(0);
+                LocalDateTime checkOut = shiftTimes.size() > 1 ? shiftTimes.get(shiftTimes.size() - 1) : null;
+
+                if (firstCheckIn == null || checkIn.isBefore(firstCheckIn)) {
+                    firstCheckIn = checkIn;
+                }
+                if (checkOut != null && (lastCheckOut == null || checkOut.isAfter(lastCheckOut))) {
+                    lastCheckOut = checkOut;
+                    totalHours += Math.max(0.0, Duration.between(checkIn, checkOut).toMinutes() / 60.0);
+                }
+
+                String inStatus = classifyCheckIn(shift, checkIn.toLocalTime());
+                if ("LATE".equals(inStatus) && shift.getStartTime() != null) {
+                    LocalTime onTimeEnd = shift.getStartTime().plusMinutes(defaultInt(shift.getOnTimeCheckInEndMinutes(), 5));
+                    lateMinutes += Math.max(0, Duration.between(onTimeEnd, checkIn.toLocalTime()).toMinutes());
+                }
+
+                if (checkOut == null) {
+                    shiftStatuses.add("MISSING_CHECK_OUT");
+                    continue;
+                }
+
+                String outStatus = classifyCheckOut(shift, checkOut.toLocalTime());
+                if ("EARLY_CHECKOUT".equals(outStatus) && shift.getEndTime() != null) {
+                    LocalTime onTimeStart = shift.getEndTime().minusMinutes(defaultInt(shift.getOnTimeCheckOutStartMinutes(), 5));
+                    earlyMinutes += Math.max(0, Duration.between(checkOut.toLocalTime(), onTimeStart).toMinutes());
+                }
+
+                shiftStatuses.add(combineShiftStatus(inStatus, outStatus));
+            }
+
+            if (firstCheckIn == null) {
                 List<LeaveRequest> leaves = leaveRequestRepository
                         .findApprovedLeavesForEmployeeInRange(employee.getId(), date, date, ApprovalStatus.APPROVED);
-                if (!leaves.isEmpty()) {
-                    status = "ABSENT_EXCUSED";
-                } else {
-                    status = "ABSENT_UNEXCUSED";
-                }
-            } else if (uniqueTimes.size() % 2 != 0) {
-                // Odd number of events means they checked in but missed check-out (or vice versa)
-                // Let's assume they checked in (first event) but missing check-out
-                status = "MISSING_CHECK_OUT";
-                if (shiftStart != null && firstCheckIn != null) {
-                    LocalTime inTime = firstCheckIn.toLocalTime();
-                    int grace = (shift.getGracePeriodMinutes() != null) ? shift.getGracePeriodMinutes() : 15;
-                    if (inTime.isAfter(shiftStart.plusMinutes(grace))) {
-                        lateMinutes = Duration.between(shiftStart, inTime).toMinutes();
-                    }
-                }
+                status = leaves.isEmpty() ? "ABSENT_UNEXCUSED" : "ABSENT_EXCUSED";
             } else {
-                LocalTime inTime = firstCheckIn.toLocalTime();
-                LocalTime outTime = lastCheckOut.toLocalTime();
-
-
-                int grace = (shift.getGracePeriodMinutes() != null) ? shift.getGracePeriodMinutes() : 15;
-
-                boolean isLate = shiftStart != null && inTime.isAfter(shiftStart.plusMinutes(grace));
-                boolean isEarly = shiftEnd != null && outTime.isBefore(shiftEnd);
-
-                if (isLate) {
-                    lateMinutes = Duration.between(shiftStart, inTime).toMinutes();
-                }
-                if (isEarly) {
-                    earlyMinutes = Duration.between(outTime, shiftEnd).toMinutes();
-                }
-
-                if (isLate && isEarly) {
-                    status = "LATE_AND_EARLY";
-                } else if (isLate) {
-                    status = "LATE";
-                } else if (isEarly) {
-                    status = "EARLY_CHECKOUT";
-                } else {
-                    status = "ON_TIME";
-                }
+                status = combineDayStatus(shiftStatuses);
             }
         }
 
@@ -203,20 +152,185 @@ public class AttendanceCalculator {
                 .lateMinutes(lateMinutes)
                 .earlyMinutes(earlyMinutes)
                 .status(status)
-                .detailTimes(uniqueTimes)
+                .detailTimes(detailTimes)
                 .build();
     }
 
-    private static class TimeEvent {
-        private final LocalDateTime time;
-        private final boolean isCheckIn;
+    public record EffectiveShift(EmployeeShift assignment, Shift shift) {
+    }
 
-        public TimeEvent(LocalDateTime time, boolean isCheckIn) {
-            this.time = time;
-            this.isCheckIn = isCheckIn;
+    private List<EffectiveShift> resolveSwap(UUID employeeId, LocalDate date, ShiftSwapRequest req) {
+        if (req.getType() == SwapRequestType.COVER) {
+            if (req.getTargetEmployee().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
+                return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift()));
+            }
+            if (req.getRequester().getId().equals(employeeId) && req.getWorkDate().equals(date)) {
+                return List.of();
+            }
         }
 
-        public LocalDateTime getTime() { return time; }
-        public boolean isCheckIn() { return isCheckIn; }
+        if (req.getType() != SwapRequestType.SWAP) {
+            return null;
+        }
+
+        if (req.getWorkDate().equals(req.getTargetWorkDate())) {
+            if (req.getRequester().getId().equals(employeeId)) {
+                return req.getTargetShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getTargetShift()));
+            }
+            if (req.getTargetEmployee().getId().equals(employeeId)) {
+                return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift()));
+            }
+        } else {
+            if (req.getWorkDate().equals(date)) {
+                if (req.getRequester().getId().equals(employeeId)) {
+                    return List.of();
+                }
+                if (req.getTargetEmployee().getId().equals(employeeId)) {
+                    return req.getShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getShift()));
+                }
+            }
+            if (req.getTargetWorkDate() != null && req.getTargetWorkDate().equals(date)) {
+                if (req.getRequester().getId().equals(employeeId)) {
+                    return req.getTargetShift() == null ? List.of() : List.of(new EffectiveShift(null, req.getTargetShift()));
+                }
+                if (req.getTargetEmployee().getId().equals(employeeId)) {
+                    return List.of();
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private List<LocalDateTime> resolveTimesForShift(EffectiveShift effectiveShift,
+                                                     List<AttendanceEvent> rawEvents,
+                                                     List<AttendanceAdjustment> adjustments,
+                                                     LocalDate date) {
+        Shift shift = effectiveShift.shift();
+        UUID assignmentId = effectiveShift.assignment() == null ? null : effectiveShift.assignment().getId();
+        List<LocalDateTime> times = new ArrayList<>();
+
+        for (AttendanceEvent event : rawEvents) {
+            if (assignmentId != null && event.getEmployeeShift() != null
+                    && assignmentId.equals(event.getEmployeeShift().getId())) {
+                times.add(event.getTimestamp());
+            } else if (event.getEmployeeShift() == null && isWithinShiftCaptureRange(event.getTimestamp().toLocalTime(), shift)) {
+                times.add(event.getTimestamp());
+            }
+        }
+
+        for (AttendanceAdjustment adjustment : adjustments) {
+            if (isWithinShiftCaptureRange(adjustment.getProposedTime(), shift)) {
+                times.add(LocalDateTime.of(date, adjustment.getProposedTime()));
+            }
+        }
+
+        return times;
+    }
+
+    private String classifyCheckIn(Shift shift, LocalTime checkIn) {
+        if (shift.getStartTime() == null) {
+            return "ON_TIME";
+        }
+        LocalTime onTimeStart = shift.getStartTime().minusMinutes(defaultInt(shift.getOnTimeCheckInStartMinutes(), 15));
+        LocalTime onTimeEnd = shift.getStartTime().plusMinutes(defaultInt(shift.getOnTimeCheckInEndMinutes(), 5));
+        if (checkIn.isBefore(onTimeStart)) {
+            return "EARLY_CHECKIN";
+        }
+        if (checkIn.isAfter(onTimeEnd)) {
+            return "LATE";
+        }
+        return "ON_TIME";
+    }
+
+    private String classifyCheckOut(Shift shift, LocalTime checkOut) {
+        if (shift.getEndTime() == null) {
+            return "ON_TIME";
+        }
+        LocalTime onTimeStart = shift.getEndTime().minusMinutes(defaultInt(shift.getOnTimeCheckOutStartMinutes(), 5));
+        LocalTime onTimeEnd = shift.getEndTime().plusMinutes(defaultInt(shift.getOnTimeCheckOutEndMinutes(), 15));
+        if (checkOut.isBefore(onTimeStart)) {
+            return "EARLY_CHECKOUT";
+        }
+        if (checkOut.isAfter(onTimeEnd)) {
+            return "LATE_CHECKOUT";
+        }
+        return "ON_TIME";
+    }
+
+    private boolean isWithinShiftCaptureRange(LocalTime time, Shift shift) {
+        if (shift.getStartTime() == null || shift.getEndTime() == null) {
+            return true;
+        }
+        LocalTime start = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
+        LocalTime end = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
+        return !time.isBefore(start) && !time.isAfter(end);
+    }
+
+    private List<LocalDateTime> uniqueTimes(List<LocalDateTime> times) {
+        Collections.sort(times);
+        List<LocalDateTime> uniqueTimes = new ArrayList<>();
+        for (LocalDateTime t : times) {
+            if (uniqueTimes.isEmpty()) {
+                uniqueTimes.add(t);
+                continue;
+            }
+            LocalDateTime lastAdded = uniqueTimes.get(uniqueTimes.size() - 1);
+            if (Duration.between(lastAdded, t).abs().toSeconds() > 10) {
+                uniqueTimes.add(t);
+            }
+        }
+        return uniqueTimes;
+    }
+
+    private String combineShiftStatus(String inStatus, String outStatus) {
+        boolean late = "LATE".equals(inStatus);
+        boolean early = "EARLY_CHECKOUT".equals(outStatus);
+        if (late && early) {
+            return "LATE_AND_EARLY";
+        }
+        if (late) {
+            return "LATE";
+        }
+        if (early) {
+            return "EARLY_CHECKOUT";
+        }
+        if ("EARLY_CHECKIN".equals(inStatus)) {
+            return "EARLY_CHECKIN";
+        }
+        if ("LATE_CHECKOUT".equals(outStatus)) {
+            return "LATE_CHECKOUT";
+        }
+        return "ON_TIME";
+    }
+
+    private String combineDayStatus(List<String> statuses) {
+        if (statuses.contains("MISSING_CHECK_OUT")) {
+            return "MISSING_CHECK_OUT";
+        }
+        if (statuses.contains("ABSENT_UNEXCUSED")) {
+            return "ABSENT_UNEXCUSED";
+        }
+        if (statuses.contains("LATE_AND_EARLY")
+                || (statuses.contains("LATE") && statuses.contains("EARLY_CHECKOUT"))) {
+            return "LATE_AND_EARLY";
+        }
+        if (statuses.contains("LATE")) {
+            return "LATE";
+        }
+        if (statuses.contains("EARLY_CHECKOUT")) {
+            return "EARLY_CHECKOUT";
+        }
+        if (statuses.contains("EARLY_CHECKIN")) {
+            return "EARLY_CHECKIN";
+        }
+        if (statuses.contains("LATE_CHECKOUT")) {
+            return "LATE_CHECKOUT";
+        }
+        return "ON_TIME";
+    }
+
+    private int defaultInt(Integer value, int fallback) {
+        return value == null ? fallback : Math.max(0, value);
     }
 }

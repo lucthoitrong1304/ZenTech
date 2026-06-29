@@ -31,6 +31,19 @@ public class Shift {
     @Enumerated(EnumType.STRING)
     private ShiftType type;
 
+    private Integer earlyCheckInMinutes = 30;
+
+    private Integer lateCheckOutMinutes = 60;
+
+    private Integer onTimeCheckInStartMinutes = 15;
+
+    private Integer onTimeCheckInEndMinutes = 5;
+
+    private Integer onTimeCheckOutStartMinutes = 5;
+
+    private Integer onTimeCheckOutEndMinutes = 15;
+
+    @Deprecated
     private Integer gracePeriodMinutes = 15;
 }
 

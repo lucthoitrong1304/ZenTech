@@ -53,8 +53,7 @@ public class ShiftService {
             if (dto.getId() != null) {
                 Shift shift = shiftRepository.findById(dto.getId()).orElse(null);
                 if (shift != null) {
-                    shift.setStartTime(dto.getStartTime());
-                    shift.setEndTime(dto.getEndTime());
+                    shiftMapper.applyDto(shift, dto);
                     updatedShifts.add(shiftRepository.save(shift));
                 }
             }
@@ -87,6 +86,7 @@ public class ShiftService {
             
             for (EmployeeWeeklyScheduleProjection p : empSchedules) {
                 EmployeeWeeklyScheduleDto.DailyShiftDto dailyDto = new EmployeeWeeklyScheduleDto.DailyShiftDto();
+                dailyDto.setEmployeeShiftId(p.getEmployeeShiftId());
                 dailyDto.setShiftId(p.getShiftId());
                 dailyDto.setShiftName(p.getShiftName());
                 dailyDto.setColorCode(p.getColorCode());
@@ -94,6 +94,12 @@ public class ShiftService {
                 dailyDto.setStartTime(p.getStartTime());
                 dailyDto.setEndTime(p.getEndTime());
                 dailyDto.setShiftType(p.getShiftType());
+                dailyDto.setEarlyCheckInMinutes(defaultInt(p.getEarlyCheckInMinutes(), 30));
+                dailyDto.setLateCheckOutMinutes(defaultInt(p.getLateCheckOutMinutes(), 60));
+                dailyDto.setOnTimeCheckInStartMinutes(defaultInt(p.getOnTimeCheckInStartMinutes(), 15));
+                dailyDto.setOnTimeCheckInEndMinutes(defaultInt(p.getOnTimeCheckInEndMinutes(), 5));
+                dailyDto.setOnTimeCheckOutStartMinutes(defaultInt(p.getOnTimeCheckOutStartMinutes(), 5));
+                dailyDto.setOnTimeCheckOutEndMinutes(defaultInt(p.getOnTimeCheckOutEndMinutes(), 15));
                 dailyShifts.add(dailyDto);
             }
             
@@ -136,7 +142,8 @@ public class ShiftService {
                 throw new RuntimeException("Không tìm thấy thông tin người điều chỉnh lịch.");
             }
 
-            Shift originalShift = employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate)
+            Shift originalShift = employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate).stream()
+                    .findFirst()
                     .map(EmployeeShift::getShift)
                     .orElse(null);
 
@@ -162,7 +169,7 @@ public class ShiftService {
 
         validateAndApplyScheduleAdjustment(employee, dto.getWorkDate(), shift, dto.getReason());
 
-        employeeShiftRepository.deleteByEmployeeIdAndWorkDate(dto.getEmployeeId(), dto.getWorkDate());
+        validateNoOverlap(dto.getEmployeeId(), dto.getWorkDate(), shift, null);
         
         EmployeeShift es = new EmployeeShift();
         es.setEmployee(employee);
@@ -206,12 +213,11 @@ public class ShiftService {
         while (!currentDate.isAfter(dto.getEndDate())) {
             for (Employee emp : employees) {
                 validateAndApplyScheduleAdjustment(emp, currentDate, shift, dto.getReason());
+                validateNoOverlap(emp.getId(), currentDate, shift, null);
             }
             currentDate = currentDate.plusDays(1);
         }
-        
-        employeeShiftRepository.deleteByEmployeeIdInAndWorkDateBetween(targetEmployeeIds, dto.getStartDate(), dto.getEndDate());
-        
+
         List<EmployeeShift> newShifts = new ArrayList<>();
         currentDate = dto.getStartDate();
         while (!currentDate.isAfter(dto.getEndDate())) {
@@ -292,5 +298,52 @@ public class ShiftService {
                 );
             }
         }
+    }
+
+    @Transactional
+    public void deleteScheduleAssignment(UUID employeeShiftId, String reason) {
+        EmployeeShift assignment = employeeShiftRepository.findByIdWithShift(employeeShiftId)
+                .orElseThrow(() -> new RuntimeException("Schedule assignment not found"));
+
+        validateAndApplyScheduleAdjustment(
+                assignment.getEmployee(),
+                assignment.getWorkDate(),
+                null,
+                reason
+        );
+
+        employeeShiftRepository.delete(assignment);
+    }
+
+    private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift, UUID excludeEmployeeShiftId) {
+        if (newShift.getType() == ShiftType.OFF || newShift.getStartTime() == null || newShift.getEndTime() == null) {
+            return;
+        }
+
+        List<EmployeeShift> existingAssignments = employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate);
+        for (EmployeeShift existing : existingAssignments) {
+            if (excludeEmployeeShiftId != null && excludeEmployeeShiftId.equals(existing.getId())) {
+                continue;
+            }
+            Shift existingShift = existing.getShift();
+            if (existingShift == null || existingShift.getType() == ShiftType.OFF
+                    || existingShift.getStartTime() == null || existingShift.getEndTime() == null) {
+                continue;
+            }
+            boolean overlaps = newShift.getStartTime().isBefore(existingShift.getEndTime())
+                    && newShift.getEndTime().isAfter(existingShift.getStartTime());
+            if (overlaps) {
+                throw new RuntimeException(String.format(
+                        "Ca %s bị trùng thời gian với ca %s trong ngày %s.",
+                        newShift.getName(),
+                        existingShift.getName(),
+                        workDate
+                ));
+            }
+        }
+    }
+
+    private int defaultInt(Integer value, int fallback) {
+        return value == null ? fallback : value;
     }
 }

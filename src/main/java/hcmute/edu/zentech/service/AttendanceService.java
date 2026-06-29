@@ -155,12 +155,16 @@ public class AttendanceService {
             }
         }
 
+        AttendanceCalculator.EffectiveShift selectedShift = resolveAttendanceShift(employee, now, type, todayEvents);
+
         AttendanceEvent event = new AttendanceEvent();
         event.setEmployee(employee);
+        event.setEmployeeShift(selectedShift.assignment());
         event.setTimestamp(now);
         event.setEventType(type);
         event.setSource("FACE");
-        event.setDetails("Xác thực khuôn mặt thành công. (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
+        event.setDetails("Xác thực khuôn mặt thành công. Ca: " + selectedShift.shift().getName()
+                + ". (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
         event.setLatitude(request.getLatitude());
         event.setLongitude(request.getLongitude());
         event.setAccuracyMeters(request.getAccuracyMeters());
@@ -182,6 +186,77 @@ public class AttendanceService {
         );
 
         return mapToResponse(employee);
+    }
+
+    private AttendanceCalculator.EffectiveShift resolveAttendanceShift(
+            Employee employee,
+            LocalDateTime timestamp,
+            AttendanceEventType nextType,
+            List<AttendanceEvent> todayEvents
+    ) {
+        LocalDate workDate = timestamp.toLocalDate();
+        LocalTime now = timestamp.toLocalTime();
+        List<AttendanceCalculator.EffectiveShift> shifts = attendanceCalculator.resolveEffectiveShifts(employee.getId(), workDate);
+
+        if (shifts.isEmpty()) {
+            throw new RuntimeException("Hôm nay bạn không có ca làm việc.");
+        }
+
+        if (nextType == AttendanceEventType.CHECK_OUT) {
+            AttendanceEvent openCheckIn = todayEvents.isEmpty() ? null : todayEvents.get(todayEvents.size() - 1);
+            if (openCheckIn != null && openCheckIn.getEmployeeShift() != null) {
+                UUID openAssignmentId = openCheckIn.getEmployeeShift().getId();
+                return shifts.stream()
+                        .filter(item -> item.assignment() != null && item.assignment().getId().equals(openAssignmentId))
+                        .findFirst()
+                        .orElseGet(() -> new AttendanceCalculator.EffectiveShift(openCheckIn.getEmployeeShift(), openCheckIn.getEmployeeShift().getShift()));
+            }
+
+            return shifts.stream()
+                    .filter(item -> isInCaptureRange(now, item.shift()))
+                    .findFirst()
+                    .orElse(shifts.get(shifts.size() - 1));
+        }
+
+        Set<UUID> checkedInAssignmentIds = todayEvents.stream()
+                .filter(event -> event.getEventType() == AttendanceEventType.CHECK_IN)
+                .map(AttendanceEvent::getEmployeeShift)
+                .filter(Objects::nonNull)
+                .map(EmployeeShift::getId)
+                .collect(Collectors.toSet());
+
+        AttendanceCalculator.EffectiveShift nextShift = shifts.stream()
+                .filter(item -> item.assignment() == null || !checkedInAssignmentIds.contains(item.assignment().getId()))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Các ca hôm nay đã được check-in. Vui lòng checkout ca đang mở hoặc kiểm tra lại lịch."));
+
+        Shift shift = nextShift.shift();
+        if (shift.getStartTime() == null || shift.getEndTime() == null) {
+            return nextShift;
+        }
+
+        LocalTime allowedStart = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
+        if (now.isBefore(allowedStart)) {
+            throw new RuntimeException("Chưa tới giờ check-in ca " + shift.getName() + ".");
+        }
+        if (!now.isBefore(shift.getEndTime())) {
+            throw new RuntimeException("Ca " + shift.getName() + " đã kết thúc. Vui lòng gửi yêu cầu chỉnh công.");
+        }
+
+        return nextShift;
+    }
+
+    private boolean isInCaptureRange(LocalTime time, Shift shift) {
+        if (shift.getStartTime() == null || shift.getEndTime() == null) {
+            return true;
+        }
+        LocalTime start = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
+        LocalTime end = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
+        return !time.isBefore(start) && !time.isAfter(end);
+    }
+
+    private int defaultInt(Integer value, int fallback) {
+        return value == null ? fallback : Math.max(0, value);
     }
 
     private void checkCheckInRateLimit(UUID accountId) {

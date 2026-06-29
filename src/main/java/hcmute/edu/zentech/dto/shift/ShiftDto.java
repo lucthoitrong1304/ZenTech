@@ -14,4 +14,10 @@ public class ShiftDto {
     private String colorCode;
     private boolean isDefault;
     private ShiftType type;
+    private Integer earlyCheckInMinutes;
+    private Integer lateCheckOutMinutes;
+    private Integer onTimeCheckInStartMinutes;
+    private Integer onTimeCheckInEndMinutes;
+    private Integer onTimeCheckOutStartMinutes;
+    private Integer onTimeCheckOutEndMinutes;
 }

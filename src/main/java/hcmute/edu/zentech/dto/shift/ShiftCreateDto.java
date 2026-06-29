@@ -22,4 +22,16 @@ public class ShiftCreateDto {
 
     @NotNull(message = "Loại ca không được để trống")
     private ShiftType type;
+
+    private Integer earlyCheckInMinutes;
+
+    private Integer lateCheckOutMinutes;
+
+    private Integer onTimeCheckInStartMinutes;
+
+    private Integer onTimeCheckInEndMinutes;
+
+    private Integer onTimeCheckOutStartMinutes;
+
+    private Integer onTimeCheckOutEndMinutes;
 }

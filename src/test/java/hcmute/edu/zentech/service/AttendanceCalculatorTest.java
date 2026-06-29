@@ -70,7 +70,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // Act
         Shift resolved = attendanceCalculator.resolveEffectiveShift(employee.getId(), workDate);
@@ -114,7 +114,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // 8:00 - 12:00
         AttendanceEvent in = new AttendanceEvent();
@@ -152,7 +152,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // Check in at 8:20 (Late, > 15 mins grace), check out at 11:50 (Early Checkout)
         AttendanceEvent in = new AttendanceEvent();
@@ -174,8 +174,8 @@ class AttendanceCalculatorTest {
         // Assert
         assertNotNull(response);
         assertEquals("LATE_AND_EARLY", response.getStatus());
-        assertEquals(20, response.getLateMinutes()); // 8:20 - 8:00
-        assertEquals(10, response.getEarlyMinutes()); // 12:00 - 11:50
+        assertEquals(15, response.getLateMinutes()); // 8:20 - allowed on-time until 8:05
+        assertEquals(5, response.getEarlyMinutes()); // on-time checkout starts at 11:55
         assertEquals(3.5, response.getWorkingHours()); // 3 hours 30 mins
     }
 
@@ -190,7 +190,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // No events
         when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
@@ -234,7 +234,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // No events
         when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
@@ -265,7 +265,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // Only check in event
         AttendanceEvent in = new AttendanceEvent();

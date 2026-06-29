@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/shifts")
@@ -61,6 +62,15 @@ public class ShiftController {
     @PostMapping("/schedules/copy-week")
     public ResponseEntity<ApiResponse<Void>> copyWeeklySchedule(@Valid @RequestBody CopyWeekDto dto) {
         shiftService.copyWeeklySchedule(dto);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @DeleteMapping("/schedules/{employeeShiftId}")
+    public ResponseEntity<ApiResponse<Void>> deleteScheduleAssignment(
+            @PathVariable UUID employeeShiftId,
+            @RequestParam(required = false) String reason
+    ) {
+        shiftService.deleteScheduleAssignment(employeeShiftId, reason);
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 }

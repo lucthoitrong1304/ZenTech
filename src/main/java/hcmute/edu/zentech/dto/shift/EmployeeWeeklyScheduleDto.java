@@ -16,6 +16,7 @@ public class EmployeeWeeklyScheduleDto {
 
     @Data
     public static class DailyShiftDto {
+        private UUID employeeShiftId;
         private UUID shiftId;
         private String shiftName;
         private String colorCode;
@@ -23,5 +24,11 @@ public class EmployeeWeeklyScheduleDto {
         private LocalTime startTime;
         private LocalTime endTime;
         private ShiftType shiftType;
+        private Integer earlyCheckInMinutes;
+        private Integer lateCheckOutMinutes;
+        private Integer onTimeCheckInStartMinutes;
+        private Integer onTimeCheckInEndMinutes;
+        private Integer onTimeCheckOutStartMinutes;
+        private Integer onTimeCheckOutEndMinutes;
     }
 }
