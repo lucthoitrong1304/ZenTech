@@ -139,6 +139,7 @@ public class SecurityConfig {
                                 "CUSTOMER_VIEW"
                         )
 
+                        .requestMatchers(HttpMethod.POST, "/api/admin/activity-logs/recordings").authenticated()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
                         .anyRequest().authenticated()

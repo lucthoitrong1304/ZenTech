@@ -35,11 +35,15 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 @RequiredArgsConstructor
@@ -52,6 +56,7 @@ public class AdminActivityLogService {
     private final CustomerRepository customerRepository;
     private final R2StorageService r2StorageService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
@@ -59,6 +64,8 @@ public class AdminActivityLogService {
     private final RestTemplate restTemplate = new RestTemplate();
 
     private static final String ACTIVITY_LOG_TOPIC = "/topic/admin.activity-logs";
+    private static final long RECORDING_RETENTION_MS = 7L * 24 * 60 * 60 * 1000;
+    private static final int MAX_RECORDING_SESSIONS_PER_USER = 50;
 
     public void log(ActivityAction action, String targetType, String targetId, String description) {
         UUID currentUserId = SecurityContextUtils.getCurrentUserId();
@@ -923,5 +930,198 @@ public class AdminActivityLogService {
         }
 
         return search;
+    }
+
+    public void saveRecording(String email, String sessionId, List<Object> newEvents) {
+        if (email == null || email.isBlank() || newEvents == null || newEvents.isEmpty()) {
+            return;
+        }
+        String activeSessionId = sessionId;
+        if (activeSessionId == null || activeSessionId.isBlank()) {
+            activeSessionId = Instant.now().toEpochMilli() + "_" + UUID.randomUUID().toString();
+        }
+        try {
+            String fileKey = "recordings/" + email + "/" + activeSessionId + ".json";
+            List<Object> existingEvents = new ArrayList<>();
+
+            try {
+                byte[] bytes = r2StorageService.getObjectBytes(fileKey);
+                if (bytes != null && bytes.length > 0) {
+                    existingEvents = objectMapper.readValue(bytes, new TypeReference<List<Object>>() {});
+                }
+            } catch (Exception e) {
+                log.warn("No existing recording found on R2 for {} session {}, creating new.", email, activeSessionId);
+            }
+
+            existingEvents.addAll(newEvents);
+            byte[] jsonBytes = objectMapper.writeValueAsBytes(existingEvents);
+            r2StorageService.uploadFile(fileKey, jsonBytes, "application/json");
+            cleanupExpiredRecordingSessions(email, activeSessionId);
+            log.info("Saved {} new rrweb events to R2 for {} session {}. Total events: {}", newEvents.size(), email, activeSessionId, existingEvents.size());
+        } catch (Exception e) {
+            log.error("Failed to save recording on R2 for {} session {}: {}", email, activeSessionId, e.getMessage(), e);
+        }
+    }
+
+    public List<Object> getRecording(String email, String sessionId) {
+        if (email == null || email.isBlank()) {
+            return List.of();
+        }
+        try {
+            String fileKey;
+            if (sessionId == null || sessionId.isBlank()) {
+                List<String> keys = r2StorageService.getAllObjectKeysInFolder("recordings/" + email + "/");
+                if (keys.isEmpty()) {
+                    String oldKey = "recordings/" + email + ".json";
+                    try {
+                        byte[] bytes = r2StorageService.getObjectBytes(oldKey);
+                        return objectMapper.readValue(bytes, new TypeReference<List<Object>>() {});
+                    } catch (Exception ex) {
+                        return List.of();
+                    }
+                }
+                Collections.sort(keys);
+                fileKey = keys.get(keys.size() - 1);
+            } else {
+                fileKey = "recordings/" + email + "/" + sessionId + ".json";
+            }
+
+            byte[] bytes = r2StorageService.getObjectBytes(fileKey);
+            if (bytes == null || bytes.length == 0) {
+                return List.of();
+            }
+            return objectMapper.readValue(bytes, new TypeReference<List<Object>>() {});
+        } catch (Exception e) {
+            log.warn("Failed to read recording from R2 for {} session {}: {}", email, sessionId, e.getMessage());
+            return List.of();
+        }
+    }
+
+    public List<Map<String, Object>> getRecordingSessions(String email) {
+        if (email == null || email.isBlank()) {
+            return List.of();
+        }
+        try {
+            cleanupExpiredRecordingSessions(email, null);
+            List<String> keys = r2StorageService.getAllObjectKeysInFolder("recordings/" + email + "/");
+            List<Map<String, Object>> sessions = new ArrayList<>();
+            for (String key : keys) {
+                String filename = key.substring(key.lastIndexOf("/") + 1);
+                if (!filename.endsWith(".json")) {
+                    continue;
+                }
+                String sessionId = filename.substring(0, filename.lastIndexOf("."));
+                long timestamp = parseRecordingSessionTimestamp(sessionId);
+
+                Map<String, Object> session = new java.util.HashMap<>();
+                session.put("sessionId", sessionId);
+                session.put("timestamp", timestamp > 0 ? timestamp : Instant.now().toEpochMilli());
+                sessions.add(session);
+            }
+
+            sessions.sort((s1, s2) -> Long.compare((Long) s2.get("timestamp"), (Long) s1.get("timestamp")));
+            return sessions;
+        } catch (Exception e) {
+            log.error("Failed to get recording sessions for {}: {}", email, e.getMessage());
+            return List.of();
+        }
+    }
+
+    public void deleteRecording(String email, String sessionId) {
+        if (email == null || email.isBlank()) {
+            return;
+        }
+        if (sessionId != null && !sessionId.isBlank()) {
+            if (containsUnsafeStoragePathPart(email) || containsUnsafeStoragePathPart(sessionId)) {
+                log.warn("Skipped deleting rrweb recording because email/sessionId contains unsafe path characters. email={}, sessionId={}", email, sessionId);
+                return;
+            }
+            try {
+                r2StorageService.deleteFile("recordings/" + email + "/" + sessionId + ".json");
+                log.info("Deleted rrweb recording on R2 for {} session {}", email, sessionId);
+            } catch (Exception e) {
+                log.error("Failed to delete recording on R2 for {} session {}: {}", email, sessionId, e.getMessage());
+            }
+            return;
+        }
+
+        try {
+            try {
+                r2StorageService.deleteFile("recordings/" + email + ".json");
+            } catch (Exception e) {
+                // ignore old single-file path cleanup failures
+            }
+
+            List<String> keys = r2StorageService.getAllObjectKeysInFolder("recordings/" + email + "/");
+            for (String key : keys) {
+                r2StorageService.deleteFile(key);
+            }
+            log.info("Deleted all recordings on R2 for {}", email);
+        } catch (Exception e) {
+            log.error("Failed to delete recordings on R2 for {}: {}", email, e.getMessage());
+        }
+    }
+
+    private void cleanupExpiredRecordingSessions(String email, String activeSessionId) {
+        if (email == null || email.isBlank() || containsUnsafeStoragePathPart(email)) {
+            return;
+        }
+        try {
+            List<String> keys = r2StorageService.getAllObjectKeysInFolder("recordings/" + email + "/");
+            if (keys.isEmpty()) {
+                return;
+            }
+
+            long cutoff = Instant.now().toEpochMilli() - RECORDING_RETENTION_MS;
+            List<RecordingSessionObject> sessions = new ArrayList<>();
+            for (String key : keys) {
+                RecordingSessionObject session = toRecordingSessionObject(key);
+                if (session != null) {
+                    sessions.add(session);
+                }
+            }
+
+            sessions.sort((a, b) -> Long.compare(b.timestamp(), a.timestamp()));
+            for (int i = 0; i < sessions.size(); i++) {
+                RecordingSessionObject session = sessions.get(i);
+                boolean isActive = activeSessionId != null && activeSessionId.equals(session.sessionId());
+                boolean expiredByAge = session.timestamp() > 0 && session.timestamp() < cutoff;
+                boolean expiredByCount = i >= MAX_RECORDING_SESSIONS_PER_USER;
+                if (!isActive && (expiredByAge || expiredByCount)) {
+                    r2StorageService.deleteFile(session.key());
+                    log.info("Deleted expired rrweb recording {} for {}", session.sessionId(), email);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to cleanup expired rrweb recordings for {}: {}", email, e.getMessage());
+        }
+    }
+
+    private RecordingSessionObject toRecordingSessionObject(String key) {
+        String filename = key.substring(key.lastIndexOf("/") + 1);
+        if (!filename.endsWith(".json")) {
+            return null;
+        }
+        String sessionId = filename.substring(0, filename.lastIndexOf("."));
+        long timestamp = parseRecordingSessionTimestamp(sessionId);
+        return new RecordingSessionObject(key, sessionId, timestamp);
+    }
+
+    private long parseRecordingSessionTimestamp(String sessionId) {
+        if (sessionId == null || !sessionId.contains("_")) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(sessionId.split("_")[0]);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private record RecordingSessionObject(String key, String sessionId, long timestamp) {
+    }
+
+    private boolean containsUnsafeStoragePathPart(String value) {
+        return value.contains("/") || value.contains("\\") || value.contains("..");
     }
 }

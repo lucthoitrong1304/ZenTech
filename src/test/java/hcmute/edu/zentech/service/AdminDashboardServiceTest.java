@@ -116,6 +116,32 @@ class AdminDashboardServiceTest {
                 .isEqualTo("Backend recovered with warning");
     }
     @Test
+    void keepsNewAndResolvedIncidentCountsSeparateWhenOldIncidentIsResolvedToday() {
+        when(ticketRepository.findByStatusIn(any())).thenReturn(List.of());
+        when(incidentRepository.findByStatusNot(IncidentStatus.RESOLVED)).thenReturn(List.of());
+        when(adminLogService.getLogs(any(), any(), any(), any(Integer.class), any(), any()))
+                .thenReturn(List.of());
+
+        Instant now = Instant.now();
+        Incident resolvedOldIncident = Incident.builder()
+                .code("INC-OLD")
+                .severity(IncidentSeverity.MEDIUM)
+                .status(IncidentStatus.RESOLVED)
+                .createdAt(now.minus(3, ChronoUnit.DAYS))
+                .firstOccurredAt(now.minus(3, ChronoUnit.DAYS))
+                .resolvedAt(now.minus(10, ChronoUnit.MINUTES))
+                .build();
+
+        when(incidentRepository.findByCreatedAtBetween(any(), any())).thenReturn(List.of());
+        when(incidentRepository.findByResolvedAtBetween(any(), any())).thenReturn(List.of(resolvedOldIncident));
+
+        AdminDashboardResponse response = service.getDashboard("TODAY", null, null);
+
+        assertThat(response.getMetrics().getIncidentsResolvedInPeriod()).isEqualTo(1);
+        assertThat(response.getMetrics().getIncidentsCreatedInPeriod()).isZero();
+        assertThat(response.getMetrics().getIncidentResolutionRate()).isZero();
+    }
+    @Test
     void rejectsCustomRangeLongerThanNinetyDays() {
         Instant to = Instant.now().minus(1, ChronoUnit.MINUTES);
         Instant from = to.minus(91, ChronoUnit.DAYS);

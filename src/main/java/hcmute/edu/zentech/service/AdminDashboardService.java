@@ -531,6 +531,7 @@ public class AdminDashboardService {
         }
     }
 
+
     private int severityRank(IncidentSeverity severity) {
         if (severity == IncidentSeverity.CRITICAL) return 0;
         if (severity == IncidentSeverity.HIGH) return 1;
