@@ -1,6 +1,7 @@
 package hcmute.edu.zentech.service;
 
 import hcmute.edu.zentech.dto.request.EmployeeCreateRequest;
+import hcmute.edu.zentech.dto.request.EmployeeUpdateRequest;
 import hcmute.edu.zentech.dto.response.EmployeeSummaryResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.mapper.EmployeeManagementMapper;
@@ -102,6 +103,30 @@ public class EmployeeManagementService {
         emailService.sendResetPasswordEmail(account.getEmail(), frontendUrl + "/reset-password?token=" + resetTokenString);
 
         return employeeManagementMapper.toEmployeeSummaryResponse(employee);
+    }
+
+    @Transactional
+    public EmployeeSummaryResponse updateEmployee(UUID employeeId, EmployeeUpdateRequest request) {
+        validateEmployeeRole(request.getRole());
+
+        Employee employee = employeeRepository.findById(employeeId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy nhân viên."));
+        AccountUser account = employee.getUserInfo();
+        String normalizedEmail = request.getEmail().trim().toLowerCase();
+
+        accountUserRepository.findByEmailIgnoreCase(normalizedEmail)
+                .filter(existingAccount -> !existingAccount.getId().equals(account.getId()))
+                .ifPresent(existingAccount -> {
+                    throw new RuntimeException("Email đã được sử dụng!");
+        });
+
+        employee.setFullName(request.getFullName().trim());
+        account.setEmail(normalizedEmail);
+        account.setRole(request.getRole());
+        account.setActive(Boolean.TRUE.equals(request.getActive()));
+
+        accountUserRepository.save(account);
+        return employeeManagementMapper.toEmployeeSummaryResponse(employeeRepository.save(employee));
     }
 
     private void validateEmployeeRole(Role role) {
