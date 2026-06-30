@@ -152,7 +152,7 @@ public class AdminActivityLogService {
 
             ActivityLog savedLog = activityLogRepository.save(activityLog);
             publishRealtimeActivityLog(savedLog);
-            log.info("Activity logged: {} in {} by user {} from IP {}", action, effectiveArea, user != null ? user.getEmail() : "anonymous", ipAddress);
+            log.debug("Activity logged: {} in {} by user {} from IP {}", action, effectiveArea, user != null ? user.getEmail() : "anonymous", ipAddress);
         } catch (Exception e) {
             log.error("Failed to log activity: {}", e.getMessage(), e);
         }
@@ -981,7 +981,7 @@ public class AdminActivityLogService {
 
                 r2StorageService.uploadFile(fileKey, jsonBytes, "application/json");
                 cleanupExpiredRecordingSessions(email, activeSessionId);
-                log.info("Saved {} new rrweb events to R2 for {} session {}. Total events: {}", newEvents.size(), email, activeSessionId, totalEvents);
+                log.debug("Saved {} new rrweb events to R2 for {} session {}. Total events: {}", newEvents.size(), email, activeSessionId, totalEvents);
             } catch (IllegalArgumentException e) {
                 throw e;
             } catch (Exception e) {

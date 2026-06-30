@@ -798,7 +798,11 @@ public class R2StorageService {
                     .build();
 
             s3Client.putObject(putObjectRequest, software.amazon.awssdk.core.sync.RequestBody.fromBytes(bytes));
-            log.info("Successfully uploaded file to R2: {}", fileKey);
+            if (fileKey != null && fileKey.startsWith("recordings/")) {
+                log.debug("Successfully uploaded recording file to R2: {}", fileKey);
+            } else {
+                log.info("Successfully uploaded file to R2: {}", fileKey);
+            }
         } catch (Exception e) {
             log.error("Failed to upload file to R2 with key [{}]: {}", fileKey, e.getMessage(), e);
             throw new RuntimeException("Failed to upload file to R2", e);

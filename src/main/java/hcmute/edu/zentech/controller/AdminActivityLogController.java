@@ -142,7 +142,7 @@ public class AdminActivityLogController {
         }
 
         try {
-            log.info("Received {} rrweb events to save for {} session {}", eventCount, email, sessionId);
+            log.debug("Received {} rrweb events to save for {} session {}", eventCount, email, sessionId);
             activityLogService.saveRecording(email, sessionId, events);
             return ResponseEntity.ok(ApiResponse.success(null));
         } catch (IllegalArgumentException ex) {
@@ -159,7 +159,7 @@ public class AdminActivityLogController {
             @RequestParam("email") String email,
             @RequestParam(value = "sessionId", required = false) String sessionId
     ) {
-        log.info("Request get rrweb recording for {} session {}", email, sessionId);
+        log.debug("Request get rrweb recording for {} session {}", email, sessionId);
         return ResponseEntity.ok(ApiResponse.success(activityLogService.getRecording(email, sessionId)));
     }
 
@@ -167,7 +167,7 @@ public class AdminActivityLogController {
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getRecordingSessions(
             @RequestParam("email") String email
     ) {
-        log.info("Request get rrweb sessions list for {}", email);
+        log.debug("Request get rrweb sessions list for {}", email);
         return ResponseEntity.ok(ApiResponse.success(activityLogService.getRecordingSessions(email)));
     }
 
