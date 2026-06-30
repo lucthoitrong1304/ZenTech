@@ -544,9 +544,11 @@ public class R2StorageService {
 
     /**
      * Hàm tạo đường dẫn để đẩy ảnh lên cloudflare
+     *
      * @param originalFilename: Tên name gốc
-     * @param contentType: MimeType (PNG, JPG, JPEG,...)
-     * **/
+     * @param contentType:      MimeType (PNG, JPG, JPEG,...)
+     *
+     **/
     public Map<String, String> generatePresignedUrl(String originalFilename, String contentType) {
         // Tạo file key mới để tránh người dùng gửi ảnh trùng name
         String fileKey = "uploads/" + UUID.randomUUID() + "-" + originalFilename;
@@ -577,8 +579,10 @@ public class R2StorageService {
 
     /**
      * Delete File
+     *
      * @param fileKey : file key
-     * */
+     *
+     */
     public void deleteFile(String fileKey) {
         try {
             DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
@@ -667,6 +671,7 @@ public class R2StorageService {
 
     /**
      * HÀM GET ONE: Lấy Presigned URL cho 1 file cụ thể
+     *
      * @param fileKey Đường dẫn chính xác tới file (VD: "Alpha65.../image.webp")
      * @return Presigned URL (có thời hạn) để FE hiển thị ảnh
      */
@@ -712,6 +717,7 @@ public class R2StorageService {
 
     /**
      * HÀM GET ALL: Quét 1 thư mục (Prefix) và trả về list các Presigned URL
+     *
      * @param folderPrefix Tên thư mục (VD: "Alpha65 & Power Strip Bundle - Image/")
      * @return Danh sách các Presigned URL của tất cả file trong thư mục đó
      */
@@ -757,6 +763,7 @@ public class R2StorageService {
 
     /**
      * HÀM GET RAW KEYS: Quét thư mục và lấy danh sách Object Key gốc để lưu Database
+     *
      * @param folderPrefix Tên thư mục (VD: "Alpha65 & Power Strip Bundle - Image/")
      * @return Danh sách các chuỗi Object Key (VD: ["folder/img1.jpg", "folder/img2.jpg"])
      */
@@ -796,7 +803,9 @@ public class R2StorageService {
             log.error("Failed to upload file to R2 with key [{}]: {}", fileKey, e.getMessage(), e);
             throw new RuntimeException("Failed to upload file to R2", e);
         }
-    public void uploadFileBytes(String fileKey, byte[] bytes, String contentType) {
+    }
+
+    public void uploadFileBytes (String fileKey, byte[] bytes, String contentType){
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(bucketName)
                 .key(fileKey)
