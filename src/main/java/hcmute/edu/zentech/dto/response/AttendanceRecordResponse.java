@@ -1,5 +1,6 @@
 package hcmute.edu.zentech.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -27,5 +28,7 @@ public class AttendanceRecordResponse {
     private long earlyMinutes;
     private String status; // e.g. ON_TIME, LATE, EARLY, ABSENT_UNEXCUSED, ABSENT_EXCUSED, MISSING_CHECK_IN, MISSING_CHECK_OUT, OFF
     private List<LocalDateTime> detailTimes;
+    @JsonProperty("isProvisional")
+    private boolean isProvisional;
+    private List<AttendanceShiftBreakdownResponse> shiftBreakdowns;
 }
-

@@ -17,4 +17,6 @@ public class CheckInRequest {
     private Double longitude;
 
     private Double accuracyMeters;
+
+    private String faceImage;
 }

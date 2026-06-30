@@ -45,4 +45,10 @@ public class AttendanceAdjustmentController {
     public ResponseEntity<ApiResponse<List<AttendanceAdjustmentResponse>>> getMyAdjustments() {
         return ResponseEntity.ok(ApiResponse.success(approvalRequestMapper.toAttendanceAdjustmentResponses(approvalService.getMyAdjustments())));
     }
+
+    @PostMapping("/api/attendance/adjustments/{id}/cancel")
+    public ResponseEntity<ApiResponse<Void>> cancelAdjustmentRequest(@PathVariable UUID id) {
+        approvalService.cancelAttendanceAdjustment(id);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
 }

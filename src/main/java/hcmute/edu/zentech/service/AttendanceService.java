@@ -39,6 +39,7 @@ public class AttendanceService {
     private final FaceEncryptionUtils faceEncryptionUtils;
     private final AdminActivityLogService adminActivityLogService;
     private final AttendanceLocationPolicyService attendanceLocationPolicyService;
+    private final LeaveRequestRepository leaveRequestRepository;
 
 
     @Value("${zentech.attendance.face-match-threshold:0.5}")
@@ -80,19 +81,49 @@ public class AttendanceService {
         Employee employee = employeeRepository.findByUserInfo_Id(accountId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
 
-        boolean locationValid = attendanceLocationPolicyService.isLocationAllowed(
-                request.getLatitude(),
-                request.getLongitude()
-        );
-        if (!locationValid) {
-            String message = attendanceLocationPolicyService.isPolicyEnabled()
-                    ? "Vị trí hiện tại nằm ngoài phạm vi check-in hợp lệ."
-                    : "Vị trí check-in không hợp lệ.";
-            throw new RuntimeException(message);
-        }
-
         if (employee.getFaceDescriptors() == null || employee.getFaceDescriptors().isEmpty()) {
             throw new RuntimeException("Nhân viên chưa đăng ký khuôn mặt.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime endOfDay = LocalDate.now().atTime(LocalTime.MAX);
+        List<AttendanceEvent> todayEvents = attendanceEventRepository
+                .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
+        
+        AttendanceEventType type = AttendanceEventType.CHECK_IN;
+        if (!todayEvents.isEmpty()) {
+            AttendanceEvent lastEvent = todayEvents.get(todayEvents.size() - 1);
+            if (lastEvent.getEventType() == AttendanceEventType.CHECK_IN) {
+                type = AttendanceEventType.CHECK_OUT;
+            }
+        }
+
+        AttendanceCalculator.EffectiveShift selectedShift = resolveAttendanceShift(employee, now, type, todayEvents);
+
+        if (selectedShift.isLeave()) {
+            throw new RuntimeException("Bạn đã được duyệt nghỉ phép ca " + selectedShift.shift().getName() + ".");
+        }
+
+        // WFH bypass check
+        boolean hasWfhRequest = !leaveRequestRepository.findWfhRequestsForEmployeeOnDate(
+                employee.getId(),
+                now.toLocalDate(),
+                List.of(ApprovalStatus.PENDING, ApprovalStatus.APPROVED)
+        ).isEmpty();
+
+        boolean locationValid = true;
+        if (!selectedShift.isWfh() && !hasWfhRequest) {
+            locationValid = attendanceLocationPolicyService.isLocationAllowed(
+                    request.getLatitude(),
+                    request.getLongitude()
+            );
+            if (!locationValid) {
+                String message = attendanceLocationPolicyService.isPolicyEnabled()
+                        ? "Vị trí hiện tại nằm ngoài phạm vi check-in hợp lệ."
+                        : "Vị trí check-in không hợp lệ.";
+                throw new RuntimeException(message);
+            }
         }
 
         double minDistance = Double.MAX_VALUE;
@@ -139,32 +170,36 @@ public class AttendanceService {
         // Thành công: Reset rate limit
         resetFailedCheckIn(accountId);
 
-        LocalDateTime now = LocalDateTime.now();
-        
-        // Xác định loại sự kiện CHECK_IN hay CHECK_OUT dựa trên lịch sử hôm nay
-        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
-        LocalDateTime endOfDay = LocalDate.now().atTime(LocalTime.MAX);
-        List<AttendanceEvent> todayEvents = attendanceEventRepository
-                .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
-        
-        AttendanceEventType type = AttendanceEventType.CHECK_IN;
-        if (!todayEvents.isEmpty()) {
-            AttendanceEvent lastEvent = todayEvents.get(todayEvents.size() - 1);
-            if (lastEvent.getEventType() == AttendanceEventType.CHECK_IN) {
-                type = AttendanceEventType.CHECK_OUT;
+        // Upload face image if provided
+        String faceImageKey = null;
+        if (request.getFaceImage() != null && !request.getFaceImage().isEmpty()) {
+            try {
+                String base64Image = request.getFaceImage();
+                if (base64Image.contains(",")) {
+                    base64Image = base64Image.split(",")[1];
+                }
+                byte[] decodedBytes = Base64.getDecoder().decode(base64Image.trim());
+                String uniqueFilename = "checkin-" + UUID.randomUUID() + ".jpg";
+                faceImageKey = "uploads/attendance-faces/" + employee.getId() + "/" + uniqueFilename;
+                r2StorageService.uploadFileBytes(faceImageKey, decodedBytes, "image/jpeg");
+            } catch (Exception e) {
+                System.err.println("Failed to upload face image to R2: " + e.getMessage());
             }
         }
 
         AttendanceEvent event = new AttendanceEvent();
         event.setEmployee(employee);
+        event.setEmployeeShift(selectedShift.assignment());
         event.setTimestamp(now);
         event.setEventType(type);
         event.setSource("FACE");
-        event.setDetails("Xác thực khuôn mặt thành công. (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
+        event.setDetails(((selectedShift.isWfh() || hasWfhRequest) ? "[WFH] " : "") + "Xác thực khuôn mặt thành công. Ca: " + selectedShift.shift().getName()
+                + ". (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
         event.setLatitude(request.getLatitude());
         event.setLongitude(request.getLongitude());
         event.setAccuracyMeters(request.getAccuracyMeters());
         event.setLocationValid(locationValid);
+        event.setFaceImageKey(faceImageKey);
         attendanceEventRepository.save(event);
 
         // Ghi audit log thành công
@@ -182,6 +217,97 @@ public class AttendanceService {
         );
 
         return mapToResponse(employee);
+    }
+
+    private AttendanceCalculator.EffectiveShift resolveAttendanceShift(
+            Employee employee,
+            LocalDateTime timestamp,
+            AttendanceEventType nextType,
+            List<AttendanceEvent> todayEvents
+    ) {
+        LocalDate workDate = timestamp.toLocalDate();
+        LocalTime now = timestamp.toLocalTime();
+        List<AttendanceCalculator.EffectiveShift> shifts = attendanceCalculator.resolveEffectiveShifts(employee.getId(), workDate);
+
+        if (shifts.isEmpty()) {
+            throw new RuntimeException("Hôm nay bạn không có ca làm việc.");
+        }
+
+        if (nextType == AttendanceEventType.CHECK_OUT) {
+            AttendanceEvent openCheckIn = todayEvents.isEmpty() ? null : todayEvents.get(todayEvents.size() - 1);
+            AttendanceCalculator.EffectiveShift resolved = null;
+            if (openCheckIn != null && openCheckIn.getEmployeeShift() != null) {
+                UUID openAssignmentId = openCheckIn.getEmployeeShift().getId();
+                resolved = shifts.stream()
+                        .filter(item -> item.assignment() != null && item.assignment().getId().equals(openAssignmentId))
+                        .findFirst()
+                        .orElseGet(() -> new AttendanceCalculator.EffectiveShift(openCheckIn.getEmployeeShift(), openCheckIn.getEmployeeShift().getShift()));
+            } else {
+                resolved = shifts.stream()
+                        .filter(item -> isInCaptureRange(now, item.shift()))
+                        .findFirst()
+                        .orElse(shifts.get(shifts.size() - 1));
+            }
+
+            // Check if checkout is too late
+            Shift shift = resolved.shift();
+            if (shift.getEndTime() != null) {
+                LocalTime allowedEnd = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
+                if (now.isAfter(allowedEnd)) {
+                    throw new RuntimeException("Đã quá giờ check-out cho phép của ca " + shift.getName() + ". Vui lòng gửi yêu cầu chỉnh công.");
+                }
+            }
+            return resolved;
+        }
+
+        Set<UUID> checkedInAssignmentIds = todayEvents.stream()
+                .filter(event -> event.getEventType() == AttendanceEventType.CHECK_IN)
+                .map(AttendanceEvent::getEmployeeShift)
+                .filter(Objects::nonNull)
+                .map(EmployeeShift::getId)
+                .collect(Collectors.toSet());
+
+        // Find shift by matching current capture range first (allows multiple CI/CO in same shift)
+        AttendanceCalculator.EffectiveShift nextShift = shifts.stream()
+                .filter(item -> isInCaptureRange(now, item.shift()))
+                .findFirst()
+                .orElse(null);
+
+        if (nextShift == null) {
+            // Fallback to first unchecked shift
+            nextShift = shifts.stream()
+                    .filter(item -> item.assignment() == null || !checkedInAssignmentIds.contains(item.assignment().getId()))
+                    .findFirst()
+                    .orElse(shifts.get(shifts.size() - 1));
+        }
+
+        Shift shift = nextShift.shift();
+        if (shift.getStartTime() == null || shift.getEndTime() == null) {
+            return nextShift;
+        }
+
+        LocalTime allowedStart = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
+        if (now.isBefore(allowedStart)) {
+            throw new RuntimeException("Chưa tới giờ check-in ca " + shift.getName() + ".");
+        }
+        if (!now.isBefore(shift.getEndTime())) {
+            throw new RuntimeException("Ca " + shift.getName() + " đã kết thúc. Vui lòng gửi yêu cầu chỉnh công.");
+        }
+
+        return nextShift;
+    }
+
+    private boolean isInCaptureRange(LocalTime time, Shift shift) {
+        if (shift.getStartTime() == null || shift.getEndTime() == null) {
+            return true;
+        }
+        LocalTime start = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
+        LocalTime end = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
+        return !time.isBefore(start) && !time.isAfter(end);
+    }
+
+    private int defaultInt(Integer value, int fallback) {
+        return value == null ? fallback : Math.max(0, value);
     }
 
     private void checkCheckInRateLimit(UUID accountId) {
@@ -260,18 +386,7 @@ public class AttendanceService {
         AccountUser accountUser = accountUserRepository.findById(accountId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy người dùng."));
 
-        List<Employee> targetEmployees = new ArrayList<>();
-        boolean isManager = accountUser.getRole() == Role.OWNER || accountUser.getRole() == Role.MANAGER || accountUser.getRole() == Role.ADMIN;
-
-        if (isManager) {
-            targetEmployees = employeeRepository.findAll();
-        } else if (accountUser.getRole() == Role.EMPLOYEE) {
-            Employee employee = employeeRepository.findByUserInfo_Id(accountId)
-                    .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên."));
-            targetEmployees.add(employee);
-        } else {
-            throw new RuntimeException("Bạn không có quyền truy cập báo cáo này.");
-        }
+        List<Employee> targetEmployees = employeeRepository.findAll();
 
         List<LocalDate> allDates = new ArrayList<>();
         LocalDate curr = startDate;

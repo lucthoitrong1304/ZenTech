@@ -51,6 +51,8 @@ class AttendanceServiceTest {
     private AttendanceEventRepository attendanceEventRepository;
     @Mock
     private AttendanceLocationPolicyService attendanceLocationPolicyService;
+    @Mock
+    private AttendanceCalculator attendanceCalculator;
 
     @InjectMocks
     private AttendanceService attendanceService;
@@ -86,6 +88,19 @@ class AttendanceServiceTest {
                 .thenReturn(new ArrayList<>());
         lenient().when(attendanceLocationPolicyService.isLocationAllowed(any(), any())).thenReturn(true);
         lenient().when(attendanceLocationPolicyService.isPolicyEnabled()).thenReturn(false);
+
+        Shift shift = new Shift();
+        shift.setId(UUID.randomUUID());
+        shift.setName("Test ca");
+        shift.setType(ShiftType.NORMAL);
+
+        EmployeeShift employeeShift = new EmployeeShift();
+        employeeShift.setId(UUID.randomUUID());
+        employeeShift.setEmployee(mockEmployee);
+        employeeShift.setShift(shift);
+
+        lenient().when(attendanceCalculator.resolveEffectiveShifts(any(), any()))
+                .thenReturn(List.of(new AttendanceCalculator.EffectiveShift(employeeShift, shift)));
     }
 
     @AfterEach

@@ -10,10 +10,7 @@ import hcmute.edu.zentech.model.EmployeeLeaveQuota;
 import hcmute.edu.zentech.model.LeaveRequest;
 import hcmute.edu.zentech.model.LeaveType;
 import hcmute.edu.zentech.model.LeaveTypeUnit;
-import hcmute.edu.zentech.repository.EmployeeLeaveQuotaRepository;
-import hcmute.edu.zentech.repository.EmployeeRepository;
-import hcmute.edu.zentech.repository.LeaveRequestRepository;
-import hcmute.edu.zentech.repository.LeaveTypeRepository;
+import hcmute.edu.zentech.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -44,6 +41,7 @@ public class LeaveManagementService {
     private final EmployeeLeaveQuotaRepository employeeLeaveQuotaRepository;
     private final EmployeeRepository employeeRepository;
     private final LeaveRequestRepository leaveRequestRepository;
+    private final EmployeeShiftRepository employeeShiftRepository;
 
     @Transactional(readOnly = true)
     public List<LeaveTypeResponse> getActiveTypes() {
@@ -183,6 +181,18 @@ public class LeaveManagementService {
         if (leaveType == null || leaveType.getUnit() == null) {
             return BigDecimal.ZERO;
         }
+        if (leaveType.getUnit() == LeaveTypeUnit.DAY 
+                && request.getTargetShifts() != null 
+                && !request.getTargetShifts().isEmpty()) {
+            long totalShifts = employeeShiftRepository.findByEmployeeIdAndWorkDate(
+                    request.getEmployee().getId(), 
+                    request.getStartDate()
+            ).size();
+            if (totalShifts > 0) {
+                double fraction = (double) request.getTargetShifts().size() / totalShifts;
+                return BigDecimal.valueOf(fraction).setScale(2, RoundingMode.HALF_UP);
+            }
+        }
         return calculateAmount(leaveType, request.getStartDate(), request.getEndDate(), request.getStartTime(), request.getEndTime());
     }
 
@@ -209,8 +219,8 @@ public class LeaveManagementService {
     @Transactional(readOnly = true)
     public BigDecimal sumUsage(UUID employeeId, UUID leaveTypeId, int year, UUID excludingRequestId, boolean includePending) {
         List<ApprovalStatus> statuses = includePending
-                ? List.of(ApprovalStatus.APPROVED, ApprovalStatus.PENDING)
-                : List.of(ApprovalStatus.APPROVED);
+                ? List.of(ApprovalStatus.APPROVED, ApprovalStatus.PENDING, ApprovalStatus.CANCEL_PENDING)
+                : List.of(ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING);
         LocalDate start = LocalDate.of(year, 1, 1);
         LocalDate end = LocalDate.of(year, 12, 31);
         return leaveRequestRepository

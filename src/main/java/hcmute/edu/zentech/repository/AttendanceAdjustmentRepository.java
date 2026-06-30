@@ -16,11 +16,17 @@ public interface AttendanceAdjustmentRepository extends JpaRepository<Attendance
     List<AttendanceAdjustment> findByEmployeeIdAndWorkDateBetweenAndStatus(
             UUID employeeId, LocalDate start, LocalDate end, ApprovalStatus status);
 
+    List<AttendanceAdjustment> findByEmployeeIdAndWorkDateBetweenAndStatusIn(
+            UUID employeeId, LocalDate start, LocalDate end, List<ApprovalStatus> statuses);
+
     List<AttendanceAdjustment> findByEmployeeIdInAndWorkDateBetweenAndStatus(
             List<UUID> employeeIds, LocalDate start, LocalDate end, ApprovalStatus status);
 
     @EntityGraph(attributePaths = {"employee"})
     List<AttendanceAdjustment> findByStatus(ApprovalStatus status);
+
+    @EntityGraph(attributePaths = {"employee"})
+    List<AttendanceAdjustment> findByStatusIn(List<ApprovalStatus> statuses);
 
     @EntityGraph(attributePaths = {"employee"})
     List<AttendanceAdjustment> findByEmployeeIdOrderByRequestedAtDesc(UUID employeeId);

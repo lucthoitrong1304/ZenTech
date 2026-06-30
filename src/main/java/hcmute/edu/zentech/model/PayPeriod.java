@@ -32,6 +32,7 @@ public class PayPeriod {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "locked_by_id")
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private AccountUser lockedBy;
 
     private LocalDateTime lockedAt;

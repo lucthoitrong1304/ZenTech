@@ -6,6 +6,7 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -22,6 +23,8 @@ public class LeaveRequestCreateRequest {
     private LocalTime startTime;
 
     private LocalTime endTime;
+
+    private List<UUID> shiftIds;
 
     @NotBlank
     private String reason;

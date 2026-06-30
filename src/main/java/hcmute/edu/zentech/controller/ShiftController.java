@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/shifts")
@@ -40,8 +41,9 @@ public class ShiftController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) UUID employeeId,
             Pageable pageable) {
-        Page<EmployeeWeeklyScheduleDto> schedules = shiftService.getWeeklySchedules(startDate, endDate, keyword, pageable);
+        Page<EmployeeWeeklyScheduleDto> schedules = shiftService.getWeeklySchedules(startDate, endDate, keyword, employeeId, pageable);
         WeeklyScheduleResponse response = new WeeklyScheduleResponse(schedules);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -62,5 +64,22 @@ public class ShiftController {
     public ResponseEntity<ApiResponse<Void>> copyWeeklySchedule(@Valid @RequestBody CopyWeekDto dto) {
         shiftService.copyWeeklySchedule(dto);
         return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @DeleteMapping("/schedules/{employeeShiftId}")
+    public ResponseEntity<ApiResponse<Void>> deleteScheduleAssignment(
+            @PathVariable UUID employeeShiftId,
+            @RequestParam(required = false) String reason
+    ) {
+        shiftService.deleteScheduleAssignment(employeeShiftId, reason);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @GetMapping("/my-schedules")
+    public ResponseEntity<ApiResponse<List<EmployeeWeeklyScheduleDto.DailyShiftDto>>> getMyDailyShifts(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(shiftService.getMyDailyShifts(startDate, endDate)));
     }
 }
