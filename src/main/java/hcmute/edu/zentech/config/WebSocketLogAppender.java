@@ -93,7 +93,7 @@ public class WebSocketLogAppender extends AppenderBase<ILoggingEvent> {
             String message = event.getFormattedMessage() != null ? event.getFormattedMessage() : "";
             
             // Log target endpoint exclusions
-            if (message.contains("/ws") || message.contains("/api/health") || message.contains("/api/admin/logs") || message.contains("/api/admin/activity-logs") || message.contains("/api/admin/incidents/issue-links")) {
+            if (message.contains("/ws") || message.contains("/api/health") || message.contains("/api/admin/logs") || message.contains("/api/admin/activity-logs") || message.contains("/api/admin/incidents/issue-links") || message.contains("/actuator")) {
                 return;
             }
             

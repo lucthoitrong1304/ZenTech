@@ -50,6 +50,7 @@ public class AdminObservabilityService {
     @Value("${app.qdrant.url:http://localhost:6333}") private String qdrantUrl;
     @Value("${app.alloy.url:http://localhost:12345}") private String alloyUrl;
     @Value("${app.dashboard.zone-id:Asia/Ho_Chi_Minh}") private String dashboardZoneId;
+    @Value("${app.ai.base-url:http://localhost:8000}") private String aiBaseUrl;
 
     public AdminObservabilityResponse getObservability(String requestedPeriod, Instant customFrom, Instant customTo) {
         DateRange range = resolveRange(requestedPeriod, customFrom, customTo);
@@ -57,33 +58,124 @@ public class AdminObservabilityService {
         HostResourceMetricsProvider.HostResourceSnapshot host = hostMetrics.snapshot();
         boolean prometheusAvailable = prometheus.isReady();
 
-        Double heapUsed = prometheus.queryScalar("sum(jvm_memory_used_bytes{area=\"heap\"})");
-        Double heapMax = prometheus.queryScalar("sum(jvm_memory_max_bytes{area=\"heap\"} > 0)");
+        CompletableFuture<Double> heapUsedFuture;
+        CompletableFuture<Double> heapMaxFuture;
+        CompletableFuture<Double> processCpuFuture;
+        CompletableFuture<Double> processUptimeFuture;
+        CompletableFuture<Double> liveThreadsFuture;
+        CompletableFuture<Double> peakThreadsFuture;
+
+        CompletableFuture<Double> promCpuFuture;
+        CompletableFuture<Double> promCoresFuture;
+        CompletableFuture<Double> promRamFuture;
+        CompletableFuture<Double> promRamUsedFuture;
+        CompletableFuture<Double> promRamTotalFuture;
+        CompletableFuture<Double> promDiskFuture;
+        CompletableFuture<Double> promDiskUsedFuture;
+        CompletableFuture<Double> promDiskTotalFuture;
+
+        CompletableFuture<Double> requestsPerMinuteFuture;
+        CompletableFuture<Double> errorRateFuture;
+        CompletableFuture<Double> p95LatencyFuture;
+        CompletableFuture<Double> averageLatencyFuture;
+        CompletableFuture<Double> activeRequestsFuture;
+
+        CompletableFuture<List<AdminObservabilityResponse.ApiAnomaly>> slowApisFuture;
+        CompletableFuture<List<AdminObservabilityResponse.ApiAnomaly>> errorApisFuture;
+        CompletableFuture<List<AdminObservabilityResponse.DependencyStatus>> dependenciesFuture;
+
+        CompletableFuture<List<PrometheusQueryService.Sample>> cpuHistoryFuture;
+        CompletableFuture<List<PrometheusQueryService.Sample>> ramHistoryFuture;
+        CompletableFuture<List<PrometheusQueryService.Sample>> diskHistoryFuture;
+        CompletableFuture<List<PrometheusQueryService.Sample>> heapHistoryFuture;
+        CompletableFuture<List<PrometheusQueryService.Sample>> requestHistoryFuture;
+        CompletableFuture<List<PrometheusQueryService.Sample>> errorHistoryFuture;
+        CompletableFuture<List<PrometheusQueryService.Sample>> p95HistoryFuture;
+
+        if (prometheusAvailable) {
+            heapUsedFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("sum(jvm_memory_used_bytes{area=\"heap\"})"));
+            heapMaxFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("sum(jvm_memory_max_bytes{area=\"heap\"} > 0)"));
+            processCpuFuture = CompletableFuture.supplyAsync(() -> multiply(prometheus.queryScalar("process_cpu_usage"), 100));
+            processUptimeFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("process_uptime_seconds"));
+            liveThreadsFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("jvm_threads_live_threads"));
+            peakThreadsFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("jvm_threads_peak_threads"));
+
+            promCpuFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("zentech_host_cpu_usage_percent"));
+            promCoresFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("zentech_host_cpu_cores"));
+            promRamFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("zentech_host_ram_usage_percent"));
+            promRamUsedFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("zentech_host_ram_used_bytes"));
+            promRamTotalFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("zentech_host_ram_total_bytes"));
+            promDiskFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("zentech_host_disk_usage_percent"));
+            promDiskUsedFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("zentech_host_disk_used_bytes"));
+            promDiskTotalFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("zentech_host_disk_total_bytes"));
+
+            requestsPerMinuteFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar(REQUEST_RATE));
+            errorRateFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar(ERROR_RATE));
+            p95LatencyFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar(P95_LATENCY));
+            averageLatencyFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar(AVERAGE_LATENCY));
+            activeRequestsFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("sum(http_server_requests_active_seconds_count)"));
+
+            slowApisFuture = CompletableFuture.supplyAsync(this::querySlowApis);
+            errorApisFuture = CompletableFuture.supplyAsync(this::queryErrorApis);
+            dependenciesFuture = CompletableFuture.supplyAsync(() -> checkDependencies(true));
+
+            cpuHistoryFuture = CompletableFuture.supplyAsync(() -> prometheus.queryRangeSafe("zentech_host_cpu_usage_percent", range.from(), range.to(), step));
+            ramHistoryFuture = CompletableFuture.supplyAsync(() -> prometheus.queryRangeSafe("zentech_host_ram_usage_percent", range.from(), range.to(), step));
+            diskHistoryFuture = CompletableFuture.supplyAsync(() -> prometheus.queryRangeSafe("zentech_host_disk_usage_percent", range.from(), range.to(), step));
+            heapHistoryFuture = CompletableFuture.supplyAsync(() -> prometheus.queryRangeSafe(HEAP_PERCENT, range.from(), range.to(), step));
+            requestHistoryFuture = CompletableFuture.supplyAsync(() -> prometheus.queryRangeSafe(REQUEST_RATE, range.from(), range.to(), step));
+            errorHistoryFuture = CompletableFuture.supplyAsync(() -> prometheus.queryRangeSafe(ERROR_RATE, range.from(), range.to(), step));
+            p95HistoryFuture = CompletableFuture.supplyAsync(() -> prometheus.queryRangeSafe(P95_LATENCY, range.from(), range.to(), step));
+        } else {
+            heapUsedFuture = CompletableFuture.completedFuture(null);
+            heapMaxFuture = CompletableFuture.completedFuture(null);
+            processCpuFuture = CompletableFuture.completedFuture(null);
+            processUptimeFuture = CompletableFuture.completedFuture(null);
+            liveThreadsFuture = CompletableFuture.completedFuture(null);
+            peakThreadsFuture = CompletableFuture.completedFuture(null);
+
+            promCpuFuture = CompletableFuture.completedFuture(null);
+            promCoresFuture = CompletableFuture.completedFuture(null);
+            promRamFuture = CompletableFuture.completedFuture(null);
+            promRamUsedFuture = CompletableFuture.completedFuture(null);
+            promRamTotalFuture = CompletableFuture.completedFuture(null);
+            promDiskFuture = CompletableFuture.completedFuture(null);
+            promDiskUsedFuture = CompletableFuture.completedFuture(null);
+            promDiskTotalFuture = CompletableFuture.completedFuture(null);
+
+            requestsPerMinuteFuture = CompletableFuture.completedFuture(null);
+            errorRateFuture = CompletableFuture.completedFuture(null);
+            p95LatencyFuture = CompletableFuture.completedFuture(null);
+            averageLatencyFuture = CompletableFuture.completedFuture(null);
+            activeRequestsFuture = CompletableFuture.completedFuture(null);
+
+            slowApisFuture = CompletableFuture.completedFuture(List.of());
+            errorApisFuture = CompletableFuture.completedFuture(List.of());
+            dependenciesFuture = CompletableFuture.supplyAsync(() -> checkDependencies(false));
+
+            cpuHistoryFuture = CompletableFuture.completedFuture(List.of());
+            ramHistoryFuture = CompletableFuture.completedFuture(List.of());
+            diskHistoryFuture = CompletableFuture.completedFuture(List.of());
+            heapHistoryFuture = CompletableFuture.completedFuture(List.of());
+            requestHistoryFuture = CompletableFuture.completedFuture(List.of());
+            errorHistoryFuture = CompletableFuture.completedFuture(List.of());
+            p95HistoryFuture = CompletableFuture.completedFuture(List.of());
+        }
+
+        Double heapUsed = heapUsedFuture.join();
+        Double heapMax = heapMaxFuture.join();
         Double heapPercent = percent(heapUsed, heapMax);
-        Double processCpu = multiply(prometheus.queryScalar("process_cpu_usage"), 100);
-
-        CompletableFuture<Double> requestsPerMinuteFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar(REQUEST_RATE));
-        CompletableFuture<Double> errorRateFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar(ERROR_RATE));
-        CompletableFuture<Double> p95LatencyFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar(P95_LATENCY));
-        CompletableFuture<Double> averageLatencyFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar(AVERAGE_LATENCY));
-        CompletableFuture<Double> activeRequestsFuture = CompletableFuture.supplyAsync(() -> prometheus.queryScalar("sum(http_server_requests_active_seconds_count)"));
-
-        CompletableFuture<List<AdminObservabilityResponse.ApiAnomaly>> slowApisFuture =
-                CompletableFuture.supplyAsync(this::querySlowApis);
-        CompletableFuture<List<AdminObservabilityResponse.ApiAnomaly>> errorApisFuture =
-                CompletableFuture.supplyAsync(this::queryErrorApis);
-        CompletableFuture<List<AdminObservabilityResponse.DependencyStatus>> dependenciesFuture =
-                CompletableFuture.supplyAsync(() -> checkDependencies(prometheusAvailable));
-        CompletableFuture<Boolean> prometheusAvailableFuture = CompletableFuture.completedFuture(prometheusAvailable);
+        Double processCpu = processCpuFuture.join();
 
         Map<Long, MutableHistory> history = new LinkedHashMap<>();
-        merge(history, prometheus.queryRangeSafe("zentech_host_cpu_usage_percent", range.from(), range.to(), step), Metric.CPU);
-        merge(history, prometheus.queryRangeSafe("zentech_host_ram_usage_percent", range.from(), range.to(), step), Metric.RAM);
-        merge(history, prometheus.queryRangeSafe("zentech_host_disk_usage_percent", range.from(), range.to(), step), Metric.DISK);
-        merge(history, prometheus.queryRangeSafe(HEAP_PERCENT, range.from(), range.to(), step), Metric.HEAP);
-        merge(history, prometheus.queryRangeSafe(REQUEST_RATE, range.from(), range.to(), step), Metric.REQUEST_RATE);
-        merge(history, prometheus.queryRangeSafe(ERROR_RATE, range.from(), range.to(), step), Metric.ERROR_RATE);
-        merge(history, prometheus.queryRangeSafe(P95_LATENCY, range.from(), range.to(), step), Metric.P95);
+        merge(history, cpuHistoryFuture.join(), Metric.CPU);
+        merge(history, ramHistoryFuture.join(), Metric.RAM);
+        merge(history, diskHistoryFuture.join(), Metric.DISK);
+        merge(history, heapHistoryFuture.join(), Metric.HEAP);
+        merge(history, requestHistoryFuture.join(), Metric.REQUEST_RATE);
+        merge(history, errorHistoryFuture.join(), Metric.ERROR_RATE);
+        merge(history, p95HistoryFuture.join(), Metric.P95);
+
         List<AdminObservabilityResponse.MetricHistoryPoint> historyPoints = history.values().stream()
                 .map(MutableHistory::toResponse)
                 .sorted(Comparator.comparing(AdminObservabilityResponse.MetricHistoryPoint::getTimestamp))
@@ -99,21 +191,21 @@ public class AdminObservabilityService {
         Long diskTotal = host.diskTotalBytes();
 
         if (prometheusAvailable) {
-            Double promCpu = prometheus.queryScalar("zentech_host_cpu_usage_percent");
+            Double promCpu = promCpuFuture.join();
             if (promCpu != null) cpu = promCpu;
-            Double promCores = prometheus.queryScalar("zentech_host_cpu_cores");
+            Double promCores = promCoresFuture.join();
             if (promCores != null) cores = promCores.longValue();
-            Double promRam = prometheus.queryScalar("zentech_host_ram_usage_percent");
+            Double promRam = promRamFuture.join();
             if (promRam != null) ram = promRam;
-            Double promRamUsed = prometheus.queryScalar("zentech_host_ram_used_bytes");
+            Double promRamUsed = promRamUsedFuture.join();
             if (promRamUsed != null) ramUsed = promRamUsed.longValue();
-            Double promRamTotal = prometheus.queryScalar("zentech_host_ram_total_bytes");
+            Double promRamTotal = promRamTotalFuture.join();
             if (promRamTotal != null) ramTotal = promRamTotal.longValue();
-            Double promDisk = prometheus.queryScalar("zentech_host_disk_usage_percent");
+            Double promDisk = promDiskFuture.join();
             if (promDisk != null) disk = promDisk;
-            Double promDiskUsed = prometheus.queryScalar("zentech_host_disk_used_bytes");
+            Double promDiskUsed = promDiskUsedFuture.join();
             if (promDiskUsed != null) diskUsed = promDiskUsed.longValue();
-            Double promDiskTotal = prometheus.queryScalar("zentech_host_disk_total_bytes");
+            Double promDiskTotal = promDiskTotalFuture.join();
             if (promDiskTotal != null) diskTotal = promDiskTotal.longValue();
         }
 
@@ -132,9 +224,9 @@ public class AdminObservabilityService {
                         .jvmHeapUsagePercent(heapPercent)
                         .jvmHeapUsedBytes(toLong(heapUsed)).jvmHeapMaxBytes(toLong(heapMax))
                         .processCpuUsagePercent(processCpu)
-                        .processUptimeSeconds(toLong(prometheus.queryScalar("process_uptime_seconds")))
-                        .liveThreads(prometheus.queryScalar("jvm_threads_live_threads"))
-                        .peakThreads(prometheus.queryScalar("jvm_threads_peak_threads"))
+                        .processUptimeSeconds(toLong(processUptimeFuture.join()))
+                        .liveThreads(liveThreadsFuture.join())
+                        .peakThreads(peakThreadsFuture.join())
                         .build())
                 .api(AdminObservabilityResponse.ApiPerformance.builder()
                         .requestsPerMinute(requestsPerMinuteFuture.join())
@@ -153,7 +245,7 @@ public class AdminObservabilityService {
 
     private List<AdminObservabilityResponse.ApiAnomaly> querySlowApis() {
         String query = """
-                topk(5,
+                topk(10,
                   (
                     (
                       1000 * sum by (method,uri) (
@@ -199,7 +291,7 @@ public class AdminObservabilityService {
 
     private List<AdminObservabilityResponse.ApiAnomaly> queryErrorApis() {
         String query = """
-                topk(5,
+                topk(10,
                   sum by (method,uri,status) (
                     increase(http_server_requests_seconds_count{
                       uri!="/actuator/prometheus",
@@ -258,6 +350,26 @@ public class AdminObservabilityService {
                     checkHttpReady(qdrantUrl + "/readyz"), "Độ sẵn sàng của cơ sở dữ liệu Vector",
                     List.of(config("app.qdrant.url")), List.of(),
                     List.of("Lưu trữ dữ liệu tìm kiếm vector/AI phục vụ cho các tính năng gợi ý thông minh sản phẩm."));
+            case "zentech ai", "zentech-ai" -> httpDependencyDetail("ZenTech AI", "Business service", aiBaseUrl, "/health",
+                    checkHttpReady(aiBaseUrl + "/health"), "Độ sẵn sàng của dịch vụ AI",
+                    List.of(config("app.ai.base-url")), List.of(),
+                    List.of("Cung cấp các tính năng trí tuệ nhân tạo, xử lý ngôn ngữ tự nhiên và trợ lý ảo tư vấn khách hàng."));
+            case "zentech fe", "zentech-fe", "fe" -> httpDependencyDetail("ZenTech FE", "Client Browser", "Trình duyệt Web Client", "",
+                    true, "Đang truy cập",
+                    List.of(
+                            configItem("Framework", "Angular 21"),
+                            configItem("Ngôn ngữ", "TypeScript"),
+                            configItem("Bố cục UI", "Tailwind CSS & PrimeNG")
+                    ), List.of(),
+                    List.of("Giao diện SPA (Single Page Application) phía người dùng phục vụ trang Admin và trang mua sắm."));
+            case "zentech java be", "zentech-be", "zentech be", "be" -> httpDependencyDetail("ZenTech Java BE", "Core API Service", "Dịch vụ Core API", "",
+                    true, "Hoạt động tốt",
+                    List.of(
+                            configItem("Framework", "Spring Boot 3.4"),
+                            configItem("Java Version", "JDK 21"),
+                            configItem("Cổng dịch vụ", environment.getProperty("server.port", "8080"))
+                    ), List.of(),
+                    List.of("Dịch vụ backend lõi điều hướng, kết nối cơ sở dữ liệu, quản lý xác thực và điều phối toàn bộ nghiệp vụ."));
             case "prometheus" -> prometheusDetail();
             case "loki" -> httpDependencyDetail("Loki", "Observability infrastructure", lokiUrl, "/ready",
                     checkHttpReady(lokiUrl + "/ready"), "Độ sẵn sàng của kho lưu trữ nhật ký (Log)",
@@ -280,6 +392,9 @@ public class AdminObservabilityService {
                 case "mysql" -> checkMysql();
                 case "rabbitmq", "rabbit" -> checkRabbit();
                 case "qdrant" -> checkHttpReady(qdrantUrl + "/readyz");
+                case "zentech ai", "zentech-ai" -> checkHttpReady(aiBaseUrl + "/health");
+                case "zentech fe", "zentech-fe", "fe" -> true;
+                case "zentech java be", "zentech-be", "zentech be", "be" -> true;
                 case "prometheus" -> prometheus.isReady();
                 case "loki" -> checkHttpReady(lokiUrl + "/ready");
                 case "alloy" -> checkHttpReady(alloyUrl + "/-/ready");
@@ -386,6 +501,16 @@ public class AdminObservabilityService {
                 .build();
     }
 
+    private AdminDependencyDetailResponse.ConfigItem configItem(String key, String value) {
+        return AdminDependencyDetailResponse.ConfigItem.builder()
+                .key(key)
+                .value(value)
+                .source("Môi trường Spring")
+                .sensitive(false)
+                .editable(false)
+                .build();
+    }
+
     private AdminDependencyDetailResponse.ConfigItem config(String key) {
         boolean sensitive = isSensitiveKey(key);
         String rawValue = value(key);
@@ -475,6 +600,9 @@ public class AdminObservabilityService {
 
         boolean qdrantUp = checkHttpReady(qdrantUrl + "/readyz");
         result.add(dependency("Qdrant", qdrantUp, qdrantUp ? "Cơ sở dữ liệu Vector sẵn sàng" : "Qdrant không phản hồi", null, null, null, null));
+
+        boolean aiUp = checkHttpReady(aiBaseUrl + "/health");
+        result.add(dependency("ZenTech AI", aiUp, aiUp ? "Dịch vụ AI sẵn sàng" : "ZenTech AI không phản hồi", null, null, null, null));
 
         boolean alloyUp = checkHttpReady(alloyUrl + "/-/ready");
         result.add(dependency("Alloy", alloyUp, alloyUp ? "Bộ thu thập telemetry hoạt động" : "Ngừng thu thập telemetry", null, null, null, null));
