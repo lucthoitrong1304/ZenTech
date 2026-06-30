@@ -29,6 +29,8 @@ public class ApprovalService {
     private final LeaveTypeRepository leaveTypeRepository;
     private final LeaveManagementService leaveManagementService;
     private final NotificationService notificationService;
+    private final ShiftRepository shiftRepository;
+    private final EmployeeShiftRepository employeeShiftRepository;
 
     private void checkLock(LocalDate date) {
         Optional<PayPeriod> p = payPeriodRepository.findPeriodActiveAt(date);
@@ -87,30 +89,44 @@ public class ApprovalService {
         UUID userId = SecurityContextUtils.getCurrentUserId();
         AccountUser user = userId != null ? accountUserRepository.findById(userId).orElse(null) : null;
 
-        request.setStatus(status);
+        boolean isCancelRequest = request.getStatus() == ApprovalStatus.CANCEL_PENDING;
+
+        if (isCancelRequest) {
+            if (status == ApprovalStatus.APPROVED) {
+                request.setStatus(ApprovalStatus.CANCELLED);
+            } else {
+                request.setStatus(ApprovalStatus.APPROVED);
+            }
+        } else {
+            request.setStatus(status);
+            if (status == ApprovalStatus.REJECTED) {
+                request.setRejectionReason(rejectionReason);
+            }
+        }
+
         request.setApprovedBy(user);
         request.setApprovedAt(LocalDateTime.now());
-        if (status == ApprovalStatus.REJECTED) {
-            request.setRejectionReason(rejectionReason);
-        }
 
         AttendanceAdjustment saved = attendanceAdjustmentRepository.save(request);
 
         // Notify employee
         if (saved.getEmployee() != null && saved.getEmployee().getUserInfo() != null) {
             UUID employeeAccountId = saved.getEmployee().getUserInfo().getId();
-            String title = "Kết quả duyệt chỉnh sửa công";
-            String statusStr = saved.getStatus() == ApprovalStatus.APPROVED ? "ĐÃ DUYỆT" : "BỊ TỪ CHỐI";
+            String title = isCancelRequest ? "Kết quả duyệt hủy yêu cầu chỉnh sửa công" : "Kết quả duyệt chỉnh sửa công";
+            String statusStr;
+            if (isCancelRequest) {
+                statusStr = saved.getStatus() == ApprovalStatus.CANCELLED ? "ĐÃ ĐƯỢC DUYỆT HỦY" : "BỊ TỪ CHỐI HỦY";
+            } else {
+                statusStr = saved.getStatus() == ApprovalStatus.APPROVED ? "ĐÃ DUYỆT" : "BỊ TỪ CHỐI";
+            }
             String content = String.format("Yêu cầu chỉnh sửa công ngày %s của bạn đã %s.", 
                     saved.getWorkDate(), statusStr);
-            if (saved.getStatus() == ApprovalStatus.REJECTED && saved.getRejectionReason() != null) {
-                content += " Lý do: " + saved.getRejectionReason();
-            }
             notificationService.createNotification(
                     employeeAccountId, 
                     title, 
                     content, 
-                    saved.getStatus() == ApprovalStatus.APPROVED ? NotificationType.REQUEST_APPROVED : NotificationType.REQUEST_REJECTED, 
+                    (saved.getStatus() == ApprovalStatus.APPROVED || saved.getStatus() == ApprovalStatus.CANCELLED) 
+                            ? NotificationType.REQUEST_APPROVED : NotificationType.REQUEST_REJECTED, 
                     saved.getId()
             );
         }
@@ -120,7 +136,7 @@ public class ApprovalService {
 
     @Transactional(readOnly = true)
     public List<AttendanceAdjustment> getPendingAttendanceAdjustments() {
-        return attendanceAdjustmentRepository.findByStatus(ApprovalStatus.PENDING);
+        return attendanceAdjustmentRepository.findByStatusIn(List.of(ApprovalStatus.PENDING, ApprovalStatus.CANCEL_PENDING));
     }
 
     // --- Shift Swap / Cover Requests ---
@@ -138,24 +154,60 @@ public class ApprovalService {
             throw new RuntimeException("Không tìm thấy thông tin nhân viên yêu cầu.");
         }
 
+        Employee targetEmployee = employeeRepository.findById(request.getTargetEmployee().getId())
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy thông tin nhân viên làm thay/đổi ca."));
+
+        Shift shift = shiftRepository.findById(request.getShift().getId())
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy ca yêu cầu."));
+
+        Shift targetShift = null;
+        if (request.getTargetShift() != null && request.getTargetShift().getId() != null) {
+            targetShift = shiftRepository.findById(request.getTargetShift().getId())
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy ca đổi."));
+        }
+
+        // 1. Time constraints check (must request before shift start time)
+        LocalDateTime now = LocalDateTime.now();
+        if (shift.getStartTime() != null) {
+            LocalDateTime shiftStart = LocalDateTime.of(request.getWorkDate(), shift.getStartTime());
+            if (!now.isBefore(shiftStart)) {
+                throw new RuntimeException("Không thể tạo yêu cầu cho ca làm việc đã bắt đầu hoặc đã qua.");
+            }
+        }
+        if (request.getType() == SwapRequestType.SWAP && targetShift != null && targetShift.getStartTime() != null && request.getTargetWorkDate() != null) {
+            LocalDateTime targetShiftStart = LocalDateTime.of(request.getTargetWorkDate(), targetShift.getStartTime());
+            if (!now.isBefore(targetShiftStart)) {
+                throw new RuntimeException("Không thể tạo yêu cầu cho ca làm việc đối ứng đã bắt đầu hoặc đã qua.");
+            }
+        }
+
+        // 2. Overlap checks
+        // Target employee must not have overlapping shift on workDate with shift
+        validateNoOverlap(targetEmployee.getId(), request.getWorkDate(), shift);
+
+        // For SWAP, requester must not have overlapping shift on targetWorkDate with targetShift
+        if (request.getType() == SwapRequestType.SWAP && targetShift != null && request.getTargetWorkDate() != null) {
+            validateNoOverlap(employee.getId(), request.getTargetWorkDate(), targetShift);
+        }
+
         request.setRequester(employee);
+        request.setTargetEmployee(targetEmployee);
+        request.setShift(shift);
+        request.setTargetShift(targetShift);
         request.setRequestedAt(LocalDateTime.now());
         request.setStatus(ApprovalStatus.PENDING);
 
         ShiftSwapRequest saved = shiftSwapRequestRepository.save(request);
 
-        Employee reqEmp = employeeRepository.findById(saved.getRequester().getId()).orElse(null);
-        Employee tgtEmp = employeeRepository.findById(saved.getTargetEmployee().getId()).orElse(null);
-
-        String reqName = reqEmp != null ? reqEmp.getFullName() : "Nhân viên";
-        String tgtName = tgtEmp != null ? tgtEmp.getFullName() : "Nhân viên";
+        String reqName = employee.getFullName();
+        String tgtName = targetEmployee.getFullName();
 
         // 1. Notify target employee
-        if (tgtEmp != null && tgtEmp.getUserInfo() != null) {
+        if (targetEmployee.getUserInfo() != null) {
             String title = "Yêu cầu đổi ca từ đồng nghiệp";
             String content = String.format("Đồng nghiệp %s muốn đổi ca với bạn vào ngày %s.", reqName, saved.getWorkDate());
             notificationService.createNotification(
-                    tgtEmp.getUserInfo().getId(),
+                    targetEmployee.getUserInfo().getId(),
                     title,
                     content,
                     NotificationType.REQUEST_SUBMITTED,
@@ -195,7 +247,18 @@ public class ApprovalService {
         UUID userId = SecurityContextUtils.getCurrentUserId();
         AccountUser user = userId != null ? accountUserRepository.findById(userId).orElse(null) : null;
 
-        request.setStatus(status);
+        boolean isCancelRequest = request.getStatus() == ApprovalStatus.CANCEL_PENDING;
+
+        if (isCancelRequest) {
+            if (status == ApprovalStatus.APPROVED) {
+                request.setStatus(ApprovalStatus.CANCELLED);
+            } else {
+                request.setStatus(ApprovalStatus.APPROVED);
+            }
+        } else {
+            request.setStatus(status);
+        }
+
         request.setApprovedBy(user);
         request.setApprovedAt(LocalDateTime.now());
 
@@ -204,10 +267,16 @@ public class ApprovalService {
         Employee reqEmp = employeeRepository.findById(saved.getRequester().getId()).orElse(null);
         Employee tgtEmp = employeeRepository.findById(saved.getTargetEmployee().getId()).orElse(null);
 
-        String title = "Kết quả duyệt đổi ca";
-        String statusStr = saved.getStatus() == ApprovalStatus.APPROVED ? "ĐÃ DUYỆT" : "BỊ TỪ CHỐI";
+        String title = isCancelRequest ? "Kết quả duyệt hủy yêu cầu đổi ca" : "Kết quả duyệt đổi ca";
+        String statusStr;
+        if (isCancelRequest) {
+            statusStr = saved.getStatus() == ApprovalStatus.CANCELLED ? "ĐÃ ĐƯỢC DUYỆT HỦY" : "BỊ TỪ CHỐI HỦY";
+        } else {
+            statusStr = saved.getStatus() == ApprovalStatus.APPROVED ? "ĐÃ DUYỆT" : "BỊ TỪ CHỐI";
+        }
         String content = String.format("Yêu cầu đổi ca ngày %s của bạn đã %s.", saved.getWorkDate(), statusStr);
-        NotificationType notiType = saved.getStatus() == ApprovalStatus.APPROVED ? NotificationType.REQUEST_APPROVED : NotificationType.REQUEST_REJECTED;
+        NotificationType notiType = (saved.getStatus() == ApprovalStatus.APPROVED || saved.getStatus() == ApprovalStatus.CANCELLED) 
+                ? NotificationType.REQUEST_APPROVED : NotificationType.REQUEST_REJECTED;
 
         // 1. Notify requester
         if (reqEmp != null && reqEmp.getUserInfo() != null) {
@@ -220,16 +289,31 @@ public class ApprovalService {
             );
         }
 
-        // 2. Notify targetEmployee if approved
-        if (saved.getStatus() == ApprovalStatus.APPROVED && tgtEmp != null && tgtEmp.getUserInfo() != null) {
-            String tgtContent = String.format("Lịch làm việc của bạn ngày %s đã thay đổi do yêu cầu đổi ca đã được phê duyệt.", saved.getWorkDate());
-            notificationService.createNotification(
-                    tgtEmp.getUserInfo().getId(),
-                    title,
-                    tgtContent,
-                    NotificationType.REQUEST_APPROVED,
-                    saved.getId()
-            );
+        // 2. Notify targetEmployee
+        if (tgtEmp != null && tgtEmp.getUserInfo() != null) {
+            if (isCancelRequest) {
+                if (saved.getStatus() == ApprovalStatus.CANCELLED) {
+                    String tgtContent = String.format("Lịch làm việc ngày %s của bạn đã được khôi phục lại do yêu cầu đổi ca/làm thay đã bị hủy.", saved.getWorkDate());
+                    notificationService.createNotification(
+                            tgtEmp.getUserInfo().getId(),
+                            title,
+                            tgtContent,
+                            NotificationType.REQUEST_APPROVED,
+                            saved.getId()
+                    );
+                }
+            } else {
+                if (saved.getStatus() == ApprovalStatus.APPROVED) {
+                    String tgtContent = String.format("Lịch làm việc của bạn ngày %s đã thay đổi do yêu cầu đổi ca đã được phê duyệt.", saved.getWorkDate());
+                    notificationService.createNotification(
+                            tgtEmp.getUserInfo().getId(),
+                            title,
+                            tgtContent,
+                            NotificationType.REQUEST_APPROVED,
+                            saved.getId()
+                    );
+                }
+            }
         }
 
         return saved;
@@ -237,7 +321,7 @@ public class ApprovalService {
 
     @Transactional(readOnly = true)
     public List<ShiftSwapRequest> getPendingShiftSwaps() {
-        return shiftSwapRequestRepository.findByStatus(ApprovalStatus.PENDING);
+        return shiftSwapRequestRepository.findByStatusIn(List.of(ApprovalStatus.PENDING, ApprovalStatus.CANCEL_PENDING));
     }
 
     // --- Leave Requests ---
@@ -258,16 +342,6 @@ public class ApprovalService {
                 .orElseThrow(() -> new RuntimeException("Loại phép không tồn tại."));
         validateLeaveRequestShape(leaveType, request);
 
-        leaveManagementService.ensureQuotas(employee, request.getStartDate().getYear());
-        BigDecimal requestedAmount = leaveManagementService.calculateAmount(
-                leaveType,
-                request.getStartDate(),
-                request.getEndDate(),
-                request.getStartTime(),
-                request.getEndTime()
-        );
-        leaveManagementService.assertWithinQuota(employee, leaveType, request.getStartDate().getYear(), requestedAmount, null, true);
-
         LeaveRequest entity = new LeaveRequest();
         entity.setEmployee(employee);
         entity.setLeaveType(leaveType);
@@ -278,6 +352,21 @@ public class ApprovalService {
         entity.setReason(request.getReason().trim());
         entity.setRequestedAt(LocalDateTime.now());
         entity.setStatus(ApprovalStatus.PENDING);
+
+        if (request.getShiftIds() != null && !request.getShiftIds().isEmpty()) {
+            if (!request.getStartDate().equals(request.getEndDate())) {
+                throw new RuntimeException("Chỉ hỗ trợ chọn ca nghỉ khi nghỉ phép trong cùng một ngày.");
+            }
+            List<Shift> shifts = shiftRepository.findAllById(request.getShiftIds());
+            if (shifts.size() != request.getShiftIds().size()) {
+                throw new RuntimeException("Một số ca làm việc không tồn tại.");
+            }
+            entity.setTargetShifts(shifts);
+        }
+
+        leaveManagementService.ensureQuotas(employee, request.getStartDate().getYear());
+        BigDecimal requestedAmount = leaveManagementService.calculateAmount(entity);
+        leaveManagementService.assertWithinQuota(employee, leaveType, request.getStartDate().getYear(), requestedAmount, null, true);
 
         LeaveRequest saved = leaveRequestRepository.save(entity);
 
@@ -309,7 +398,9 @@ public class ApprovalService {
         checkLock(request.getStartDate());
         checkLock(request.getEndDate());
 
-        if (status == ApprovalStatus.APPROVED) {
+        boolean isCancelRequest = request.getStatus() == ApprovalStatus.CANCEL_PENDING;
+
+        if (!isCancelRequest && status == ApprovalStatus.APPROVED) {
             BigDecimal requestedAmount = leaveManagementService.calculateAmount(request);
             leaveManagementService.assertWithinQuota(
                     request.getEmployee(),
@@ -324,7 +415,16 @@ public class ApprovalService {
         UUID userId = SecurityContextUtils.getCurrentUserId();
         AccountUser user = userId != null ? accountUserRepository.findById(userId).orElse(null) : null;
 
-        request.setStatus(status);
+        if (isCancelRequest) {
+            if (status == ApprovalStatus.APPROVED) {
+                request.setStatus(ApprovalStatus.CANCELLED);
+            } else {
+                request.setStatus(ApprovalStatus.APPROVED);
+            }
+        } else {
+            request.setStatus(status);
+        }
+
         request.setApprovedBy(user);
         request.setApprovedAt(LocalDateTime.now());
 
@@ -333,15 +433,21 @@ public class ApprovalService {
         // Notify employee
         if (saved.getEmployee() != null && saved.getEmployee().getUserInfo() != null) {
             UUID employeeAccountId = saved.getEmployee().getUserInfo().getId();
-            String title = "Kết quả duyệt nghỉ phép";
-            String statusStr = saved.getStatus() == ApprovalStatus.APPROVED ? "ĐÃ DUYỆT" : "BỊ TỪ CHỐI";
+            String title = isCancelRequest ? "Kết quả duyệt hủy nghỉ phép" : "Kết quả duyệt nghỉ phép";
+            String statusStr;
+            if (isCancelRequest) {
+                statusStr = saved.getStatus() == ApprovalStatus.CANCELLED ? "ĐÃ ĐƯỢC DUYỆT HỦY" : "BỊ TỪ CHỐI HỦY";
+            } else {
+                statusStr = saved.getStatus() == ApprovalStatus.APPROVED ? "ĐÃ DUYỆT" : "BỊ TỪ CHỐI";
+            }
             String content = String.format("Yêu cầu nghỉ phép từ ngày %s đến ngày %s của bạn đã %s.", 
                     saved.getStartDate(), saved.getEndDate(), statusStr);
             notificationService.createNotification(
                     employeeAccountId,
                     title,
                     content,
-                    saved.getStatus() == ApprovalStatus.APPROVED ? NotificationType.REQUEST_APPROVED : NotificationType.REQUEST_REJECTED,
+                    (saved.getStatus() == ApprovalStatus.APPROVED || saved.getStatus() == ApprovalStatus.CANCELLED) 
+                            ? NotificationType.REQUEST_APPROVED : NotificationType.REQUEST_REJECTED,
                     saved.getId()
             );
         }
@@ -351,7 +457,7 @@ public class ApprovalService {
 
     @Transactional(readOnly = true)
     public List<LeaveRequest> getPendingLeaves() {
-        return leaveRequestRepository.findByStatusIn(List.of(ApprovalStatus.PENDING));
+        return leaveRequestRepository.findByStatusIn(List.of(ApprovalStatus.PENDING, ApprovalStatus.CANCEL_PENDING));
     }
 
     @Transactional(readOnly = true)
@@ -412,6 +518,142 @@ public class ApprovalService {
         }
         if (!request.getEndTime().isAfter(request.getStartTime())) {
             throw new RuntimeException("Giờ kết thúc phải sau giờ bắt đầu.");
+        }
+    }
+
+    private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift) {
+        if (newShift.getType() == ShiftType.OFF || newShift.getStartTime() == null || newShift.getEndTime() == null) {
+            return;
+        }
+
+        List<EmployeeShift> existingAssignments = employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate);
+        for (EmployeeShift existing : existingAssignments) {
+            Shift existingShift = existing.getShift();
+            if (existingShift == null || existingShift.getType() == ShiftType.OFF
+                    || existingShift.getStartTime() == null || existingShift.getEndTime() == null) {
+                continue;
+            }
+            boolean overlaps = newShift.getStartTime().isBefore(existingShift.getEndTime())
+                    && newShift.getEndTime().isAfter(existingShift.getStartTime());
+            if (overlaps) {
+                throw new RuntimeException(String.format(
+                        "Ca làm việc mới bị trùng thời gian với ca %s của nhân viên ngày %s.",
+                        existingShift.getName(),
+                        workDate
+                ));
+            }
+        }
+    }
+
+    @Transactional
+    public void cancelLeaveRequest(UUID id) {
+        LeaveRequest request = leaveRequestRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Yêu cầu nghỉ phép không tồn tại."));
+
+        checkLock(request.getStartDate());
+        checkLock(request.getEndDate());
+
+        UUID userId = SecurityContextUtils.getCurrentUserId();
+        if (request.getEmployee().getUserInfo() == null || !request.getEmployee().getUserInfo().getId().equals(userId)) {
+            throw new RuntimeException("Bạn không có quyền hủy yêu cầu này.");
+        }
+
+        if (request.getStatus() == ApprovalStatus.PENDING) {
+            request.setStatus(ApprovalStatus.CANCELLED);
+            leaveRequestRepository.save(request);
+        } else if (request.getStatus() == ApprovalStatus.APPROVED) {
+            request.setStatus(ApprovalStatus.CANCEL_PENDING);
+            leaveRequestRepository.save(request);
+
+            // Notify managers/admins
+            List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
+                    List.of(Role.ADMIN, Role.MANAGER, Role.OWNER)
+            );
+            String title = "Yêu cầu hủy nghỉ phép đã duyệt";
+            String content = String.format("Nhân viên %s yêu cầu hủy đơn nghỉ phép từ %s đến %s đã được duyệt.", 
+                    request.getEmployee().getFullName(), request.getStartDate(), request.getEndDate());
+            for (AccountUser mgr : managers) {
+                notificationService.createNotification(
+                        mgr.getId(), title, content, NotificationType.REQUEST_SUBMITTED, request.getId()
+                );
+            }
+        } else {
+            throw new RuntimeException("Không thể hủy yêu cầu ở trạng thái: " + request.getStatus());
+        }
+    }
+
+    @Transactional
+    public void cancelShiftSwapRequest(UUID id) {
+        ShiftSwapRequest request = shiftSwapRequestRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Yêu cầu đổi ca không tồn tại."));
+
+        checkLock(request.getWorkDate());
+        if (request.getTargetWorkDate() != null) {
+            checkLock(request.getTargetWorkDate());
+        }
+
+        UUID userId = SecurityContextUtils.getCurrentUserId();
+        if (request.getRequester().getUserInfo() == null || !request.getRequester().getUserInfo().getId().equals(userId)) {
+            throw new RuntimeException("Bạn không có quyền hủy yêu cầu này.");
+        }
+
+        if (request.getStatus() == ApprovalStatus.PENDING) {
+            request.setStatus(ApprovalStatus.CANCELLED);
+            shiftSwapRequestRepository.save(request);
+        } else if (request.getStatus() == ApprovalStatus.APPROVED) {
+            request.setStatus(ApprovalStatus.CANCEL_PENDING);
+            shiftSwapRequestRepository.save(request);
+
+            // Notify managers/admins
+            List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
+                    List.of(Role.ADMIN, Role.MANAGER, Role.OWNER)
+            );
+            String title = "Yêu cầu hủy đổi ca đã duyệt";
+            String content = String.format("Nhân viên %s yêu cầu hủy đơn đổi ca ngày %s đã được duyệt.", 
+                    request.getRequester().getFullName(), request.getWorkDate());
+            for (AccountUser mgr : managers) {
+                notificationService.createNotification(
+                        mgr.getId(), title, content, NotificationType.REQUEST_SUBMITTED, request.getId()
+                );
+            }
+        } else {
+            throw new RuntimeException("Không thể hủy yêu cầu ở trạng thái: " + request.getStatus());
+        }
+    }
+
+    @Transactional
+    public void cancelAttendanceAdjustment(UUID id) {
+        AttendanceAdjustment request = attendanceAdjustmentRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Yêu cầu chỉnh sửa công không tồn tại."));
+
+        checkLock(request.getWorkDate());
+
+        UUID userId = SecurityContextUtils.getCurrentUserId();
+        if (request.getEmployee().getUserInfo() == null || !request.getEmployee().getUserInfo().getId().equals(userId)) {
+            throw new RuntimeException("Bạn không có quyền hủy yêu cầu này.");
+        }
+
+        if (request.getStatus() == ApprovalStatus.PENDING) {
+            request.setStatus(ApprovalStatus.CANCELLED);
+            attendanceAdjustmentRepository.save(request);
+        } else if (request.getStatus() == ApprovalStatus.APPROVED) {
+            request.setStatus(ApprovalStatus.CANCEL_PENDING);
+            attendanceAdjustmentRepository.save(request);
+
+            // Notify managers/admins
+            List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
+                    List.of(Role.ADMIN, Role.MANAGER, Role.OWNER)
+            );
+            String title = "Yêu cầu hủy chỉnh công đã duyệt";
+            String content = String.format("Nhân viên %s yêu cầu hủy đơn chỉnh công ngày %s đã được duyệt.", 
+                    request.getEmployee().getFullName(), request.getWorkDate());
+            for (AccountUser mgr : managers) {
+                notificationService.createNotification(
+                        mgr.getId(), title, content, NotificationType.REQUEST_SUBMITTED, request.getId()
+                );
+            }
+        } else {
+            throw new RuntimeException("Không thể hủy yêu cầu ở trạng thái: " + request.getStatus());
         }
     }
 }

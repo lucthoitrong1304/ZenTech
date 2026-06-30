@@ -7,6 +7,7 @@ import java.util.UUID;
 
 public interface EmployeeWeeklyScheduleProjection {
     UUID getEmployeeId();
+    UUID getEmployeeShiftId();
     UUID getShiftId();
     String getShiftName();
     String getColorCode();
@@ -14,4 +15,10 @@ public interface EmployeeWeeklyScheduleProjection {
     LocalTime getStartTime();
     LocalTime getEndTime();
     ShiftType getShiftType();
+    Integer getEarlyCheckInMinutes();
+    Integer getLateCheckOutMinutes();
+    Integer getOnTimeCheckInStartMinutes();
+    Integer getOnTimeCheckInEndMinutes();
+    Integer getOnTimeCheckOutStartMinutes();
+    Integer getOnTimeCheckOutEndMinutes();
 }

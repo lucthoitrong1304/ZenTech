@@ -39,6 +39,19 @@ public interface ShiftSwapRequestRepository extends JpaRepository<ShiftSwapReque
     List<ShiftSwapRequest> findByStatus(ApprovalStatus status);
 
     @EntityGraph(attributePaths = {"requester", "targetEmployee", "shift", "targetShift"})
+    List<ShiftSwapRequest> findByStatusIn(List<ApprovalStatus> statuses);
+
+    @EntityGraph(attributePaths = {"requester", "targetEmployee", "shift", "targetShift"})
     @Query("SELECT r FROM ShiftSwapRequest r WHERE r.requester.id = :empId OR r.targetEmployee.id = :empId ORDER BY r.requestedAt DESC")
     List<ShiftSwapRequest> findMySwaps(@Param("empId") UUID employeeId);
+
+    @Query("SELECT r FROM ShiftSwapRequest r WHERE r.status IN :statuses AND " +
+           "((r.requester.id = :empId AND r.workDate BETWEEN :start AND :end) OR " +
+           "(r.targetEmployee.id = :empId AND r.workDate BETWEEN :start AND :end) OR " +
+           "(r.targetEmployee.id = :empId AND r.targetWorkDate BETWEEN :start AND :end))")
+    List<ShiftSwapRequest> findSwapsForEmployeeInRangeWithStatuses(
+            @Param("empId") UUID employeeId,
+            @Param("start") LocalDate start,
+            @Param("end") LocalDate end,
+            @Param("statuses") List<ApprovalStatus> statuses);
 }

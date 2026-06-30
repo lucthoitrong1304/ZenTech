@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -28,4 +29,5 @@ public class LeaveRequestResponse {
     private String reason;
     private ApprovalStatus status;
     private LocalDateTime requestedAt;
+    private List<ApprovalShiftResponse> targetShifts;
 }

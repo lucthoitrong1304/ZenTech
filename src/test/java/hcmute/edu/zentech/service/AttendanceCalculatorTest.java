@@ -70,7 +70,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // Act
         Shift resolved = attendanceCalculator.resolveEffectiveShift(employee.getId(), workDate);
@@ -114,7 +114,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // 8:00 - 12:00
         AttendanceEvent in = new AttendanceEvent();
@@ -152,7 +152,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // Check in at 8:20 (Late, > 15 mins grace), check out at 11:50 (Early Checkout)
         AttendanceEvent in = new AttendanceEvent();
@@ -174,8 +174,8 @@ class AttendanceCalculatorTest {
         // Assert
         assertNotNull(response);
         assertEquals("LATE_AND_EARLY", response.getStatus());
-        assertEquals(20, response.getLateMinutes()); // 8:20 - 8:00
-        assertEquals(10, response.getEarlyMinutes()); // 12:00 - 11:50
+        assertEquals(15, response.getLateMinutes()); // 8:20 - allowed on-time until 8:05
+        assertEquals(5, response.getEarlyMinutes()); // on-time checkout starts at 11:55
         assertEquals(3.5, response.getWorkingHours()); // 3 hours 30 mins
     }
 
@@ -190,7 +190,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // No events
         when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
@@ -234,7 +234,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // No events
         when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
@@ -265,7 +265,7 @@ class AttendanceCalculatorTest {
         when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
                 .thenReturn(Collections.emptyList());
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
-                .thenReturn(Optional.of(es));
+                .thenReturn(List.of(es));
 
         // Only check in event
         AttendanceEvent in = new AttendanceEvent();
@@ -284,5 +284,157 @@ class AttendanceCalculatorTest {
         assertNotNull(response);
         assertEquals("MISSING_CHECK_OUT", response.getStatus());
         assertEquals(0.0, response.getWorkingHours());
+    }
+
+    @Test
+    void testCalculateDayAttendance_MultipleShiftsBreakdown() {
+        Shift pmShift = new Shift();
+        pmShift.setId(UUID.randomUUID());
+        pmShift.setName("Ca Chiá»u");
+        pmShift.setStartTime(LocalTime.of(13, 0));
+        pmShift.setEndTime(LocalTime.of(17, 0));
+        pmShift.setType(ShiftType.NORMAL);
+
+        EmployeeShift amAssignment = new EmployeeShift();
+        amAssignment.setId(UUID.randomUUID());
+        amAssignment.setShift(baseShift);
+
+        EmployeeShift pmAssignment = new EmployeeShift();
+        pmAssignment.setId(UUID.randomUUID());
+        pmAssignment.setShift(pmShift);
+
+        when(scheduleAdjustmentRepository.findByEmployeeIdAndWorkDateBetween(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
+                .thenReturn(List.of(amAssignment, pmAssignment));
+
+        AttendanceEvent amIn = new AttendanceEvent();
+        amIn.setEmployeeShift(amAssignment);
+        amIn.setEventType(AttendanceEventType.CHECK_IN);
+        amIn.setTimestamp(LocalDateTime.of(workDate, LocalTime.of(8, 0)));
+
+        AttendanceEvent amOut = new AttendanceEvent();
+        amOut.setEmployeeShift(amAssignment);
+        amOut.setEventType(AttendanceEventType.CHECK_OUT);
+        amOut.setTimestamp(LocalDateTime.of(workDate, LocalTime.of(12, 0)));
+
+        AttendanceEvent pmIn = new AttendanceEvent();
+        pmIn.setEmployeeShift(pmAssignment);
+        pmIn.setEventType(AttendanceEventType.CHECK_IN);
+        pmIn.setTimestamp(LocalDateTime.of(workDate, LocalTime.of(13, 0)));
+
+        AttendanceEvent pmOut = new AttendanceEvent();
+        pmOut.setEmployeeShift(pmAssignment);
+        pmOut.setEventType(AttendanceEventType.CHECK_OUT);
+        pmOut.setTimestamp(LocalDateTime.of(workDate, LocalTime.of(17, 0)));
+
+        when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
+                .thenReturn(List.of(amIn, amOut, pmIn, pmOut));
+        when(attendanceAdjustmentRepository.findByEmployeeIdAndWorkDateBetweenAndStatus(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(leaveRequestRepository.findApprovedLeavesForEmployeeInRange(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        AttendanceRecordResponse response = attendanceCalculator.calculateDayAttendance(employee, workDate);
+
+        assertEquals("ON_TIME", response.getStatus());
+        assertEquals(8.0, response.getWorkingHours());
+        assertEquals(2, response.getShiftBreakdowns().size());
+        assertEquals(4.0, response.getShiftBreakdowns().get(0).getWorkingHours());
+        assertEquals(4.0, response.getShiftBreakdowns().get(1).getWorkingHours());
+        assertFalse(response.isProvisional());
+    }
+
+    @Test
+    void testCalculateDayAttendance_CurrentDayMissingCheckoutIsProvisional() {
+        LocalDate today = LocalDate.now();
+        LocalDateTime checkInTime = LocalDateTime.now().minusMinutes(75);
+
+        Shift currentShift = new Shift();
+        currentShift.setId(UUID.randomUUID());
+        currentShift.setName("Ca Hiá»‡n Táº¡i");
+        currentShift.setStartTime(checkInTime.toLocalTime().minusMinutes(5));
+        currentShift.setEndTime(LocalTime.now().plusHours(2));
+        currentShift.setType(ShiftType.NORMAL);
+
+        EmployeeShift assignment = new EmployeeShift();
+        assignment.setId(UUID.randomUUID());
+        assignment.setShift(currentShift);
+
+        when(scheduleAdjustmentRepository.findByEmployeeIdAndWorkDateBetween(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), today))
+                .thenReturn(List.of(assignment));
+
+        AttendanceEvent in = new AttendanceEvent();
+        in.setEmployeeShift(assignment);
+        in.setEventType(AttendanceEventType.CHECK_IN);
+        in.setTimestamp(checkInTime);
+
+        when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
+                .thenReturn(List.of(in));
+        when(attendanceAdjustmentRepository.findByEmployeeIdAndWorkDateBetweenAndStatus(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(leaveRequestRepository.findApprovedLeavesForEmployeeInRange(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        AttendanceRecordResponse response = attendanceCalculator.calculateDayAttendance(employee, today);
+
+        assertEquals("MISSING_CHECK_OUT", response.getStatus());
+        assertTrue(response.isProvisional());
+        assertTrue(response.getWorkingHours() >= 1.0);
+        assertEquals(1, response.getShiftBreakdowns().size());
+        assertTrue(response.getShiftBreakdowns().get(0).isProvisional());
+    }
+
+    @Test
+    void testCalculateDayAttendance_PartialWorkedDayDoesNotShowAbsentAsDayStatus() {
+        Shift pmShift = new Shift();
+        pmShift.setId(UUID.randomUUID());
+        pmShift.setName("Ca Chiá»u");
+        pmShift.setStartTime(LocalTime.of(13, 0));
+        pmShift.setEndTime(LocalTime.of(17, 0));
+        pmShift.setType(ShiftType.NORMAL);
+
+        EmployeeShift amAssignment = new EmployeeShift();
+        amAssignment.setId(UUID.randomUUID());
+        amAssignment.setShift(baseShift);
+
+        EmployeeShift pmAssignment = new EmployeeShift();
+        pmAssignment.setId(UUID.randomUUID());
+        pmAssignment.setShift(pmShift);
+
+        when(scheduleAdjustmentRepository.findByEmployeeIdAndWorkDateBetween(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
+                .thenReturn(List.of(amAssignment, pmAssignment));
+
+        AttendanceEvent amIn = new AttendanceEvent();
+        amIn.setEmployeeShift(amAssignment);
+        amIn.setEventType(AttendanceEventType.CHECK_IN);
+        amIn.setTimestamp(LocalDateTime.of(workDate, LocalTime.of(8, 20)));
+
+        AttendanceEvent amOut = new AttendanceEvent();
+        amOut.setEmployeeShift(amAssignment);
+        amOut.setEventType(AttendanceEventType.CHECK_OUT);
+        amOut.setTimestamp(LocalDateTime.of(workDate, LocalTime.of(11, 50)));
+
+        when(attendanceEventRepository.findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(any(), any(), any()))
+                .thenReturn(List.of(amIn, amOut));
+        when(attendanceAdjustmentRepository.findByEmployeeIdAndWorkDateBetweenAndStatus(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(leaveRequestRepository.findApprovedLeavesForEmployeeInRange(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        AttendanceRecordResponse response = attendanceCalculator.calculateDayAttendance(employee, workDate);
+
+        assertEquals("LATE_AND_EARLY", response.getStatus());
+        assertEquals("ABSENT_UNEXCUSED", response.getShiftBreakdowns().get(1).getStatus());
     }
 }
