@@ -93,5 +93,6 @@ public class AdminObservabilityResponse {
         private String primaryUnit;
         private Double secondaryValue;
         private String secondaryUnit;
+        private Double latencyMs;
     }
 }
