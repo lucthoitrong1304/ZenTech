@@ -200,6 +200,45 @@ public class ChatConversationService {
     }
 
     @Transactional
+    public ConversationResponse leaveConversation(UUID conversationId) {
+        ChatParticipantService.StaffIdentity staff = chatParticipantService.getCurrentStaffIdentity();
+        Conversation conversation = getConversation(conversationId);
+        ensureNotClosed(conversation);
+
+        ConversationParticipant participant = chatParticipantService.getActiveParticipant(
+                conversationId,
+                staff.accountId()
+        );
+        participant.setStatus(ParticipantStatus.LEFT);
+        participant.setLeftAt(Instant.now());
+        participantRepository.save(participant);
+
+        boolean hasActiveStaff = participantRepository
+                .findByConversation_IdAndStatus(conversationId, ParticipantStatus.ACTIVE)
+                .stream()
+                .anyMatch(this::isStaffParticipant);
+
+        conversation.setStatus(hasActiveStaff ? ConversationStatus.AGENT_HANDLING : ConversationStatus.WAITING_FOR_AGENT);
+        conversation.setUpdatedAt(Instant.now());
+        Conversation savedConversation = conversationRepository.save(conversation);
+
+        ChatMessage systemMessage = ChatMessage.builder()
+                .conversation(savedConversation)
+                .participant(null)
+                .messageType(ChatMessageType.SYSTEM)
+                .content("Nhân viên " + resolveStaffName(staff) + " đã rời cuộc trò chuyện")
+                .createdAt(Instant.now())
+                .build();
+        chatMessageRepository.save(systemMessage);
+
+        ConversationResponse response = toConversationResponse(savedConversation);
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, chatMapper.toChatMessageResponse(systemMessage));
+        messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
+        return response;
+    }
+
+    @Transactional
     public ConversationResponse closeConversation(UUID conversationId) {
         Conversation conversation = getConversation(conversationId);
         chatParticipantService.findCurrentCustomer()
@@ -369,6 +408,19 @@ public class ChatConversationService {
     private ConversationResponse toConversationResponse(Conversation conversation) {
         List<ConversationParticipant> participants = participantRepository.findByConversation_Id(conversation.getId());
         return chatMapper.toConversationResponse(conversation, participants);
+    }
+
+    private boolean isStaffParticipant(ConversationParticipant participant) {
+        return participant.getUserType() == ParticipantType.EMPLOYEE || participant.getUserType() == ParticipantType.EXPERT;
+    }
+
+    private String resolveStaffName(ChatParticipantService.StaffIdentity staff) {
+        if (staff.participantType() == ParticipantType.EMPLOYEE || staff.participantType() == ParticipantType.EXPERT) {
+            return employeeRepository.findById(staff.referenceId())
+                    .map(hcmute.edu.zentech.model.Employee::getFullName)
+                    .orElse("Nhân viên");
+        }
+        return "Nhân viên";
     }
 
     private void ensureNotClosed(Conversation conversation) {
