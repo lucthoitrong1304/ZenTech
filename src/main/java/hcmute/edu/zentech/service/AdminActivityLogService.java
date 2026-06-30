@@ -66,6 +66,12 @@ public class AdminActivityLogService {
     private static final String ACTIVITY_LOG_TOPIC = "/topic/admin.activity-logs";
     private static final long RECORDING_RETENTION_MS = 7L * 24 * 60 * 60 * 1000;
     private static final int MAX_RECORDING_SESSIONS_PER_USER = 50;
+    public static final int MAX_RECORDING_EVENTS_PER_CHUNK = 2_000;
+    private static final int MAX_RECORDING_EVENTS_PER_SESSION = 50_000;
+    private static final int MAX_RECORDING_BYTES_PER_SESSION = 10 * 1024 * 1024;
+    private static final int RECORDING_LOCK_STRIPES = 64;
+
+    private final Object[] recordingLocks = createRecordingLocks();
 
     public void log(ActivityAction action, String targetType, String targetId, String description) {
         UUID currentUserId = SecurityContextUtils.getCurrentUserId();
@@ -933,40 +939,67 @@ public class AdminActivityLogService {
     }
 
     public void saveRecording(String email, String sessionId, List<Object> newEvents) {
-        if (email == null || email.isBlank() || newEvents == null || newEvents.isEmpty()) {
+        validateRecordingPathPart(email, "email");
+        if (newEvents == null || newEvents.isEmpty()) {
             return;
         }
+        if (newEvents.size() > MAX_RECORDING_EVENTS_PER_CHUNK) {
+            throw new IllegalArgumentException("Recording chunk exceeds the allowed event limit");
+        }
+
         String activeSessionId = sessionId;
         if (activeSessionId == null || activeSessionId.isBlank()) {
-            activeSessionId = Instant.now().toEpochMilli() + "_" + UUID.randomUUID().toString();
+            activeSessionId = Instant.now().toEpochMilli() + "_" + UUID.randomUUID();
         }
-        try {
-            String fileKey = "recordings/" + email + "/" + activeSessionId + ".json";
-            List<Object> existingEvents = new ArrayList<>();
+        validateRecordingPathPart(activeSessionId, "sessionId");
 
+        String fileKey = "recordings/" + email + "/" + activeSessionId + ".json";
+        Object lock = recordingLockFor(fileKey);
+        synchronized (lock) {
             try {
-                byte[] bytes = r2StorageService.getObjectBytes(fileKey);
-                if (bytes != null && bytes.length > 0) {
-                    existingEvents = objectMapper.readValue(bytes, new TypeReference<List<Object>>() {});
-                }
-            } catch (Exception e) {
-                log.warn("No existing recording found on R2 for {} session {}, creating new.", email, activeSessionId);
-            }
+                List<Object> existingEvents = new ArrayList<>();
 
-            existingEvents.addAll(newEvents);
-            byte[] jsonBytes = objectMapper.writeValueAsBytes(existingEvents);
-            r2StorageService.uploadFile(fileKey, jsonBytes, "application/json");
-            cleanupExpiredRecordingSessions(email, activeSessionId);
-            log.info("Saved {} new rrweb events to R2 for {} session {}. Total events: {}", newEvents.size(), email, activeSessionId, existingEvents.size());
-        } catch (Exception e) {
-            log.error("Failed to save recording on R2 for {} session {}: {}", email, activeSessionId, e.getMessage(), e);
+                try {
+                    byte[] bytes = r2StorageService.getObjectBytes(fileKey);
+                    if (bytes != null && bytes.length > 0) {
+                        existingEvents = objectMapper.readValue(bytes, new TypeReference<List<Object>>() {});
+                    }
+                } catch (Exception e) {
+                    log.debug("No existing recording found on R2 for {} session {}, creating new.", email, activeSessionId);
+                }
+
+                int totalEvents = existingEvents.size() + newEvents.size();
+                if (totalEvents > MAX_RECORDING_EVENTS_PER_SESSION) {
+                    throw new IllegalArgumentException("Recording session exceeds the allowed event limit");
+                }
+
+                existingEvents.addAll(newEvents);
+                byte[] jsonBytes = objectMapper.writeValueAsBytes(existingEvents);
+                if (jsonBytes.length > MAX_RECORDING_BYTES_PER_SESSION) {
+                    throw new IllegalArgumentException("Recording session exceeds the allowed storage size");
+                }
+
+                r2StorageService.uploadFile(fileKey, jsonBytes, "application/json");
+                cleanupExpiredRecordingSessions(email, activeSessionId);
+                log.info("Saved {} new rrweb events to R2 for {} session {}. Total events: {}", newEvents.size(), email, activeSessionId, totalEvents);
+            } catch (IllegalArgumentException e) {
+                throw e;
+            } catch (Exception e) {
+                log.error("Failed to save recording on R2 for {} session {}: {}", email, activeSessionId, e.getMessage(), e);
+            }
         }
     }
 
     public List<Object> getRecording(String email, String sessionId) {
-        if (email == null || email.isBlank()) {
+        if (!isSafeRecordingPathPart(email)) {
+            log.warn("Skipped reading rrweb recording because email contains unsafe path characters. email={}", email);
             return List.of();
         }
+        if (sessionId != null && !sessionId.isBlank() && !isSafeRecordingPathPart(sessionId)) {
+            log.warn("Skipped reading rrweb recording because sessionId contains unsafe path characters. email={}, sessionId={}", email, sessionId);
+            return List.of();
+        }
+
         try {
             String fileKey;
             if (sessionId == null || sessionId.isBlank()) {
@@ -998,7 +1031,8 @@ public class AdminActivityLogService {
     }
 
     public List<Map<String, Object>> getRecordingSessions(String email) {
-        if (email == null || email.isBlank()) {
+        if (!isSafeRecordingPathPart(email)) {
+            log.warn("Skipped listing rrweb sessions because email contains unsafe path characters. email={}", email);
             return List.of();
         }
         try {
@@ -1011,6 +1045,9 @@ public class AdminActivityLogService {
                     continue;
                 }
                 String sessionId = filename.substring(0, filename.lastIndexOf("."));
+                if (!isSafeRecordingPathPart(sessionId)) {
+                    continue;
+                }
                 long timestamp = parseRecordingSessionTimestamp(sessionId);
 
                 Map<String, Object> session = new java.util.HashMap<>();
@@ -1028,12 +1065,13 @@ public class AdminActivityLogService {
     }
 
     public void deleteRecording(String email, String sessionId) {
-        if (email == null || email.isBlank()) {
+        if (!isSafeRecordingPathPart(email)) {
+            log.warn("Skipped deleting rrweb recording because email contains unsafe path characters. email={}", email);
             return;
         }
         if (sessionId != null && !sessionId.isBlank()) {
-            if (containsUnsafeStoragePathPart(email) || containsUnsafeStoragePathPart(sessionId)) {
-                log.warn("Skipped deleting rrweb recording because email/sessionId contains unsafe path characters. email={}, sessionId={}", email, sessionId);
+            if (!isSafeRecordingPathPart(sessionId)) {
+                log.warn("Skipped deleting rrweb recording because sessionId contains unsafe path characters. email={}, sessionId={}", email, sessionId);
                 return;
             }
             try {
@@ -1063,7 +1101,7 @@ public class AdminActivityLogService {
     }
 
     private void cleanupExpiredRecordingSessions(String email, String activeSessionId) {
-        if (email == null || email.isBlank() || containsUnsafeStoragePathPart(email)) {
+        if (!isSafeRecordingPathPart(email)) {
             return;
         }
         try {
@@ -1121,7 +1159,29 @@ public class AdminActivityLogService {
     private record RecordingSessionObject(String key, String sessionId, long timestamp) {
     }
 
-    private boolean containsUnsafeStoragePathPart(String value) {
-        return value.contains("/") || value.contains("\\") || value.contains("..");
+    private static Object[] createRecordingLocks() {
+        Object[] locks = new Object[RECORDING_LOCK_STRIPES];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new Object();
+        }
+        return locks;
+    }
+
+    private Object recordingLockFor(String fileKey) {
+        return recordingLocks[Math.floorMod(fileKey.hashCode(), recordingLocks.length)];
+    }
+
+    private void validateRecordingPathPart(String value, String fieldName) {
+        if (!isSafeRecordingPathPart(value)) {
+            throw new IllegalArgumentException("Invalid recording " + fieldName);
+        }
+    }
+
+    private boolean isSafeRecordingPathPart(String value) {
+        return value != null
+                && !value.isBlank()
+                && !value.contains("/")
+                && !value.contains("\\")
+                && !value.contains("..");
     }
 }
