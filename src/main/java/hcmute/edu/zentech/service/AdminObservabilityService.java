@@ -575,37 +575,54 @@ public class AdminObservabilityService {
     }
 
     private AdminObservabilityResponse.DependencyStatus dependency(String name, boolean up, String detail,
-            Double primary, String primaryUnit, Double secondary, String secondaryUnit) {
+            Double primary, String primaryUnit, Double secondary, String secondaryUnit, Double latencyMs) {
         return AdminObservabilityResponse.DependencyStatus.builder().name(name).status(up ? "UP" : "DOWN")
                 .detail(detail).primaryValue(primary).primaryUnit(primaryUnit)
-                .secondaryValue(secondary).secondaryUnit(secondaryUnit).build();
+                .secondaryValue(secondary).secondaryUnit(secondaryUnit)
+                .latencyMs(latencyMs).build();
     }
 
     private List<AdminObservabilityResponse.DependencyStatus> checkDependencies(boolean prometheusAvailable) {
         List<AdminObservabilityResponse.DependencyStatus> result = new ArrayList<>();
-        result.add(dependency("Prometheus", prometheusAvailable, prometheusAvailable ? "Đang thu thập dữ liệu metric" : "Không thể kết nối Prometheus", null, null, null, null));
+        
+        long startProm = System.nanoTime();
+        boolean promUp = prometheus.isReady();
+        double promLat = Math.round(((System.nanoTime() - startProm) / 1_000_000.0) * 10.0) / 10.0;
+        result.add(dependency("Prometheus", promUp, promUp ? "Đang thu thập dữ liệu metric" : "Không thể kết nối Prometheus", null, null, null, null, promLat));
 
+        long startMysql = System.nanoTime();
         boolean mysqlUp = checkMysql();
+        double mysqlLat = Math.round(((System.nanoTime() - startMysql) / 1_000_000.0) * 10.0) / 10.0;
         result.add(dependency("MySQL", mysqlUp, mysqlUp ? "Pool kết nối sẵn sàng" : "Kết nối database thất bại",
                 prometheus.queryScalar("hikaricp_connections_active"), "hoạt động",
-                prometheus.queryScalar("hikaricp_connections_idle"), "nhàn rỗi"));
+                prometheus.queryScalar("hikaricp_connections_idle"), "nhàn rỗi", mysqlLat));
 
+        long startRabbit = System.nanoTime();
         boolean rabbitUp = checkRabbit();
+        double rabbitLat = Math.round(((System.nanoTime() - startRabbit) / 1_000_000.0) * 10.0) / 10.0;
         result.add(dependency("RabbitMQ", rabbitUp, rabbitUp ? "Broker connection hoạt động" : "Không thể kết nối broker",
                 prometheus.queryScalar("rabbitmq_connections"), "kết nối",
-                prometheus.queryScalar("rabbitmq_channels"), "kênh"));
+                prometheus.queryScalar("rabbitmq_channels"), "kênh", rabbitLat));
 
+        long startLoki = System.nanoTime();
         boolean lokiUp = checkHttpReady(lokiUrl + "/ready");
-        result.add(dependency("Loki", lokiUp, lokiUp ? "Kho lưu trữ nhật ký (Log storage) sẵn sàng" : "Loki không phản hồi", null, null, null, null));
+        double lokiLat = Math.round(((System.nanoTime() - startLoki) / 1_000_000.0) * 10.0) / 10.0;
+        result.add(dependency("Loki", lokiUp, lokiUp ? "Kho lưu trữ nhật ký (Log storage) sẵn sàng" : "Loki không phản hồi", null, null, null, null, lokiLat));
 
+        long startQdrant = System.nanoTime();
         boolean qdrantUp = checkHttpReady(qdrantUrl + "/readyz");
-        result.add(dependency("Qdrant", qdrantUp, qdrantUp ? "Cơ sở dữ liệu Vector sẵn sàng" : "Qdrant không phản hồi", null, null, null, null));
+        double qdrantLat = Math.round(((System.nanoTime() - startQdrant) / 1_000_000.0) * 10.0) / 10.0;
+        result.add(dependency("Qdrant", qdrantUp, qdrantUp ? "Cơ sở dữ liệu Vector sẵn sàng" : "Qdrant không phản hồi", null, null, null, null, qdrantLat));
 
+        long startAi = System.nanoTime();
         boolean aiUp = checkHttpReady(aiBaseUrl + "/health");
-        result.add(dependency("ZenTech AI", aiUp, aiUp ? "Dịch vụ AI sẵn sàng" : "ZenTech AI không phản hồi", null, null, null, null));
+        double aiLat = Math.round(((System.nanoTime() - startAi) / 1_000_000.0) * 10.0) / 10.0;
+        result.add(dependency("ZenTech AI", aiUp, aiUp ? "Dịch vụ AI sẵn sàng" : "ZenTech AI không phản hồi", null, null, null, null, aiLat));
 
+        long startAlloy = System.nanoTime();
         boolean alloyUp = checkHttpReady(alloyUrl + "/-/ready");
-        result.add(dependency("Alloy", alloyUp, alloyUp ? "Bộ thu thập telemetry hoạt động" : "Ngừng thu thập telemetry", null, null, null, null));
+        double alloyLat = Math.round(((System.nanoTime() - startAlloy) / 1_000_000.0) * 10.0) / 10.0;
+        result.add(dependency("Alloy", alloyUp, alloyUp ? "Bộ thu thập telemetry hoạt động" : "Ngừng thu thập telemetry", null, null, null, null, alloyLat));
         return result;
     }
 

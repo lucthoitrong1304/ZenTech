@@ -16,6 +16,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -128,9 +129,29 @@ public class AdminActivityLogController {
             return ResponseEntity.status(403).build();
         }
 
-        log.info("Received {} rrweb events to save for {} session {}", events.size(), email, sessionId);
-        activityLogService.saveRecording(email, sessionId, events);
-        return ResponseEntity.ok(ApiResponse.success(null));
+        int eventCount = events == null ? 0 : events.size();
+        if (eventCount == 0) {
+            return ResponseEntity.ok(ApiResponse.success(null));
+        }
+        if (eventCount > AdminActivityLogService.MAX_RECORDING_EVENTS_PER_CHUNK) {
+            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                    .body(ApiResponse.<Void>builder()
+                            .success(false)
+                            .message("Recording chunk exceeds the allowed event limit")
+                            .build());
+        }
+
+        try {
+            log.debug("Received {} rrweb events to save for {} session {}", eventCount, email, sessionId);
+            activityLogService.saveRecording(email, sessionId, events);
+            return ResponseEntity.ok(ApiResponse.success(null));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.<Void>builder()
+                            .success(false)
+                            .message(ex.getMessage())
+                            .build());
+        }
     }
 
     @GetMapping("/recordings")
@@ -138,7 +159,7 @@ public class AdminActivityLogController {
             @RequestParam("email") String email,
             @RequestParam(value = "sessionId", required = false) String sessionId
     ) {
-        log.info("Request get rrweb recording for {} session {}", email, sessionId);
+        log.debug("Request get rrweb recording for {} session {}", email, sessionId);
         return ResponseEntity.ok(ApiResponse.success(activityLogService.getRecording(email, sessionId)));
     }
 
@@ -146,7 +167,7 @@ public class AdminActivityLogController {
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getRecordingSessions(
             @RequestParam("email") String email
     ) {
-        log.info("Request get rrweb sessions list for {}", email);
+        log.debug("Request get rrweb sessions list for {}", email);
         return ResponseEntity.ok(ApiResponse.success(activityLogService.getRecordingSessions(email)));
     }
 

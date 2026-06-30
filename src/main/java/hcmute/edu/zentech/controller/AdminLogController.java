@@ -51,4 +51,11 @@ public class AdminLogController {
         Map<String, Object> result = adminLogService.explainLogError(logPayload);
         return ResponseEntity.ok(result);
     }
+
+    @PostMapping("/admin/chat/follow-up")
+    public ResponseEntity<Map<String, Object>> followUpChat(@RequestBody Map<String, Object> chatPayload) {
+        log.info("Request for follow-up chat received");
+        Map<String, Object> result = adminLogService.chatFollowUp(chatPayload);
+        return ResponseEntity.ok(result);
+    }
 }
