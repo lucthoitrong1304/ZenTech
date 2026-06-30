@@ -106,4 +106,39 @@ public class AdminLogService {
         }
         return Map.of("explanation", "AI Service không phản hồi thông tin phân tích.");
     }
+
+    /**
+     * Gọi AI Service để hỏi đáp tiếp nối về log lỗi
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> chatFollowUp(Map<String, Object> payload) {
+        try {
+            String chatUrl = aiBaseUrl + "/admin/chat/follow-up";
+            log.info("Calling AI service for chat follow-up: {}", chatUrl);
+
+            Map<String, Object> requestBody = Map.of(
+                    "service", payload.getOrDefault("service", ""),
+                    "log_details", payload.getOrDefault("logDetails", ""),
+                    "user_message", payload.getOrDefault("userMessage", ""),
+                    "history", payload.getOrDefault("history", List.of())
+            );
+
+            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
+            String traceId = org.slf4j.MDC.get("traceId");
+            if (traceId != null && !traceId.trim().isEmpty()) {
+                headers.set("X-Trace-Id", traceId.trim());
+            }
+
+            org.springframework.http.HttpEntity<Map<String, Object>> entity = new org.springframework.http.HttpEntity<>(requestBody, headers);
+
+            ResponseEntity<Map> response = restTemplate.postForEntity(chatUrl, entity, Map.class);
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                return (Map<String, Object>) response.getBody();
+            }
+        } catch (Exception e) {
+            log.error("Failed to call chat follow-up: {}", e.getMessage());
+        }
+        return Map.of("content", "Không thể liên kết với AI Service để thực hiện chat lúc này.");
+    }
 }
