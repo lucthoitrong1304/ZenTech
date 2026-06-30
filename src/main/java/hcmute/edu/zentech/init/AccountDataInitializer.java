@@ -29,6 +29,8 @@ public class AccountDataInitializer implements CommandLineRunner {
     public void run(String... args) {
         createAccountWithProfileIfMissing("admin@zentech.local", Role.ADMIN, "ZenTech Admin");
         createAccountWithProfileIfMissing("owner@zentech.local", Role.OWNER, "ZenTech Owner");
+        createAccountWithProfileIfMissing("manager@zentech.local", Role.MANAGER, "ZenTech Manager");
+        createAccountWithProfileIfMissing("employee@zentech.local", Role.EMPLOYEE, "ZenTech Employee");
     }
 
     private void createAccountWithProfileIfMissing(String email, Role role, String fullName) {
