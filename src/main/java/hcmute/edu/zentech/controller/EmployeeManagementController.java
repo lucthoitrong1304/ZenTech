@@ -2,6 +2,7 @@ package hcmute.edu.zentech.controller;
 
 import hcmute.edu.zentech.dto.request.EmployeeCreateRequest;
 import hcmute.edu.zentech.dto.request.EmployeeLeaveQuotaUpdateRequest;
+import hcmute.edu.zentech.dto.request.EmployeeUpdateRequest;
 import hcmute.edu.zentech.dto.response.ApiResponse;
 import hcmute.edu.zentech.dto.response.EmployeeLeaveQuotaResponse;
 import hcmute.edu.zentech.dto.response.EmployeeSummaryResponse;
@@ -51,6 +52,14 @@ public class EmployeeManagementController {
             @Valid @RequestBody EmployeeCreateRequest request
     ) {
         return ResponseEntity.ok(ApiResponse.success(employeeManagementService.createEmployee(request)));
+    }
+
+    @PatchMapping("/{employeeId}")
+    public ResponseEntity<ApiResponse<EmployeeSummaryResponse>> updateEmployee(
+            @PathVariable UUID employeeId,
+            @Valid @RequestBody EmployeeUpdateRequest request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(employeeManagementService.updateEmployee(employeeId, request)));
     }
 
     @GetMapping("/{employeeId}/leave-quotas")
