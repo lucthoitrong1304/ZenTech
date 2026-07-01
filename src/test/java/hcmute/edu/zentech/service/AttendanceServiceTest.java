@@ -18,6 +18,8 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -211,6 +213,51 @@ class AttendanceServiceTest {
     }
 
     @Test
+    void resolveAttendanceShiftAllowsCheckInWithinEarlyWindow() {
+        Shift shift = buildAmShift();
+        EmployeeShift employeeShift = new EmployeeShift();
+        employeeShift.setId(UUID.randomUUID());
+        employeeShift.setEmployee(mockEmployee);
+        employeeShift.setShift(shift);
+        when(attendanceCalculator.resolveEffectiveShifts(eq(mockEmployee.getId()), any()))
+                .thenReturn(List.of(new AttendanceCalculator.EffectiveShift(employeeShift, shift)));
+
+        AttendanceCalculator.EffectiveShift resolved = ReflectionTestUtils.invokeMethod(
+                attendanceService,
+                "resolveAttendanceShift",
+                mockEmployee,
+                LocalDateTime.of(2026, 7, 1, 8, 39),
+                AttendanceEventType.CHECK_IN,
+                Collections.emptyList()
+        );
+
+        assertNotNull(resolved);
+        assertEquals(shift.getId(), resolved.shift().getId());
+    }
+
+    @Test
+    void resolveAttendanceShiftBlocksCheckInBeforeEarlyWindow() {
+        Shift shift = buildAmShift();
+        EmployeeShift employeeShift = new EmployeeShift();
+        employeeShift.setId(UUID.randomUUID());
+        employeeShift.setEmployee(mockEmployee);
+        employeeShift.setShift(shift);
+        when(attendanceCalculator.resolveEffectiveShifts(eq(mockEmployee.getId()), any()))
+                .thenReturn(List.of(new AttendanceCalculator.EffectiveShift(employeeShift, shift)));
+
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> ReflectionTestUtils.invokeMethod(
+                attendanceService,
+                "resolveAttendanceShift",
+                mockEmployee,
+                LocalDateTime.of(2026, 7, 1, 7, 59),
+                AttendanceEventType.CHECK_IN,
+                Collections.emptyList()
+        ));
+
+        assertEquals("Chưa tới giờ check-in ca AM.", exception.getMessage());
+    }
+
+    @Test
     void testCheckInRateLimit() throws Exception {
         // Arrange
         securityContextUtilsMock.when(SecurityContextUtils::getCurrentUserId).thenReturn(mockAccountId);
@@ -255,5 +302,17 @@ class AttendanceServiceTest {
                 any(),
                 any()
         );
+    }
+
+    private Shift buildAmShift() {
+        Shift shift = new Shift();
+        shift.setId(UUID.randomUUID());
+        shift.setName("AM");
+        shift.setType(ShiftType.NORMAL);
+        shift.setStartTime(LocalTime.of(9, 0));
+        shift.setEndTime(LocalTime.of(12, 0));
+        shift.setEarlyCheckInMinutes(60);
+        shift.setLateCheckOutMinutes(60);
+        return shift;
     }
 }
