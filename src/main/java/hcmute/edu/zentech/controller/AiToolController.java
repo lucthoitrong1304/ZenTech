@@ -390,9 +390,7 @@ public class AiToolController {
                 for (ProductGroupItemResponse gp : details.getGroupProducts()) {
                     relatedBuilder.append(String.format("- %s (ID: %s)\n", gp.getProductName(), gp.getId()));
                     productRepository.findById(gp.getId()).ifPresent(p -> {
-                        Optional<ProductVariant> repVarOpt = p.getVariants().stream()
-                                .filter(v -> !v.isDeleted())
-                                .min(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+                        Optional<ProductVariant> repVarOpt = findLowestPricedVariant(p, now);
                         repVarOpt.ifPresent(v -> relatedList.add(RelatedProductSummaryDto.builder()
                                 .productId(p.getId())
                                 .variantId(v.getId())
@@ -419,19 +417,35 @@ public class AiToolController {
                     double price = sp.getSalePrice() != null ? sp.getSalePrice() : sp.getOriginalPrice();
                     relatedBuilder.append(String.format("- %s - Giá: %,.0f VND - Tồn kho: %d sản phẩm (ID: %s)\n",
                             sp.getProductName(), price, sp.getStockQuantity(), sp.getId()));
-                    productRepository.findById(sp.getId()).ifPresent(p -> relatedList.add(RelatedProductSummaryDto.builder()
-                            .productId(sp.getId())
-                            .variantId(null)
-                            .name(sp.getProductName())
-                            .variantName(null)
-                            .price(BigDecimal.valueOf(price))
-                            .originalPrice(sp.getOriginalPrice() == null ? null : BigDecimal.valueOf(sp.getOriginalPrice()))
-                            .salePrice(sp.getSalePrice() == null ? null : BigDecimal.valueOf(sp.getSalePrice()))
-                            .saleStartAt(null)
-                            .saleEndAt(null)
-                            .stock(sp.getStockQuantity())
-                            .imageKey(resolveRepresentativeImageKey(p))
-                            .build()));
+                    productRepository.findById(sp.getId()).ifPresent(p -> {
+                        Optional<ProductVariant> repVarOpt = findLowestPricedVariant(p, now);
+                        relatedList.add(repVarOpt.map(v -> RelatedProductSummaryDto.builder()
+                                        .productId(sp.getId())
+                                        .variantId(v.getId())
+                                        .name(sp.getProductName())
+                                        .variantName(v.getName())
+                                        .price(BigDecimal.valueOf(resolveActivePrice(v, now)))
+                                        .originalPrice(BigDecimal.valueOf(v.getOriginalPrice()))
+                                        .salePrice(resolveActiveSalePrice(v, now).map(BigDecimal::valueOf).orElse(null))
+                                        .saleStartAt(v.getSaleStartAt())
+                                        .saleEndAt(v.getSaleEndAt())
+                                        .stock(v.getStockQuantity())
+                                        .imageKey(resolveRepresentativeImageKey(p))
+                                        .build())
+                                .orElseGet(() -> RelatedProductSummaryDto.builder()
+                                        .productId(sp.getId())
+                                        .variantId(null)
+                                        .name(sp.getProductName())
+                                        .variantName(null)
+                                        .price(BigDecimal.valueOf(price))
+                                        .originalPrice(sp.getOriginalPrice() == null ? null : BigDecimal.valueOf(sp.getOriginalPrice()))
+                                        .salePrice(sp.getSalePrice() == null ? null : BigDecimal.valueOf(sp.getSalePrice()))
+                                        .saleStartAt(null)
+                                        .saleEndAt(null)
+                                        .stock(sp.getStockQuantity())
+                                        .imageKey(resolveRepresentativeImageKey(p))
+                                        .build()));
+                    });
                 }
             }
         } catch (Exception ex) {
@@ -462,7 +476,47 @@ public class AiToolController {
                 .supportInfo(product.getSupportInfo())
                 .relatedProducts(relatedProductsStr)
                 .relatedProductList(relatedList)
+                .variants(mapVariantSummaries(product, now))
                 .build();
+    }
+
+    private List<VariantSummaryDto> mapVariantSummaries(Product product, Instant now) {
+        if (product.getVariants() == null || product.getVariants().isEmpty()) {
+            return List.of();
+        }
+        return product.getVariants().stream()
+                .filter(Objects::nonNull)
+                .filter(variant -> !variant.isDeleted())
+                .sorted(lowestActivePriceComparator(now))
+                .map(variant -> VariantSummaryDto.builder()
+                        .variantId(variant.getId())
+                        .variantName(variant.getName())
+                        .nameColor(variant.getNameColor())
+                        .colorCode(variant.getColorCode())
+                        .price(BigDecimal.valueOf(resolveActivePrice(variant, now)))
+                        .originalPrice(BigDecimal.valueOf(variant.getOriginalPrice()))
+                        .salePrice(resolveActiveSalePrice(variant, now).map(BigDecimal::valueOf).orElse(null))
+                        .saleStartAt(variant.getSaleStartAt())
+                        .saleEndAt(variant.getSaleEndAt())
+                        .stock(variant.getStockQuantity())
+                        .build())
+                .toList();
+    }
+
+    private Optional<ProductVariant> findLowestPricedVariant(Product product, Instant now) {
+        if (product.getVariants() == null || product.getVariants().isEmpty()) {
+            return Optional.empty();
+        }
+        return product.getVariants().stream()
+                .filter(Objects::nonNull)
+                .filter(variant -> !variant.isDeleted())
+                .min(lowestActivePriceComparator(now));
+    }
+
+    private Comparator<ProductVariant> lowestActivePriceComparator(Instant now) {
+        return Comparator
+                .comparing((ProductVariant variant) -> resolveActivePrice(variant, now))
+                .thenComparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder()));
     }
 
     private double resolveActivePrice(ProductVariant variant, Instant now) {
@@ -603,6 +657,23 @@ public class AiToolController {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VariantSummaryDto {
+        private UUID variantId;
+        private String variantName;
+        private String nameColor;
+        private String colorCode;
+        private BigDecimal price;
+        private BigDecimal originalPrice;
+        private BigDecimal salePrice;
+        private Instant saleStartAt;
+        private Instant saleEndAt;
+        private Integer stock;
+    }
+
+    @Data
+    @Builder
     public static class ResolvedProductDto {
         private UUID productId;
         private UUID variantId;
@@ -625,6 +696,7 @@ public class AiToolController {
         private String supportInfo;
         private String relatedProducts;
         private List<RelatedProductSummaryDto> relatedProductList;
+        private List<VariantSummaryDto> variants;
     }
 
     @Data
