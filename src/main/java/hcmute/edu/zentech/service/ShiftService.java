@@ -33,6 +33,7 @@ public class ShiftService {
     private final AccountUserRepository accountUserRepository;
     private final NotificationService notificationService;
     private final AttendanceCalculator attendanceCalculator;
+    private final ShiftOverlapService shiftOverlapService;
 
 
     @Transactional
@@ -201,9 +202,9 @@ public class ShiftService {
         Shift shift = shiftRepository.findById(dto.getShiftId())
                 .orElseThrow(() -> new RuntimeException("Shift not found"));
 
-        validateAndApplyScheduleAdjustment(employee, dto.getWorkDate(), shift, dto.getReason());
-
         validateNoOverlap(dto.getEmployeeId(), dto.getWorkDate(), shift, null);
+
+        validateAndApplyScheduleAdjustment(employee, dto.getWorkDate(), shift, dto.getReason());
         
         EmployeeShift es = new EmployeeShift();
         es.setEmployee(employee);
@@ -246,8 +247,15 @@ public class ShiftService {
         LocalDate currentDate = dto.getStartDate();
         while (!currentDate.isAfter(dto.getEndDate())) {
             for (Employee emp : employees) {
-                validateAndApplyScheduleAdjustment(emp, currentDate, shift, dto.getReason());
                 validateNoOverlap(emp.getId(), currentDate, shift, null);
+            }
+            currentDate = currentDate.plusDays(1);
+        }
+
+        currentDate = dto.getStartDate();
+        while (!currentDate.isAfter(dto.getEndDate())) {
+            for (Employee emp : employees) {
+                validateAndApplyScheduleAdjustment(emp, currentDate, shift, dto.getReason());
             }
             currentDate = currentDate.plusDays(1);
         }
@@ -294,6 +302,16 @@ public class ShiftService {
         if (employeeIdsToCopy.isEmpty()) return;
 
         long daysDiff = java.time.temporal.ChronoUnit.DAYS.between(dto.getFromWeekStartDate(), dto.getToWeekStartDate());
+
+        List<ScheduleCandidate> copyCandidates = prevShifts.stream()
+                .map(prevEs -> new ScheduleCandidate(
+                        prevEs.getEmployee(),
+                        prevEs.getWorkDate().plusDays(daysDiff),
+                        prevEs.getShift()
+                ))
+                .toList();
+        validateNoInternalOverlap(copyCandidates);
+        validateNoAdjustmentOverlap(copyCandidates);
 
         for (EmployeeShift prevEs : prevShifts) {
             LocalDate destDate = prevEs.getWorkDate().plusDays(daysDiff);
@@ -360,31 +378,98 @@ public class ShiftService {
     }
 
     private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift, UUID excludeEmployeeShiftId) {
-        if (newShift.getType() == ShiftType.OFF || newShift.getStartTime() == null || newShift.getEndTime() == null) {
+        if (!shiftOverlapService.hasCaptureWindow(newShift)) {
             return;
         }
 
+        ShiftOverlapService.CaptureWindow newWindow = shiftOverlapService.captureWindow(workDate, newShift);
         List<EmployeeShift> existingAssignments = employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate);
         for (EmployeeShift existing : existingAssignments) {
             if (excludeEmployeeShiftId != null && excludeEmployeeShiftId.equals(existing.getId())) {
                 continue;
             }
             Shift existingShift = existing.getShift();
-            if (existingShift == null || existingShift.getType() == ShiftType.OFF
-                    || existingShift.getStartTime() == null || existingShift.getEndTime() == null) {
+            if (!shiftOverlapService.hasCaptureWindow(existingShift)) {
                 continue;
             }
-            boolean overlaps = newShift.getStartTime().isBefore(existingShift.getEndTime())
-                    && newShift.getEndTime().isAfter(existingShift.getStartTime());
-            if (overlaps) {
+            ShiftOverlapService.CaptureWindow existingWindow = shiftOverlapService.captureWindow(workDate, existingShift);
+            if (shiftOverlapService.overlapsInclusive(newWindow, existingWindow)) {
                 throw new RuntimeException(String.format(
-                        "Ca %s bị trùng thời gian với ca %s trong ngày %s.",
+                        "Ca %s (%s) bị trùng vùng chấm công với ca %s (%s) trong ngày %s.",
                         newShift.getName(),
+                        shiftOverlapService.format(newWindow),
                         existingShift.getName(),
+                        shiftOverlapService.format(existingWindow),
                         workDate
                 ));
             }
         }
+    }
+
+    private void validateNoInternalOverlap(List<ScheduleCandidate> candidates) {
+        for (int i = 0; i < candidates.size(); i++) {
+            ScheduleCandidate first = candidates.get(i);
+            if (!shiftOverlapService.hasCaptureWindow(first.shift())) {
+                continue;
+            }
+            ShiftOverlapService.CaptureWindow firstWindow = shiftOverlapService.captureWindow(first.workDate(), first.shift());
+            for (int j = i + 1; j < candidates.size(); j++) {
+                ScheduleCandidate second = candidates.get(j);
+                if (!Objects.equals(first.employee().getId(), second.employee().getId())
+                        || !Objects.equals(first.workDate(), second.workDate())
+                        || !shiftOverlapService.hasCaptureWindow(second.shift())) {
+                    continue;
+                }
+                ShiftOverlapService.CaptureWindow secondWindow = shiftOverlapService.captureWindow(second.workDate(), second.shift());
+                if (shiftOverlapService.overlapsInclusive(firstWindow, secondWindow)) {
+                    throw new RuntimeException(String.format(
+                            "Không thể sao chép tuần vì nhân viên %s ngày %s có ca %s (%s) trùng vùng chấm công với ca %s (%s).",
+                            first.employee().getFullName(),
+                            first.workDate(),
+                            first.shift().getName(),
+                            shiftOverlapService.format(firstWindow),
+                            second.shift().getName(),
+                            shiftOverlapService.format(secondWindow)
+                    ));
+                }
+            }
+        }
+    }
+
+    private void validateNoAdjustmentOverlap(List<ScheduleCandidate> candidates) {
+        for (ScheduleCandidate candidate : candidates) {
+            if (!shiftOverlapService.hasCaptureWindow(candidate.shift())) {
+                continue;
+            }
+            List<ScheduleAdjustment> adjustments = scheduleAdjustmentRepository.findByEmployeeIdAndWorkDateBetween(
+                    candidate.employee().getId(),
+                    candidate.workDate(),
+                    candidate.workDate()
+            );
+            ShiftOverlapService.CaptureWindow candidateWindow = shiftOverlapService.captureWindow(candidate.workDate(), candidate.shift());
+            for (ScheduleAdjustment adjustment : adjustments) {
+                if (adjustment.getStatus() != ApprovalStatus.APPROVED
+                        || !shiftOverlapService.hasCaptureWindow(adjustment.getAdjustedShift())) {
+                    continue;
+                }
+                Shift adjustedShift = adjustment.getAdjustedShift();
+                ShiftOverlapService.CaptureWindow adjustmentWindow = shiftOverlapService.captureWindow(adjustment.getWorkDate(), adjustedShift);
+                if (shiftOverlapService.overlapsInclusive(candidateWindow, adjustmentWindow)) {
+                    throw new RuntimeException(String.format(
+                            "Không thể sao chép tuần vì nhân viên %s ngày %s có ca %s (%s) trùng vùng chấm công với ca điều chỉnh %s (%s).",
+                            candidate.employee().getFullName(),
+                            candidate.workDate(),
+                            candidate.shift().getName(),
+                            shiftOverlapService.format(candidateWindow),
+                            adjustedShift.getName(),
+                            shiftOverlapService.format(adjustmentWindow)
+                    ));
+                }
+            }
+        }
+    }
+
+    private record ScheduleCandidate(Employee employee, LocalDate workDate, Shift shift) {
     }
 
     private int defaultInt(Integer value, int fallback) {

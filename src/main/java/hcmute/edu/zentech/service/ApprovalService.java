@@ -31,6 +31,7 @@ public class ApprovalService {
     private final NotificationService notificationService;
     private final ShiftRepository shiftRepository;
     private final EmployeeShiftRepository employeeShiftRepository;
+    private final ShiftOverlapService shiftOverlapService;
 
     private void checkLock(LocalDate date) {
         Optional<PayPeriod> p = payPeriodRepository.findPeriodActiveAt(date);
@@ -522,23 +523,25 @@ public class ApprovalService {
     }
 
     private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift) {
-        if (newShift.getType() == ShiftType.OFF || newShift.getStartTime() == null || newShift.getEndTime() == null) {
+        if (!shiftOverlapService.hasCaptureWindow(newShift)) {
             return;
         }
 
+        ShiftOverlapService.CaptureWindow newWindow = shiftOverlapService.captureWindow(workDate, newShift);
         List<EmployeeShift> existingAssignments = employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate);
         for (EmployeeShift existing : existingAssignments) {
             Shift existingShift = existing.getShift();
-            if (existingShift == null || existingShift.getType() == ShiftType.OFF
-                    || existingShift.getStartTime() == null || existingShift.getEndTime() == null) {
+            if (!shiftOverlapService.hasCaptureWindow(existingShift)) {
                 continue;
             }
-            boolean overlaps = newShift.getStartTime().isBefore(existingShift.getEndTime())
-                    && newShift.getEndTime().isAfter(existingShift.getStartTime());
-            if (overlaps) {
+            ShiftOverlapService.CaptureWindow existingWindow = shiftOverlapService.captureWindow(workDate, existingShift);
+            if (shiftOverlapService.overlapsInclusive(newWindow, existingWindow)) {
                 throw new RuntimeException(String.format(
-                        "Ca làm việc mới bị trùng thời gian với ca %s của nhân viên ngày %s.",
+                        "Ca làm việc mới %s (%s) bị trùng vùng chấm công với ca %s (%s) của nhân viên ngày %s.",
+                        newShift.getName(),
+                        shiftOverlapService.format(newWindow),
                         existingShift.getName(),
+                        shiftOverlapService.format(existingWindow),
                         workDate
                 ));
             }
