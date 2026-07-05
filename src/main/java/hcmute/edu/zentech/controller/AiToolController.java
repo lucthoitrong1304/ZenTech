@@ -401,6 +401,8 @@ public class AiToolController {
                                 .price(BigDecimal.valueOf(resolveActivePrice(v, now)))
                                 .originalPrice(BigDecimal.valueOf(v.getOriginalPrice()))
                                 .salePrice(resolveActiveSalePrice(v, now).map(BigDecimal::valueOf).orElse(null))
+                                .saleStartAt(v.getSaleStartAt())
+                                .saleEndAt(v.getSaleEndAt())
                                 .stock(v.getStockQuantity())
                                 .imageKey(resolveRepresentativeImageKey(p))
                                 .build()));
@@ -425,6 +427,8 @@ public class AiToolController {
                             .price(BigDecimal.valueOf(price))
                             .originalPrice(sp.getOriginalPrice() == null ? null : BigDecimal.valueOf(sp.getOriginalPrice()))
                             .salePrice(sp.getSalePrice() == null ? null : BigDecimal.valueOf(sp.getSalePrice()))
+                            .saleStartAt(null)
+                            .saleEndAt(null)
                             .stock(sp.getStockQuantity())
                             .imageKey(resolveRepresentativeImageKey(p))
                             .build()));
@@ -445,6 +449,8 @@ public class AiToolController {
                 .price(BigDecimal.valueOf(activePrice))
                 .originalPrice(BigDecimal.valueOf(variant.getOriginalPrice()))
                 .salePrice(resolveActiveSalePrice(variant, now).map(BigDecimal::valueOf).orElse(null))
+                .saleStartAt(variant.getSaleStartAt())
+                .saleEndAt(variant.getSaleEndAt())
                 .stock(variant.getStockQuantity())
                 .promotionInfo(promoInfo)
                 .rating(avgRating)
@@ -589,6 +595,8 @@ public class AiToolController {
         private BigDecimal price;
         private BigDecimal originalPrice;
         private BigDecimal salePrice;
+        private Instant saleStartAt;
+        private Instant saleEndAt;
         private Integer stock;
         private String imageKey;
     }
@@ -604,6 +612,8 @@ public class AiToolController {
         private BigDecimal price;
         private BigDecimal originalPrice;
         private BigDecimal salePrice;
+        private Instant saleStartAt;
+        private Instant saleEndAt;
         private Integer stock;
         private String promotionInfo;
         private Double rating;
