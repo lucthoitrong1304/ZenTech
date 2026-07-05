@@ -14,6 +14,7 @@ import hcmute.edu.zentech.dto.response.AiKnowledgeIngestResponse;
 import hcmute.edu.zentech.dto.response.AiProductVectorStatusResponse;
 import hcmute.edu.zentech.dto.response.AiProductVectorVerifyResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
+import hcmute.edu.zentech.model.AccountUser;
 import hcmute.edu.zentech.model.AiDataset;
 import hcmute.edu.zentech.model.AiDatasetStatus;
 import hcmute.edu.zentech.model.AiDocument;
@@ -26,9 +27,12 @@ import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.repository.AiDatasetRepository;
 import hcmute.edu.zentech.repository.AiDocumentRepository;
 import hcmute.edu.zentech.repository.AiProductVectorStatusRepository;
+import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.ProductRepository;
+import hcmute.edu.zentech.repository.RolePermissionRepository;
 import hcmute.edu.zentech.security.CustomUserDetails;
 import hcmute.edu.zentech.security.SecurityContextUtils;
+import hcmute.edu.zentech.security.jwt.JwtUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
@@ -46,6 +50,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -73,7 +78,10 @@ public class AiManagementService {
     private final AiDatasetRepository aiDatasetRepository;
     private final AiDocumentRepository aiDocumentRepository;
     private final AiProductVectorStatusRepository aiProductVectorStatusRepository;
+    private final AccountUserRepository accountUserRepository;
     private final ProductRepository productRepository;
+    private final RolePermissionRepository rolePermissionRepository;
+    private final JwtUtils jwtUtils;
     private final ObjectMapper objectMapper;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
@@ -88,7 +96,7 @@ public class AiManagementService {
     @Value("${app.ai.default-agent.system-prompt:Ban la tro ly tu van khach hang cua ZenTech. Hay tra loi tu nhien, ngan gon, lich su bang tieng Viet va uu tien thong tin san pham/dataset duoc cung cap.}")
     private String defaultAgentSystemPrompt;
 
-    @Value("${app.ai.default-agent.guardrails:Khong tiet lo thong tin ky thuat noi bo. Neu thieu du lieu chinh xac, hay hoi them thong tin hoac de nghi nhan vien ho tro.}")
+    @Value("${app.ai.default-agent.guardrails:Không tiết lộ thông tin kỹ thuật nội bộ. Nếu thiếu dữ liệu chính xác, hãy hỏi thêm thông tin hoặc đề nghị nhân viên hỗ trợ.}")
     private String defaultAgentGuardrails;
 
     @Value("${app.ai.default-agent.fallback-message:Hien tai ZenTech AI chua co du du lieu de tra loi chac chan. Ban vui long bo sung thong tin hoac doi nhan vien ho tro.}")
@@ -272,6 +280,25 @@ public class AiManagementService {
             log.warn("AI agent stream service failed", ex);
             return Optional.empty();
         }
+    }
+
+    public Optional<String> generateAiToolAccessToken(UUID accountId) {
+        if (accountId == null) {
+            return Optional.empty();
+        }
+
+        return accountUserRepository.findById(accountId)
+                .filter(AccountUser::isActive)
+                .map(account -> {
+                    Collection<hcmute.edu.zentech.model.PermissionCode> permissions = account.getRole() == Role.ADMIN
+                            ? java.util.EnumSet.allOf(hcmute.edu.zentech.model.PermissionCode.class)
+                            : rolePermissionRepository.findPermissionCodesByRole(account.getRole());
+                    CustomUserDetails userDetails = CustomUserDetails.build(
+                            account,
+                            permissions.stream().map(Enum::name).toList()
+                    );
+                    return jwtUtils.generateAiToolJwtToken(userDetails);
+                });
     }
 
     public AiAgentDemoResponse demoAgent(AiAgentDemoRequest request) {
@@ -481,7 +508,7 @@ public class AiManagementService {
                 status.setErrorMessage(null);
             }
         } catch (Exception ex) {
-            markProductSyncFailed(syncingStatuses, "Khong ket noi duoc ZenTech-AI tai " + normalizeBaseUrl(aiBaseUrl) + ": " + resolveExceptionMessage(ex));
+            markProductSyncFailed(syncingStatuses, "Không kết nối được ZenTech-AI tại " + normalizeBaseUrl(aiBaseUrl) + ": " + resolveExceptionMessage(ex));
             log.error("Could not sync product {} to AI service", productId, ex);
         }
     }
@@ -600,7 +627,7 @@ public class AiManagementService {
                 }
                 status.setQdrantPresent(item.isPresent());
                 status.setLastVerifiedAt(now);
-                status.setErrorMessage(item.isPresent() ? null : "Khong tim thay vector trong Qdrant");
+                status.setErrorMessage(item.isPresent() ? null : "Không tìm thấy vector trong Qdrant");
             }
         } catch (Exception ex) {
             statuses.forEach(status -> status.setErrorMessage(ex.getMessage()));
@@ -665,11 +692,13 @@ public class AiManagementService {
 
     private Map<String, Object> buildBusinessContext(Role role) {
         CustomUserDetails user = SecurityContextUtils.getCurrentUser();
-        return Map.of(
-                "role", role == null ? Role.CUSTOMER.name() : role.name(),
-                "userId", user == null ? "" : user.getId().toString(),
-                "generatedAt", Instant.now().toString()
-        );
+        Map<String, Object> context = new HashMap<>();
+        context.put("role", role == null ? Role.CUSTOMER.name() : role.name());
+        context.put("generatedAt", Instant.now().toString());
+        if (user != null) {
+            generateAiToolAccessToken(user.getId()).ifPresent(token -> context.put("toolAccessToken", token));
+        }
+        return context;
     }
 
     private AiDataset getDatasetEntity(UUID datasetId) {

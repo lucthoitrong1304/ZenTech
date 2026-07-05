@@ -301,8 +301,9 @@ public class ChatBotService {
         Map<String, Object> context = new HashMap<>();
         context.put("conversationId", conversationId.toString());
         context.put("role", role == null ? Role.CUSTOMER.name() : role.name());
-        context.put("userId", accountId == null ? "" : accountId.toString());
         context.put("generatedAt", Instant.now().toString());
+        aiManagementService.generateAiToolAccessToken(accountId)
+                .ifPresent(token -> context.put("toolAccessToken", token));
 
         Map<String, Object> safePageContext = sanitizePageContext(pageContext);
         if (!safePageContext.isEmpty()) {
