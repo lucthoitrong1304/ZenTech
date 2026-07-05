@@ -13,12 +13,14 @@ import hcmute.edu.zentech.model.Order;
 import hcmute.edu.zentech.model.OrderDetail;
 import hcmute.edu.zentech.model.OrderStatus;
 import hcmute.edu.zentech.model.Product;
+import hcmute.edu.zentech.model.ProductCategory;
 import hcmute.edu.zentech.model.ProductReview;
 import hcmute.edu.zentech.model.ProductVariant;
 import hcmute.edu.zentech.repository.CustomerRepository;
 import hcmute.edu.zentech.repository.CustomerVoucherRepository;
 import hcmute.edu.zentech.repository.OrderDetailRepository;
 import hcmute.edu.zentech.repository.OrderRepository;
+import hcmute.edu.zentech.repository.ProductCategoryRepository;
 import hcmute.edu.zentech.repository.ProductRepository;
 import hcmute.edu.zentech.repository.ProductReviewRepository;
 import hcmute.edu.zentech.repository.ProductVariantRepository;
@@ -48,15 +50,20 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.text.Normalizer;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/ai/tools")
@@ -64,6 +71,7 @@ import java.util.UUID;
 @Slf4j
 public class AiToolController {
     private final ProductRepository productRepository;
+    private final ProductCategoryRepository productCategoryRepository;
     private final ProductVariantRepository productVariantRepository;
     private final OrderRepository orderRepository;
     private final OrderDetailRepository orderDetailRepository;
@@ -125,6 +133,46 @@ public class AiToolController {
                 .toList();
 
         return ResponseEntity.ok(ApiResponse.success(products));
+    }
+
+    @GetMapping("/catalog/overview")
+    public ResponseEntity<ApiResponse<CatalogOverviewDto>> getCatalogOverview(
+            @RequestParam(required = false) String categoryName,
+            @RequestParam(defaultValue = "3") int productsPerCategory,
+            @RequestParam(defaultValue = "true") boolean includeEmpty
+    ) {
+        int safeLimit = Math.max(1, Math.min(productsPerCategory, 5));
+        List<ProductCategory> allCategories = productCategoryRepository.findAllWithParent().stream()
+                .filter(ProductCategory::isVisible)
+                .toList();
+        List<ProductCategory> matchedCategories = resolveCatalogCategories(allCategories, categoryName);
+        List<ProductCategory> categoriesToReturn = matchedCategories.isEmpty() ? allCategories : matchedCategories;
+        Set<UUID> categoryIds = categoriesToReturn.stream()
+                .map(ProductCategory::getId)
+                .collect(Collectors.toSet());
+
+        List<ProductCategory> categoriesWithProducts = categoryIds.isEmpty()
+                ? List.of()
+                : productCategoryRepository.findCategoriesWithProductsByIds(categoryIds);
+
+        List<CatalogCategoryDto> categoryDtos = categoriesToReturn.stream()
+                .map(category -> mapToCatalogCategoryDto(category, categoriesWithProducts, safeLimit))
+                .filter(dto -> includeEmpty || dto.getActiveProductCount() > 0)
+                .toList();
+
+        List<CatalogCategoryDto> emptyCategories = categoryDtos.stream()
+                .filter(dto -> dto.getActiveProductCount() == 0)
+                .toList();
+
+        CatalogOverviewDto overview = CatalogOverviewDto.builder()
+                .categoryQuery(categoryName)
+                .categoryMatched(!matchedCategories.isEmpty())
+                .productsPerCategory(safeLimit)
+                .categories(categoryDtos)
+                .emptyCategories(emptyCategories)
+                .build();
+
+        return ResponseEntity.ok(ApiResponse.success(overview));
     }
 
     @PostMapping("/orders/resolve")
@@ -476,8 +524,142 @@ public class AiToolController {
                 .supportInfo(product.getSupportInfo())
                 .relatedProducts(relatedProductsStr)
                 .relatedProductList(relatedList)
+                .categories(mapCategorySummaries(product.getCategories()))
                 .variants(mapVariantSummaries(product, now))
                 .build();
+    }
+
+    private List<ProductCategory> resolveCatalogCategories(List<ProductCategory> allCategories, String categoryName) {
+        String normalizedQuery = normalizeCatalogText(categoryName);
+        if (normalizedQuery == null || normalizedQuery.isBlank()) {
+            return List.of();
+        }
+
+        Set<UUID> matchedIds = allCategories.stream()
+                .filter(category -> categoryMatches(category, normalizedQuery))
+                .map(ProductCategory::getId)
+                .collect(Collectors.toSet());
+
+        if (matchedIds.isEmpty()) {
+            return List.of();
+        }
+
+        Set<UUID> expandedIds = allCategories.stream()
+                .filter(category -> matchedIds.contains(category.getId())
+                        || (category.getParent() != null && matchedIds.contains(category.getParent().getId())))
+                .map(ProductCategory::getId)
+                .collect(Collectors.toSet());
+
+        return allCategories.stream()
+                .filter(category -> expandedIds.contains(category.getId()))
+                .toList();
+    }
+
+    private boolean categoryMatches(ProductCategory category, String normalizedQuery) {
+        List<String> values = Arrays.asList(
+                category.getCategoryName(),
+                category.getShortName(),
+                category.getParent() == null ? null : category.getParent().getCategoryName(),
+                category.getParent() == null ? null : category.getParent().getShortName()
+        );
+        return values.stream()
+                .map(this::normalizeCatalogText)
+                .filter(Objects::nonNull)
+                .anyMatch(value -> value.contains(normalizedQuery)
+                        || normalizedQuery.contains(value)
+                        || categoryAliasMatches(value, normalizedQuery));
+    }
+
+    private boolean categoryAliasMatches(String categoryValue, String normalizedQuery) {
+        boolean keyboardCategory = categoryValue.contains("keyboard");
+        boolean keyboardQuery = normalizedQuery.contains("keyboard")
+                || normalizedQuery.contains("ban phim")
+                || normalizedQuery.contains("phim co")
+                || normalizedQuery.contains("phim gaming");
+        boolean chargerCategory = categoryValue.contains("charger");
+        boolean chargerQuery = normalizedQuery.contains("charger")
+                || normalizedQuery.contains("sac")
+                || normalizedQuery.contains("cu sac")
+                || normalizedQuery.contains("bo sac");
+        return (keyboardCategory && keyboardQuery) || (chargerCategory && chargerQuery);
+    }
+
+    private String normalizeCatalogText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = Normalizer.normalize(value.toLowerCase(), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('đ', 'd');
+        return normalized.replaceAll("[^a-z0-9 ]", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    private CatalogCategoryDto mapToCatalogCategoryDto(
+            ProductCategory category,
+            List<ProductCategory> categoriesWithProducts,
+            int productsPerCategory
+    ) {
+        ProductCategory hydratedCategory = categoriesWithProducts.stream()
+                .filter(item -> item.getId().equals(category.getId()))
+                .findFirst()
+                .orElse(category);
+        List<Product> activeProducts = hydratedCategory.getProductList() == null
+                ? List.of()
+                : hydratedCategory.getProductList().stream()
+                .filter(Objects::nonNull)
+                .filter(product -> !product.isDeleted())
+                .sorted(Comparator.comparing(Product::getProductName, Comparator.nullsLast(String::compareToIgnoreCase)))
+                .toList();
+
+        Instant now = Instant.now();
+        List<CatalogProductSampleDto> samples = activeProducts.stream()
+                .limit(productsPerCategory)
+                .map(product -> mapToCatalogProductSampleDto(product, now))
+                .toList();
+
+        return CatalogCategoryDto.builder()
+                .categoryId(category.getId())
+                .categoryName(category.getCategoryName())
+                .shortName(category.getShortName())
+                .parentId(category.getParent() == null ? null : category.getParent().getId())
+                .parentName(category.getParent() == null ? null : category.getParent().getCategoryName())
+                .activeProductCount(activeProducts.size())
+                .sampleProducts(samples)
+                .build();
+    }
+
+    private CatalogProductSampleDto mapToCatalogProductSampleDto(Product product, Instant now) {
+        Optional<ProductVariant> variant = findLowestPricedVariant(product, now);
+        return CatalogProductSampleDto.builder()
+                .productId(product.getId())
+                .name(product.getProductName())
+                .variantId(variant.map(ProductVariant::getId).orElse(null))
+                .variantName(variant.map(ProductVariant::getName).orElse(null))
+                .price(variant.map(v -> BigDecimal.valueOf(resolveActivePrice(v, now))).orElse(null))
+                .originalPrice(variant.map(v -> BigDecimal.valueOf(v.getOriginalPrice())).orElse(null))
+                .salePrice(variant.flatMap(v -> resolveActiveSalePrice(v, now)).map(BigDecimal::valueOf).orElse(null))
+                .stock(variant.map(ProductVariant::getStockQuantity).orElse(null))
+                .imageKey(resolveRepresentativeImageKey(product))
+                .build();
+    }
+
+    private List<CategorySummaryDto> mapCategorySummaries(Collection<ProductCategory> categories) {
+        if (categories == null || categories.isEmpty()) {
+            return List.of();
+        }
+        return categories.stream()
+                .filter(Objects::nonNull)
+                .sorted(Comparator
+                        .comparing(ProductCategory::getPriority, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ProductCategory::getCategoryName, Comparator.nullsLast(String::compareToIgnoreCase)))
+                .map(category -> CategorySummaryDto.builder()
+                        .categoryId(category.getId())
+                        .categoryName(category.getCategoryName())
+                        .shortName(category.getShortName())
+                        .parentId(category.getParent() == null ? null : category.getParent().getId())
+                        .parentName(category.getParent() == null ? null : category.getParent().getCategoryName())
+                        .build())
+                .toList();
     }
 
     private List<VariantSummaryDto> mapVariantSummaries(Product product, Instant now) {
@@ -696,7 +878,54 @@ public class AiToolController {
         private String supportInfo;
         private String relatedProducts;
         private List<RelatedProductSummaryDto> relatedProductList;
+        private List<CategorySummaryDto> categories;
         private List<VariantSummaryDto> variants;
+    }
+
+    @Data
+    @Builder
+    public static class CatalogOverviewDto {
+        private String categoryQuery;
+        private boolean categoryMatched;
+        private int productsPerCategory;
+        private List<CatalogCategoryDto> categories;
+        private List<CatalogCategoryDto> emptyCategories;
+    }
+
+    @Data
+    @Builder
+    public static class CatalogCategoryDto {
+        private UUID categoryId;
+        private String categoryName;
+        private String shortName;
+        private UUID parentId;
+        private String parentName;
+        private int activeProductCount;
+        private List<CatalogProductSampleDto> sampleProducts;
+    }
+
+    @Data
+    @Builder
+    public static class CatalogProductSampleDto {
+        private UUID productId;
+        private UUID variantId;
+        private String name;
+        private String variantName;
+        private BigDecimal price;
+        private BigDecimal originalPrice;
+        private BigDecimal salePrice;
+        private Integer stock;
+        private String imageKey;
+    }
+
+    @Data
+    @Builder
+    public static class CategorySummaryDto {
+        private UUID categoryId;
+        private String categoryName;
+        private String shortName;
+        private UUID parentId;
+        private String parentName;
     }
 
     @Data
