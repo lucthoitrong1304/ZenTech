@@ -16,6 +16,8 @@ public class ChatRecommendedProductResponse {
     private String name;
     private String imageUrl;
     private BigDecimal price;
+    private BigDecimal originalPrice;
+    private BigDecimal salePrice;
     private Integer stock;
     private String productUrl;
 }

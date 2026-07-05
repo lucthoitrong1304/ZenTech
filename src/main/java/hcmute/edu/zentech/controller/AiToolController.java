@@ -112,6 +112,21 @@ public class AiToolController {
         return ResponseEntity.ok(ApiResponse.success(responseList));
     }
 
+    @GetMapping("/products/sale")
+    public ResponseEntity<ApiResponse<List<ResolvedProductDto>>> getSaleProducts(
+            @RequestParam(defaultValue = "10") int limit
+    ) {
+        Instant now = Instant.now();
+        int safeLimit = Math.max(1, Math.min(limit, 20));
+        List<ResolvedProductDto> products = productVariantRepository
+                .findActiveSaleVariants(now, PageRequest.of(0, safeLimit))
+                .stream()
+                .map(variant -> mapToResolvedProductDto(variant.getProduct(), variant, now))
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(products));
+    }
+
     @PostMapping("/orders/resolve")
     public ResponseEntity<ApiResponse<Object>> resolveOrders(@RequestBody OrderResolveRequest request) {
         Customer customer = resolveCurrentCustomer();
@@ -352,11 +367,10 @@ public class AiToolController {
     }
 
     private ResolvedProductDto mapToResolvedProductDto(Product product, ProductVariant variant, Instant now) {
-        double activePrice = variant.getOriginalPrice();
+        Optional<Double> activeSalePrice = resolveActiveSalePrice(variant, now);
+        double activePrice = activeSalePrice.orElse(variant.getOriginalPrice());
         String promoInfo = null;
-        if (variant.getSalePrice() != null && variant.getSaleStartAt() != null && variant.getSaleEndAt() != null
-                && now.isAfter(variant.getSaleStartAt()) && now.isBefore(variant.getSaleEndAt())) {
-            activePrice = variant.getSalePrice();
+        if (activeSalePrice.isPresent()) {
             promoInfo = String.format("Giảm giá đặc biệt: %,.0f VND (Giá gốc: %,.0f VND)", variant.getSalePrice(), variant.getOriginalPrice());
         }
 
@@ -385,6 +399,8 @@ public class AiToolController {
                                 .name(p.getProductName())
                                 .variantName(v.getName())
                                 .price(BigDecimal.valueOf(resolveActivePrice(v, now)))
+                                .originalPrice(BigDecimal.valueOf(v.getOriginalPrice()))
+                                .salePrice(resolveActiveSalePrice(v, now).map(BigDecimal::valueOf).orElse(null))
                                 .stock(v.getStockQuantity())
                                 .imageKey(resolveRepresentativeImageKey(p))
                                 .build()));
@@ -407,6 +423,8 @@ public class AiToolController {
                             .name(sp.getProductName())
                             .variantName(null)
                             .price(BigDecimal.valueOf(price))
+                            .originalPrice(sp.getOriginalPrice() == null ? null : BigDecimal.valueOf(sp.getOriginalPrice()))
+                            .salePrice(sp.getSalePrice() == null ? null : BigDecimal.valueOf(sp.getSalePrice()))
                             .stock(sp.getStockQuantity())
                             .imageKey(resolveRepresentativeImageKey(p))
                             .build()));
@@ -425,6 +443,8 @@ public class AiToolController {
                 .name(product.getProductName())
                 .variantName(variant.getName())
                 .price(BigDecimal.valueOf(activePrice))
+                .originalPrice(BigDecimal.valueOf(variant.getOriginalPrice()))
+                .salePrice(resolveActiveSalePrice(variant, now).map(BigDecimal::valueOf).orElse(null))
                 .stock(variant.getStockQuantity())
                 .promotionInfo(promoInfo)
                 .rating(avgRating)
@@ -440,11 +460,17 @@ public class AiToolController {
     }
 
     private double resolveActivePrice(ProductVariant variant, Instant now) {
-        if (variant.getSalePrice() != null && variant.getSaleStartAt() != null && variant.getSaleEndAt() != null
-                && now.isAfter(variant.getSaleStartAt()) && now.isBefore(variant.getSaleEndAt())) {
-            return variant.getSalePrice();
+        return resolveActiveSalePrice(variant, now).orElse(variant.getOriginalPrice());
+    }
+
+    private Optional<Double> resolveActiveSalePrice(ProductVariant variant, Instant now) {
+        if (variant.getSalePrice() != null
+                && variant.getSalePrice() < variant.getOriginalPrice()
+                && (variant.getSaleStartAt() == null || !now.isBefore(variant.getSaleStartAt()))
+                && (variant.getSaleEndAt() == null || !now.isAfter(variant.getSaleEndAt()))) {
+            return Optional.of(variant.getSalePrice());
         }
-        return variant.getOriginalPrice();
+        return Optional.empty();
     }
 
     private String resolveRepresentativeImageKey(Product product) {
@@ -561,6 +587,8 @@ public class AiToolController {
         private String name;
         private String variantName;
         private BigDecimal price;
+        private BigDecimal originalPrice;
+        private BigDecimal salePrice;
         private Integer stock;
         private String imageKey;
     }
@@ -574,6 +602,8 @@ public class AiToolController {
         private String name;
         private String variantName;
         private BigDecimal price;
+        private BigDecimal originalPrice;
+        private BigDecimal salePrice;
         private Integer stock;
         private String promotionInfo;
         private Double rating;

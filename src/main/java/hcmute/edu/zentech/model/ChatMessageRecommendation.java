@@ -38,6 +38,12 @@ public class ChatMessageRecommendation {
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal price;
 
+    @Column(name = "original_price", precision = 19, scale = 2)
+    private BigDecimal originalPrice;
+
+    @Column(name = "sale_price", precision = 19, scale = 2)
+    private BigDecimal salePrice;
+
     @Column(nullable = false)
     private Integer stock;
 

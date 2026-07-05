@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -20,6 +22,20 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
             and p.deleted = false
             """)
     Optional<ProductVariant> findOrderableById(@Param("variantId") UUID variantId);
+
+    @Query("""
+            select v
+            from ProductVariant v
+            join fetch v.product p
+            where v.deleted = false
+            and p.deleted = false
+            and v.salePrice is not null
+            and v.salePrice < v.originalPrice
+            and (v.saleStartAt is null or v.saleStartAt <= :now)
+            and (v.saleEndAt is null or v.saleEndAt >= :now)
+            order by (v.originalPrice - v.salePrice) desc
+            """)
+    List<ProductVariant> findActiveSaleVariants(@Param("now") Instant now, org.springframework.data.domain.Pageable pageable);
 
     @Query(
             value = """
