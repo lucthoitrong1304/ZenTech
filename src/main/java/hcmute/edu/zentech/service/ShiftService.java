@@ -34,7 +34,87 @@ public class ShiftService {
     private final NotificationService notificationService;
     private final AttendanceCalculator attendanceCalculator;
     private final ShiftOverlapService shiftOverlapService;
+    private final ScheduleMutationPolicy scheduleMutationPolicy;
 
+
+    private void createAdjustmentSnapshot(Employee employee, LocalDate workDate, List<Shift> desiredShifts, String reason) {
+        scheduleMutationPolicy.assertPayPeriodUnlocked(workDate);
+        String normalizedReason = requireReason(reason, workDate);
+        AccountUser adjuster = resolveAdjuster();
+
+        List<Shift> originalShifts = resolveCurrentEffectiveShifts(employee.getId(), workDate);
+        List<ScheduleAdjustment> existingApproved = scheduleMutationPolicy.findApprovedScheduleAdjustments(employee.getId(), workDate);
+        existingApproved.forEach(adjustment -> adjustment.setStatus(ApprovalStatus.SUPERSEDED));
+        scheduleAdjustmentRepository.saveAll(existingApproved);
+
+        List<ScheduleAdjustment> snapshot = new ArrayList<>();
+        if (desiredShifts.isEmpty()) {
+            snapshot.add(buildScheduleAdjustment(
+                    employee,
+                    workDate,
+                    originalShifts.isEmpty() ? null : originalShifts.get(0),
+                    null,
+                    adjuster,
+                    normalizedReason
+            ));
+        } else {
+            for (Shift desiredShift : desiredShifts) {
+                snapshot.add(buildScheduleAdjustment(
+                        employee,
+                        workDate,
+                        findMatchingOriginalShift(originalShifts, desiredShift),
+                        desiredShift,
+                        adjuster,
+                        normalizedReason
+                ));
+            }
+        }
+        scheduleAdjustmentRepository.saveAll(snapshot);
+    }
+
+    private ScheduleAdjustment buildScheduleAdjustment(Employee employee,
+                                                       LocalDate workDate,
+                                                       Shift originalShift,
+                                                       Shift adjustedShift,
+                                                       AccountUser adjuster,
+                                                       String reason) {
+        ScheduleAdjustment adjustment = new ScheduleAdjustment();
+        adjustment.setEmployee(employee);
+        adjustment.setWorkDate(workDate);
+        adjustment.setOriginalShift(originalShift);
+        adjustment.setAdjustedShift(adjustedShift);
+        adjustment.setAdjustedBy(adjuster);
+        adjustment.setAdjustedAt(LocalDateTime.now());
+        adjustment.setReason(reason);
+        adjustment.setStatus(ApprovalStatus.APPROVED);
+        return adjustment;
+    }
+
+    private String requireReason(String reason, LocalDate workDate) {
+        if (reason == null || reason.trim().isEmpty()) {
+            throw new RuntimeException("Cần lý do điều chỉnh lịch cho ngày " + workDate + ".");
+        }
+        return reason.trim();
+    }
+
+    private AccountUser resolveAdjuster() {
+        UUID adjusterId = SecurityContextUtils.getCurrentUserId();
+        AccountUser adjuster = adjusterId != null ? accountUserRepository.findById(adjusterId).orElse(null) : null;
+        if (adjuster == null) {
+            throw new RuntimeException("Không tìm thấy thông tin người điều chỉnh lịch.");
+        }
+        return adjuster;
+    }
+
+    private Shift findMatchingOriginalShift(List<Shift> originalShifts, Shift desiredShift) {
+        if (desiredShift == null || desiredShift.getId() == null) {
+            return null;
+        }
+        return originalShifts.stream()
+                .filter(original -> original != null && desiredShift.getId().equals(original.getId()))
+                .findFirst()
+                .orElse(null);
+    }
 
     @Transactional
     public ShiftDto createShift(ShiftCreateDto dto) {
@@ -202,15 +282,23 @@ public class ShiftService {
         Shift shift = shiftRepository.findById(dto.getShiftId())
                 .orElseThrow(() -> new RuntimeException("Shift not found"));
 
-        validateNoOverlap(dto.getEmployeeId(), dto.getWorkDate(), shift, null);
+        scheduleMutationPolicy.assertPayPeriodUnlocked(dto.getWorkDate());
+        scheduleMutationPolicy.assertTodayShiftStillUseful(dto.getWorkDate(), shift);
 
-        validateAndApplyScheduleAdjustment(employee, dto.getWorkDate(), shift, dto.getReason());
-        
-        EmployeeShift es = new EmployeeShift();
-        es.setEmployee(employee);
-        es.setShift(shift);
-        es.setWorkDate(dto.getWorkDate());
-        employeeShiftRepository.save(es);
+        if (scheduleMutationPolicy.requiresAdjustment(employee, dto.getWorkDate())) {
+            List<Shift> desiredShifts = new ArrayList<>(resolveCurrentEffectiveShifts(employee.getId(), dto.getWorkDate()));
+            desiredShifts.add(shift);
+            validateNoInternalOverlap(toScheduleCandidates(employee, dto.getWorkDate(), desiredShifts));
+            createAdjustmentSnapshot(employee, dto.getWorkDate(), desiredShifts, dto.getReason());
+        } else {
+            validateNoOverlap(dto.getEmployeeId(), dto.getWorkDate(), shift, null);
+
+            EmployeeShift es = new EmployeeShift();
+            es.setEmployee(employee);
+            es.setShift(shift);
+            es.setWorkDate(dto.getWorkDate());
+            employeeShiftRepository.save(es);
+        }
 
         // Notify employee
         if (employee.getUserInfo() != null) {
@@ -244,35 +332,34 @@ public class ShiftService {
                 
         List<Employee> employees = employeeRepository.findAllById(targetEmployeeIds);
 
+        List<EmployeeShift> newShifts = new ArrayList<>();
+        List<ScheduleAdjustmentPlan> adjustmentPlans = new ArrayList<>();
         LocalDate currentDate = dto.getStartDate();
         while (!currentDate.isAfter(dto.getEndDate())) {
             for (Employee emp : employees) {
-                validateNoOverlap(emp.getId(), currentDate, shift, null);
+                scheduleMutationPolicy.assertPayPeriodUnlocked(currentDate);
+                scheduleMutationPolicy.assertTodayShiftStillUseful(currentDate, shift);
+
+                if (scheduleMutationPolicy.requiresAdjustment(emp, currentDate)) {
+                    List<Shift> desiredShifts = new ArrayList<>(resolveCurrentEffectiveShifts(emp.getId(), currentDate));
+                    desiredShifts.add(shift);
+                    validateNoInternalOverlap(toScheduleCandidates(emp, currentDate, desiredShifts));
+                    adjustmentPlans.add(new ScheduleAdjustmentPlan(emp, currentDate, desiredShifts));
+                } else {
+                    validateNoOverlap(emp.getId(), currentDate, shift, null);
+                    EmployeeShift es = new EmployeeShift();
+                    es.setEmployee(emp);
+                    es.setShift(shift);
+                    es.setWorkDate(currentDate);
+                    newShifts.add(es);
+                }
             }
             currentDate = currentDate.plusDays(1);
         }
 
-        currentDate = dto.getStartDate();
-        while (!currentDate.isAfter(dto.getEndDate())) {
-            for (Employee emp : employees) {
-                validateAndApplyScheduleAdjustment(emp, currentDate, shift, dto.getReason());
-            }
-            currentDate = currentDate.plusDays(1);
+        for (ScheduleAdjustmentPlan plan : adjustmentPlans) {
+            createAdjustmentSnapshot(plan.employee(), plan.workDate(), plan.desiredShifts(), dto.getReason());
         }
-
-        List<EmployeeShift> newShifts = new ArrayList<>();
-        currentDate = dto.getStartDate();
-        while (!currentDate.isAfter(dto.getEndDate())) {
-            for (Employee emp : employees) {
-                EmployeeShift es = new EmployeeShift();
-                es.setEmployee(emp);
-                es.setShift(shift);
-                es.setWorkDate(currentDate);
-                newShifts.add(es);
-            }
-            currentDate = currentDate.plusDays(1);
-        }
-        
         employeeShiftRepository.saveAll(newShifts);
 
         // Notify employees
@@ -311,24 +398,56 @@ public class ShiftService {
                 ))
                 .toList();
         validateNoInternalOverlap(copyCandidates);
-        validateNoAdjustmentOverlap(copyCandidates);
 
-        for (EmployeeShift prevEs : prevShifts) {
-            LocalDate destDate = prevEs.getWorkDate().plusDays(daysDiff);
-            validateAndApplyScheduleAdjustment(prevEs.getEmployee(), destDate, prevEs.getShift(), dto.getReason());
+        Map<UUID, Employee> employeesById = prevShifts.stream()
+                .map(EmployeeShift::getEmployee)
+                .collect(Collectors.toMap(Employee::getId, employee -> employee, (first, second) -> first, LinkedHashMap::new));
+        Map<ScheduleGroupKey, ScheduleAdjustmentPlan> copyPlansByDay = new LinkedHashMap<>();
+        for (Employee employee : employeesById.values()) {
+            for (LocalDate date = dto.getToWeekStartDate(); !date.isAfter(dto.getToWeekEndDate()); date = date.plusDays(1)) {
+                copyPlansByDay.put(
+                        new ScheduleGroupKey(employee.getId(), date),
+                        new ScheduleAdjustmentPlan(employee, date, new ArrayList<>())
+                );
+            }
         }
-        
-        employeeShiftRepository.deleteByEmployeeIdInAndWorkDateBetween(employeeIdsToCopy, dto.getToWeekStartDate(), dto.getToWeekEndDate());
-        
+        for (ScheduleCandidate candidate : copyCandidates) {
+            ScheduleGroupKey key = new ScheduleGroupKey(candidate.employee().getId(), candidate.workDate());
+            copyPlansByDay.computeIfAbsent(
+                    key,
+                    ignored -> new ScheduleAdjustmentPlan(candidate.employee(), candidate.workDate(), new ArrayList<>())
+            ).desiredShifts().add(candidate.shift());
+        }
+
+        List<ScheduleAdjustmentPlan> adjustmentPlans = new ArrayList<>();
+        List<ScheduleAdjustmentPlan> directPlans = new ArrayList<>();
+        for (ScheduleAdjustmentPlan plan : copyPlansByDay.values()) {
+            scheduleMutationPolicy.assertPayPeriodUnlocked(plan.workDate());
+            for (Shift copiedShift : plan.desiredShifts()) {
+                scheduleMutationPolicy.assertTodayShiftStillUseful(plan.workDate(), copiedShift);
+            }
+            if (scheduleMutationPolicy.requiresAdjustment(plan.employee(), plan.workDate())) {
+                adjustmentPlans.add(plan);
+            } else {
+                directPlans.add(plan);
+            }
+        }
+
+        for (ScheduleAdjustmentPlan plan : adjustmentPlans) {
+            createAdjustmentSnapshot(plan.employee(), plan.workDate(), plan.desiredShifts(), dto.getReason());
+        }
+
         List<EmployeeShift> newShifts = new ArrayList<>();
-        for (EmployeeShift prevEs : prevShifts) {
-            EmployeeShift newEs = new EmployeeShift();
-            newEs.setEmployee(prevEs.getEmployee());
-            newEs.setShift(prevEs.getShift());
-            newEs.setWorkDate(prevEs.getWorkDate().plusDays(daysDiff));
-            newShifts.add(newEs);
+        for (ScheduleAdjustmentPlan plan : directPlans) {
+            employeeShiftRepository.deleteByEmployeeIdAndWorkDate(plan.employee().getId(), plan.workDate());
+            for (Shift copiedShift : plan.desiredShifts()) {
+                EmployeeShift newEs = new EmployeeShift();
+                newEs.setEmployee(plan.employee());
+                newEs.setShift(copiedShift);
+                newEs.setWorkDate(plan.workDate());
+                newShifts.add(newEs);
+            }
         }
-        
         employeeShiftRepository.saveAll(newShifts);
 
         // Notify affected employees
@@ -356,6 +475,22 @@ public class ShiftService {
     public void deleteScheduleAssignment(UUID employeeShiftId, String reason) {
         EmployeeShift assignment = employeeShiftRepository.findByIdWithShift(employeeShiftId)
                 .orElseThrow(() -> new RuntimeException("Schedule assignment not found"));
+
+        if (scheduleMutationPolicy != null) {
+            scheduleMutationPolicy.assertPayPeriodUnlocked(assignment.getWorkDate());
+            if (scheduleMutationPolicy.shouldDeleteByAdjustment(assignment)) {
+                List<Shift> desiredShifts = new ArrayList<>(resolveCurrentEffectiveShifts(
+                        assignment.getEmployee().getId(),
+                        assignment.getWorkDate()
+                ));
+                removeOneShift(desiredShifts, assignment.getShift());
+                validateNoInternalOverlap(toScheduleCandidates(assignment.getEmployee(), assignment.getWorkDate(), desiredShifts));
+                createAdjustmentSnapshot(assignment.getEmployee(), assignment.getWorkDate(), desiredShifts, reason);
+            } else {
+                employeeShiftRepository.delete(assignment);
+            }
+            return;
+        }
 
         LocalDateTime start = assignment.getWorkDate().atStartOfDay();
         LocalDateTime end = assignment.getWorkDate().atTime(LocalTime.MAX);
@@ -402,6 +537,43 @@ public class ShiftService {
                         shiftOverlapService.format(existingWindow),
                         workDate
                 ));
+            }
+        }
+    }
+
+    private List<Shift> resolveCurrentEffectiveShifts(UUID employeeId, LocalDate workDate) {
+        List<ScheduleAdjustment> approvedAdjustments = scheduleMutationPolicy.findApprovedScheduleAdjustments(employeeId, workDate);
+        if (!approvedAdjustments.isEmpty()) {
+            return approvedAdjustments.stream()
+                    .map(ScheduleAdjustment::getAdjustedShift)
+                    .filter(Objects::nonNull)
+                    .sorted(Comparator.comparing(Shift::getStartTime, Comparator.nullsLast(Comparator.naturalOrder())))
+                    .collect(Collectors.toCollection(ArrayList::new));
+        }
+
+        return employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate).stream()
+                .map(EmployeeShift::getShift)
+                .filter(Objects::nonNull)
+                .filter(shift -> shift.getType() != ShiftType.OFF)
+                .sorted(Comparator.comparing(Shift::getStartTime, Comparator.nullsLast(Comparator.naturalOrder())))
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private List<ScheduleCandidate> toScheduleCandidates(Employee employee, LocalDate workDate, List<Shift> shifts) {
+        return shifts.stream()
+                .map(shift -> new ScheduleCandidate(employee, workDate, shift))
+                .toList();
+    }
+
+    private void removeOneShift(List<Shift> shifts, Shift shiftToRemove) {
+        if (shiftToRemove == null) {
+            return;
+        }
+        for (Iterator<Shift> iterator = shifts.iterator(); iterator.hasNext(); ) {
+            Shift shift = iterator.next();
+            if (shift != null && Objects.equals(shift.getId(), shiftToRemove.getId())) {
+                iterator.remove();
+                return;
             }
         }
     }
@@ -470,6 +642,12 @@ public class ShiftService {
     }
 
     private record ScheduleCandidate(Employee employee, LocalDate workDate, Shift shift) {
+    }
+
+    private record ScheduleAdjustmentPlan(Employee employee, LocalDate workDate, List<Shift> desiredShifts) {
+    }
+
+    private record ScheduleGroupKey(UUID employeeId, LocalDate workDate) {
     }
 
     private int defaultInt(Integer value, int fallback) {

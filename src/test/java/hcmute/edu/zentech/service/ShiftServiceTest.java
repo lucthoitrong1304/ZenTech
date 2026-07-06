@@ -4,8 +4,10 @@ import hcmute.edu.zentech.dto.shift.BulkShiftUpdateDto;
 import hcmute.edu.zentech.dto.shift.CopyWeekDto;
 import hcmute.edu.zentech.dto.shift.EmployeeShiftDto;
 import hcmute.edu.zentech.mapper.ShiftMapper;
+import hcmute.edu.zentech.model.AccountUser;
 import hcmute.edu.zentech.model.Employee;
 import hcmute.edu.zentech.model.EmployeeShift;
+import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.model.Shift;
 import hcmute.edu.zentech.model.ShiftType;
 import hcmute.edu.zentech.repository.AccountUserRepository;
@@ -15,15 +17,20 @@ import hcmute.edu.zentech.repository.EmployeeShiftRepository;
 import hcmute.edu.zentech.repository.PayPeriodRepository;
 import hcmute.edu.zentech.repository.ScheduleAdjustmentRepository;
 import hcmute.edu.zentech.repository.ShiftRepository;
+import hcmute.edu.zentech.security.CustomUserDetails;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,6 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -59,6 +68,8 @@ class ShiftServiceTest {
     private NotificationService notificationService;
     @Mock
     private AttendanceCalculator attendanceCalculator;
+    @Mock
+    private ScheduleMutationPolicy scheduleMutationPolicy;
     @Spy
     private ShiftOverlapService shiftOverlapService = new ShiftOverlapService();
 
@@ -66,6 +77,11 @@ class ShiftServiceTest {
     private ShiftService shiftService;
 
     private final LocalDate workDate = LocalDate.of(2099, 1, 5);
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
 
     @Test
     void assignSingleShift_blocksWhenScheduledTimesDoNotOverlapButCaptureWindowsOverlap() {
@@ -113,8 +129,6 @@ class ShiftServiceTest {
         when(shiftRepository.findById(incoming.getId())).thenReturn(Optional.of(incoming));
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
                 .thenReturn(List.of(assignment(employee, existing, workDate)));
-        when(payPeriodRepository.findPeriodActiveAt(workDate)).thenReturn(Optional.empty());
-
         assertDoesNotThrow(() -> shiftService.assignSingleShift(dto));
 
         verify(employeeShiftRepository).save(any(EmployeeShift.class));
@@ -131,11 +145,67 @@ class ShiftServiceTest {
 
         when(employeeRepository.findById(employee.getId())).thenReturn(Optional.of(employee));
         when(shiftRepository.findById(offShift.getId())).thenReturn(Optional.of(offShift));
-        when(payPeriodRepository.findPeriodActiveAt(workDate)).thenReturn(Optional.empty());
-
         assertDoesNotThrow(() -> shiftService.assignSingleShift(dto));
 
         verify(employeeShiftRepository).save(any(EmployeeShift.class));
+    }
+
+    @Test
+    void assignSingleShift_blocksWhenPayPeriodLocked() {
+        Employee employee = employee();
+        Shift incoming = shift("Ca chiều", LocalTime.of(14, 0), LocalTime.of(17, 0), 30, 60);
+        EmployeeShiftDto dto = assignDto(employee.getId(), incoming.getId(), workDate);
+
+        when(employeeRepository.findById(employee.getId())).thenReturn(Optional.of(employee));
+        when(shiftRepository.findById(incoming.getId())).thenReturn(Optional.of(incoming));
+        doThrow(new RuntimeException("locked"))
+                .when(scheduleMutationPolicy)
+                .assertPayPeriodUnlocked(workDate);
+
+        assertThrows(RuntimeException.class, () -> shiftService.assignSingleShift(dto));
+
+        verify(employeeShiftRepository, never()).save(any(EmployeeShift.class));
+    }
+
+    @Test
+    void assignSingleShift_blocksWhenTodayShiftAlreadyPassed() {
+        LocalDate today = LocalDate.now();
+        Employee employee = employee();
+        Shift incoming = shift("Ca cũ", LocalTime.of(8, 0), LocalTime.of(9, 0), 30, 60);
+        EmployeeShiftDto dto = assignDto(employee.getId(), incoming.getId(), today);
+
+        when(employeeRepository.findById(employee.getId())).thenReturn(Optional.of(employee));
+        when(shiftRepository.findById(incoming.getId())).thenReturn(Optional.of(incoming));
+        doThrow(new RuntimeException("expired"))
+                .when(scheduleMutationPolicy)
+                .assertTodayShiftStillUseful(today, incoming);
+
+        assertThrows(RuntimeException.class, () -> shiftService.assignSingleShift(dto));
+
+        verify(employeeShiftRepository, never()).save(any(EmployeeShift.class));
+    }
+
+    @Test
+    void assignSingleShift_todayWithEventsCreatesAdjustmentOnly() {
+        LocalDate today = LocalDate.now();
+        Employee employee = employee();
+        Shift incoming = shift("Ca bổ sung", LocalTime.of(14, 0), LocalTime.of(17, 0), 30, 60);
+        EmployeeShiftDto dto = assignDto(employee.getId(), incoming.getId(), today);
+        dto.setReason("Bổ sung lịch hôm nay");
+        AccountUser adjuster = adjuster();
+        setCurrentUser(adjuster);
+
+        when(employeeRepository.findById(employee.getId())).thenReturn(Optional.of(employee));
+        when(shiftRepository.findById(incoming.getId())).thenReturn(Optional.of(incoming));
+        when(scheduleMutationPolicy.requiresAdjustment(employee, today)).thenReturn(true);
+        when(scheduleMutationPolicy.findApprovedScheduleAdjustments(employee.getId(), today)).thenReturn(List.of());
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), today)).thenReturn(List.of());
+        when(accountUserRepository.findById(adjuster.getId())).thenReturn(Optional.of(adjuster));
+
+        shiftService.assignSingleShift(dto);
+
+        verify(employeeShiftRepository, never()).save(any(EmployeeShift.class));
+        verify(scheduleAdjustmentRepository, atLeastOnce()).saveAll(anyList());
     }
 
     @Test
@@ -165,8 +235,6 @@ class ShiftServiceTest {
         when(employeeRepository.findAllById(List.of(employee.getId()))).thenReturn(List.of(employee));
         when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
                 .thenReturn(List.of());
-        when(payPeriodRepository.findPeriodActiveAt(workDate)).thenReturn(Optional.empty());
-
         assertDoesNotThrow(() -> shiftService.bulkAssignShifts(dto));
 
         verify(employeeShiftRepository).saveAll(anyList());
@@ -199,14 +267,48 @@ class ShiftServiceTest {
         Shift shift = shift("Ca sáng", LocalTime.of(8, 0), LocalTime.of(12, 0), 30, 60);
 
         when(employeeShiftRepository.findAll()).thenReturn(List.of(assignment(employee, shift, sourceDate)));
-        when(scheduleAdjustmentRepository.findByEmployeeIdAndWorkDateBetween(eq(employee.getId()), eq(workDate), eq(workDate)))
-                .thenReturn(List.of());
-        when(payPeriodRepository.findPeriodActiveAt(workDate)).thenReturn(Optional.empty());
-
         assertDoesNotThrow(() -> shiftService.copyWeeklySchedule(dto));
 
-        verify(employeeShiftRepository).deleteByEmployeeIdInAndWorkDateBetween(List.of(employee.getId()), workDate, workDate.plusDays(6));
+        verify(employeeShiftRepository).deleteByEmployeeIdAndWorkDate(employee.getId(), workDate);
         verify(employeeShiftRepository).saveAll(anyList());
+    }
+
+    @Test
+    void deleteScheduleAssignment_pastCreatesAdjustmentAndKeepsBaseAssignment() {
+        LocalDate pastDate = LocalDate.now().minusDays(1);
+        Employee employee = employee();
+        Shift existing = shift("Ca sáng", LocalTime.of(8, 0), LocalTime.of(12, 0), 30, 60);
+        EmployeeShift assignment = assignment(employee, existing, pastDate);
+        AccountUser adjuster = adjuster();
+        setCurrentUser(adjuster);
+
+        when(employeeShiftRepository.findByIdWithShift(assignment.getId())).thenReturn(Optional.of(assignment));
+        when(scheduleMutationPolicy.shouldDeleteByAdjustment(assignment)).thenReturn(true);
+        when(scheduleMutationPolicy.findApprovedScheduleAdjustments(employee.getId(), pastDate)).thenReturn(List.of());
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), pastDate)).thenReturn(List.of(assignment));
+        when(accountUserRepository.findById(adjuster.getId())).thenReturn(Optional.of(adjuster));
+
+        shiftService.deleteScheduleAssignment(assignment.getId(), "Sai lịch");
+
+        verify(employeeShiftRepository, never()).delete(assignment);
+        verify(scheduleAdjustmentRepository, atLeastOnce()).saveAll(anyList());
+    }
+
+    @Test
+    void deleteScheduleAssignment_pastWithoutReasonIsRejected() {
+        LocalDate pastDate = LocalDate.now().minusDays(1);
+        Employee employee = employee();
+        Shift existing = shift("Ca sáng", LocalTime.of(8, 0), LocalTime.of(12, 0), 30, 60);
+        EmployeeShift assignment = assignment(employee, existing, pastDate);
+
+        when(employeeShiftRepository.findByIdWithShift(assignment.getId())).thenReturn(Optional.of(assignment));
+        when(scheduleMutationPolicy.shouldDeleteByAdjustment(assignment)).thenReturn(true);
+        when(scheduleMutationPolicy.findApprovedScheduleAdjustments(employee.getId(), pastDate)).thenReturn(List.of());
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), pastDate)).thenReturn(List.of(assignment));
+
+        assertThrows(RuntimeException.class, () -> shiftService.deleteScheduleAssignment(assignment.getId(), ""));
+
+        verify(employeeShiftRepository, never()).delete(assignment);
     }
 
     private Employee employee() {
@@ -262,5 +364,22 @@ class ShiftServiceTest {
         dto.setToWeekStartDate(toStart);
         dto.setToWeekEndDate(toEnd);
         return dto;
+    }
+
+    private AccountUser adjuster() {
+        AccountUser adjuster = new AccountUser();
+        adjuster.setId(UUID.randomUUID());
+        adjuster.setEmail("manager@zentech.local");
+        adjuster.setPassword("password");
+        adjuster.setRole(Role.MANAGER);
+        adjuster.setActive(true);
+        return adjuster;
+    }
+
+    private void setCurrentUser(AccountUser accountUser) {
+        CustomUserDetails principal = CustomUserDetails.build(accountUser, List.of("SCHEDULE_UPDATE"));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, Collections.emptyList())
+        );
     }
 }
