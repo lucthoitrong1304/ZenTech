@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,6 +34,10 @@ public class LokiService {
     private static final Pattern LEVEL_PATTERN = Pattern.compile("\\b(INFO|WARN|ERROR|DEBUG)\\b");
     // Regex để bóc tách traceId dạng ZT-xxxxxxx
     private static final Pattern TRACE_ID_PATTERN = Pattern.compile("(?<=\\[|\\s|^)(ZT-(?:FE-)?[A-Fa-f0-9a-zA-Z]{8})(?=\\]|\\s|$)");
+    private static final Pattern JSON_STATUS_CODE_PATTERN = Pattern.compile("\"(?:statusCode|status_code|status)\"\\s*:\\s*(\\d{3})");
+    private static final Pattern BUSINESS_STATUS_CODE_PATTERN = Pattern.compile("\\b(?:Business error|Validation error|Argument type mismatch|Access denied|Unexpected server error) \\((\\d{3})\\)");
+    private static final Pattern RESPONSE_STATUS_CODE_PATTERN = Pattern.compile("\\b(?:Outgoing Response|Response):\\s*(\\d{3})\\b");
+    private static final Pattern REQUEST_FAILED_STATUS_CODE_PATTERN = Pattern.compile("\\b(?:FE_FAILED|HttpRequestFailed)[^\\r\\n]*\\b(\\d{3})\\b");
 
     public List<Map<String, Object>> queryLogs(String level, String search, String traceId, int limit) {
         return queryLogs(level, search, traceId, limit, null, null);
@@ -172,14 +177,52 @@ public class LokiService {
             cleanMessage = rawLine.substring(hyphenIndex + 3).trim();
         }
 
-        return Map.of(
-                "id", id, // Dùng timestamp nanoseconds làm ID duy nhất
-                "timestamp", timestamp,
-                "level", level,
-                "category", service, // e.g., BACKEND, FRONTEND, AI-SERVICE
-                "message", cleanMessage,
-                "details", rawLine, // Lưu raw log đầy đủ vào details để hiển thị trong tab Raw JSON
-                "traceId", traceId
-        );
+        Integer statusCode = extractStatusCode(rawLine);
+
+        Map<String, Object> logMap = new LinkedHashMap<>();
+        logMap.put("id", id);
+        logMap.put("timestamp", timestamp);
+        logMap.put("level", level);
+        logMap.put("category", service);
+        logMap.put("message", cleanMessage);
+        logMap.put("details", rawLine);
+        logMap.put("traceId", traceId);
+        if (statusCode != null) {
+            logMap.put("statusCode", statusCode);
+        }
+        return logMap;
+    }
+
+    private Integer extractStatusCode(String rawLine) {
+        Matcher jsonMatcher = JSON_STATUS_CODE_PATTERN.matcher(rawLine);
+        if (jsonMatcher.find()) {
+            return parseStatusCode(jsonMatcher.group(1));
+        }
+
+        Matcher businessMatcher = BUSINESS_STATUS_CODE_PATTERN.matcher(rawLine);
+        if (businessMatcher.find()) {
+            return parseStatusCode(businessMatcher.group(1));
+        }
+
+        Matcher responseMatcher = RESPONSE_STATUS_CODE_PATTERN.matcher(rawLine);
+        if (responseMatcher.find()) {
+            return parseStatusCode(responseMatcher.group(1));
+        }
+
+        Matcher failedMatcher = REQUEST_FAILED_STATUS_CODE_PATTERN.matcher(rawLine);
+        if (failedMatcher.find()) {
+            return parseStatusCode(failedMatcher.group(1));
+        }
+
+        return null;
+    }
+
+    private Integer parseStatusCode(String value) {
+        try {
+            int statusCode = Integer.parseInt(value);
+            return statusCode >= 100 && statusCode <= 599 ? statusCode : null;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 }
