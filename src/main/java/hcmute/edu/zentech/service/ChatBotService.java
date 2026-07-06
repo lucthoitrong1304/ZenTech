@@ -255,6 +255,8 @@ public class ChatBotService {
                     .name(item.name())
                     .imageKey(item.imageKey())
                     .price(item.price())
+                    .originalPrice(item.originalPrice())
+                    .salePrice(item.salePrice())
                     .stock(item.stock())
                     .sortOrder(index)
                     .build());
@@ -301,8 +303,9 @@ public class ChatBotService {
         Map<String, Object> context = new HashMap<>();
         context.put("conversationId", conversationId.toString());
         context.put("role", role == null ? Role.CUSTOMER.name() : role.name());
-        context.put("userId", accountId == null ? "" : accountId.toString());
         context.put("generatedAt", Instant.now().toString());
+        aiManagementService.generateAiToolAccessToken(accountId)
+                .ifPresent(token -> context.put("toolAccessToken", token));
 
         Map<String, Object> safePageContext = sanitizePageContext(pageContext);
         if (!safePageContext.isEmpty()) {
@@ -500,6 +503,8 @@ public class ChatBotService {
             String name,
             String imageKey,
             BigDecimal price,
+            BigDecimal originalPrice,
+            BigDecimal salePrice,
             int stock
     ) {
         private static RecommendationPayload from(JsonNode node) {
@@ -509,12 +514,21 @@ public class ChatBotService {
                     return null;
                 }
                 String variantId = node.path("variantId").asText("").trim();
+                BigDecimal price = node.path("price").decimalValue();
+                BigDecimal originalPrice = node.hasNonNull("originalPrice")
+                        ? node.path("originalPrice").decimalValue()
+                        : price;
+                BigDecimal salePrice = node.hasNonNull("salePrice")
+                        ? node.path("salePrice").decimalValue()
+                        : null;
                 return new RecommendationPayload(
                         UUID.fromString(node.path("productId").asText()),
                         variantId.isEmpty() ? null : UUID.fromString(variantId),
                         node.path("name").asText(""),
                         imageKey,
-                        node.path("price").decimalValue(),
+                        price,
+                        originalPrice,
+                        salePrice,
                         node.path("stock").asInt(0)
                 );
             } catch (RuntimeException ignored) {

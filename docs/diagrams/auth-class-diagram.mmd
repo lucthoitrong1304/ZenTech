@@ -1,0 +1,167 @@
+classDiagram
+direction LR
+
+class AccountUser {
+  +UUID id
+  +String email
+  +String password
+  +boolean isPasswordSet
+  +Role role
+  +boolean isActive
+  +Instant createdAt
+}
+
+class Customer {
+  +UUID id
+  +String fullName
+  +String imageUrl
+  +AccountUser userInfo
+}
+
+class Employee {
+  +UUID id
+  +String fullName
+  +String imageUrl
+  +String phoneNumber
+  +String address
+  +LocalDate dateOfBirth
+  +AccountUser userInfo
+  +String faceDescriptors
+}
+
+class RefreshToken {
+  +UUID id
+  +String token
+  +Instant expiryDate
+  +AccountUser user
+}
+
+class PasswordResetToken {
+  +UUID id
+  +String token
+  +Instant expiryDate
+  +AccountUser user
+}
+
+class RolePermission {
+  +UUID id
+  +Role role
+  +PermissionCode permissionCode
+}
+
+class CustomUserDetails {
+  +UUID id
+  +String email
+  +String password
+  +boolean isActive
+  +Collection authorities
+  +build(AccountUser account)
+  +build(AccountUser account, Collection permissions)
+}
+
+class AuthService {
+  +registerUser(RegisterRequest request)
+  +authenticate(LoginRequest request) AuthResponse
+  +authenticateWithGoogle(String idToken) AuthResponse
+  +forgotPassword(String email)
+  +resetPassword(String token, String newPassword)
+  +refreshToken(TokenRefreshRequest request) AuthResponse
+  +logout(String refreshToken)
+  +changePassword(ChangePasswordRequest request)
+}
+
+class RefreshTokenService {
+  +createRefreshToken(UUID userId, String email) String
+  +generateNewAccessToken(String token) AuthResponse
+  +deleteByToken(String token)
+}
+
+class CustomUserDetailsService {
+  +loadUserByUsername(String email) UserDetails
+}
+
+class JwtUtils {
+  +generateJwtToken(CustomUserDetails userPrincipal) String
+  +getEmailFromJwtToken(String token) String
+  +validateJwtToken(String authToken) boolean
+}
+
+class Role {
+  <<enumeration>>
+  ADMIN
+  OWNER
+  MANAGER
+  EMPLOYEE
+  CUSTOMER
+}
+
+class PermissionCode {
+  <<enumeration>>
+  ORDER_VIEW
+  ORDER_CREATE
+  ORDER_UPDATE
+  ORDER_DELETE
+  RETURN_VIEW
+  RETURN_APPROVE
+  PRODUCT_VIEW
+  PRODUCT_CREATE
+  PRODUCT_UPDATE
+  PRODUCT_DELETE
+  INVENTORY_VIEW
+  INVENTORY_UPDATE
+  CUSTOMER_VIEW
+  CUSTOMER_UPDATE
+  EMPLOYEE_VIEW
+  EMPLOYEE_CREATE
+  EMPLOYEE_UPDATE
+  SCHEDULE_VIEW
+  SCHEDULE_UPDATE
+  APPROVAL_VIEW
+  APPROVAL_APPROVE
+  MARKETING_VIEW
+  MARKETING_CREATE
+  MARKETING_UPDATE
+  MARKETING_DELETE
+  REPORT_VIEW
+  REPORT_ANALYZE
+  CHAT_VIEW
+  CHAT_UPDATE
+  AI_VIEW
+  AI_CREATE
+  AI_UPDATE
+  AI_DELETE
+  PAY_PERIOD_VIEW
+  PAY_PERIOD_UPDATE
+}
+
+%% Associations: normal references between auth objects
+Customer "0..1" --> "1" AccountUser : association / userInfo
+Employee "0..1" --> "1" AccountUser : association / userInfo
+AccountUser --> Role : association / role
+RolePermission --> Role : association / role
+RolePermission --> PermissionCode : association / permissionCode
+
+%% Aggregations: AccountUser can have many auth tokens, tokens have their own lifecycle
+AccountUser "1" o-- "0..*" RefreshToken : aggregation / sessions
+AccountUser "1" o-- "0..*" PasswordResetToken : aggregation / reset tokens
+Role "1" o-- "0..*" RolePermission : aggregation / granted permissions
+
+%% Dependencies: service/security classes use models but do not own them
+AuthService ..> AccountUser : uses
+AuthService ..> Customer : creates/loads
+AuthService ..> Employee : creates/loads
+AuthService ..> PasswordResetToken : creates/validates
+AuthService ..> RefreshTokenService : delegates refresh
+AuthService ..> CustomUserDetails : builds response
+AuthService ..> JwtUtils : creates access token
+RefreshTokenService ..> RefreshToken : creates/rotates
+RefreshTokenService ..> AccountUser : loads owner
+RefreshTokenService ..> CustomUserDetails : builds principal
+RefreshTokenService ..> JwtUtils : creates access token
+CustomUserDetailsService ..> AccountUser : loads by email
+CustomUserDetailsService ..> RolePermission : loads permissions
+CustomUserDetailsService ..> CustomUserDetails : builds principal
+JwtUtils ..> CustomUserDetails : reads claims
+
+%% Note: No true composition is shown in the auth core.
+%% Customer -> Address and Customer -> Cart are excluded because auth does not handle them directly.

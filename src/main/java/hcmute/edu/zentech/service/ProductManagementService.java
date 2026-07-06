@@ -308,25 +308,31 @@ public class ProductManagementService {
         if (request.getColorCode() != null) {
             variant.setColorCode(normalizeText(request.getColorCode()));
         }
-        if (request.getSaleStartAt() != null) {
-            variant.setSaleStartAt(request.getSaleStartAt());
-        }
-        if (request.getSaleEndAt() != null) {
-            variant.setSaleEndAt(request.getSaleEndAt());
-        }
-        if (request.getSalePrice() != null) {
-            variant.setSalePrice(resolveSalePrice(variant, request.getSalePrice()));
-        }
+        variant.setSaleStartAt(request.getSaleStartAt());
+        variant.setSaleEndAt(request.getSaleEndAt());
+        variant.setSalePrice(resolveSalePrice(variant, request.getSalePrice()));
+        validateSaleWindow(variant);
         if (request.getStockQuantity() != null) {
             variant.setStockQuantity(request.getStockQuantity());
         }
     }
 
     private Double resolveSalePrice(ProductVariant variant, Double salePrice) {
-        if (variant.getSaleStartAt() == null && variant.getSaleEndAt() == null) {
+        if (salePrice == null) {
+            return null;
+        }
+        if (salePrice >= variant.getOriginalPrice()) {
             return null;
         }
         return salePrice;
+    }
+
+    private void validateSaleWindow(ProductVariant variant) {
+        if (variant.getSaleStartAt() != null
+                && variant.getSaleEndAt() != null
+                && variant.getSaleEndAt().isBefore(variant.getSaleStartAt())) {
+            throw new RuntimeException("saleEndAt must be after saleStartAt");
+        }
     }
 
     private void softDeleteVariant(ProductVariant variant, Instant deletedAt) {
