@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -32,6 +33,7 @@ public class ApprovalService {
     private final ShiftRepository shiftRepository;
     private final EmployeeShiftRepository employeeShiftRepository;
     private final ShiftOverlapService shiftOverlapService;
+    private final AttendanceEventRepository attendanceEventRepository;
 
     private void checkLock(LocalDate date) {
         Optional<PayPeriod> p = payPeriodRepository.findPeriodActiveAt(date);
@@ -166,6 +168,9 @@ public class ApprovalService {
             targetShift = shiftRepository.findById(request.getTargetShift().getId())
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy ca đổi."));
         }
+        if (request.getType() == SwapRequestType.SWAP && (request.getTargetWorkDate() == null || targetShift == null)) {
+            throw new RuntimeException("Vui lòng chọn ngày và ca đối ứng khi tạo yêu cầu đổi ca.");
+        }
 
         // 1. Time constraints check (must request before shift start time)
         LocalDateTime now = LocalDateTime.now();
@@ -180,6 +185,19 @@ public class ApprovalService {
             if (!now.isBefore(targetShiftStart)) {
                 throw new RuntimeException("Không thể tạo yêu cầu cho ca làm việc đối ứng đã bắt đầu hoặc đã qua.");
             }
+        }
+
+        EmployeeShift sourceAssignment = resolveAssignment(employee.getId(), request.getWorkDate(), shift, "ca nguồn");
+        assertNoAttendanceEvents(sourceAssignment, "ca nguồn");
+
+        if (request.getType() == SwapRequestType.SWAP && targetShift != null && request.getTargetWorkDate() != null) {
+            EmployeeShift targetAssignment = resolveAssignment(
+                    targetEmployee.getId(),
+                    request.getTargetWorkDate(),
+                    targetShift,
+                    "ca đối ứng"
+            );
+            assertNoAttendanceEvents(targetAssignment, "ca đối ứng");
         }
 
         // 2. Overlap checks
@@ -249,6 +267,13 @@ public class ApprovalService {
         AccountUser user = userId != null ? accountUserRepository.findById(userId).orElse(null) : null;
 
         boolean isCancelRequest = request.getStatus() == ApprovalStatus.CANCEL_PENDING;
+        boolean approvingPendingRequest = !isCancelRequest
+                && request.getStatus() == ApprovalStatus.PENDING
+                && status == ApprovalStatus.APPROVED;
+
+        if (approvingPendingRequest) {
+            assertSwapAssignmentsHaveNoAttendanceEvents(request);
+        }
 
         if (isCancelRequest) {
             if (status == ApprovalStatus.APPROVED) {
@@ -545,6 +570,54 @@ public class ApprovalService {
                         workDate
                 ));
             }
+        }
+    }
+
+    private void assertSwapAssignmentsHaveNoAttendanceEvents(ShiftSwapRequest request) {
+        EmployeeShift sourceAssignment = resolveAssignment(
+                request.getRequester().getId(),
+                request.getWorkDate(),
+                request.getShift(),
+                "ca nguồn"
+        );
+        assertNoAttendanceEvents(sourceAssignment, "ca nguồn");
+
+        if (request.getType() == SwapRequestType.SWAP) {
+            if (request.getTargetEmployee() == null || request.getTargetWorkDate() == null || request.getTargetShift() == null) {
+                throw new RuntimeException("Yêu cầu đổi ca thiếu ngày hoặc ca đối ứng.");
+            }
+            EmployeeShift targetAssignment = resolveAssignment(
+                    request.getTargetEmployee().getId(),
+                    request.getTargetWorkDate(),
+                    request.getTargetShift(),
+                    "ca đối ứng"
+            );
+            assertNoAttendanceEvents(targetAssignment, "ca đối ứng");
+        }
+    }
+
+    private EmployeeShift resolveAssignment(UUID employeeId, LocalDate workDate, Shift shift, String label) {
+        if (employeeId == null || workDate == null || shift == null || shift.getId() == null) {
+            throw new RuntimeException("Không xác định được " + label + " trong lịch làm việc.");
+        }
+
+        List<EmployeeShift> matches = employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate).stream()
+                .filter(assignment -> assignment.getShift() != null)
+                .filter(assignment -> Objects.equals(shift.getId(), assignment.getShift().getId()))
+                .toList();
+
+        if (matches.isEmpty()) {
+            throw new RuntimeException("Ca " + label + " không tồn tại trong lịch của nhân viên ngày " + workDate + ".");
+        }
+        if (matches.size() > 1) {
+            throw new RuntimeException("Không xác định được duy nhất " + label + " trong lịch của nhân viên ngày " + workDate + ".");
+        }
+        return matches.get(0);
+    }
+
+    private void assertNoAttendanceEvents(EmployeeShift assignment, String label) {
+        if (attendanceEventRepository.existsByEmployeeShift_Id(assignment.getId())) {
+            throw new RuntimeException("Ca " + label + " đã phát sinh dữ liệu chấm công. Vui lòng thực hiện qua luồng điều chỉnh công hoặc điều chỉnh lịch có lý do.");
         }
     }
 
