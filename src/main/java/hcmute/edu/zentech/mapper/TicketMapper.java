@@ -94,7 +94,7 @@ public class TicketMapper {
                 .build();
     }
 
-    private String resolveDisplayName(AccountUser account) {
+    public String resolveDisplayName(AccountUser account) {
         if (account == null) {
             return null;
         }
