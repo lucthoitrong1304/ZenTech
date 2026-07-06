@@ -1030,6 +1030,12 @@ public class AdminActivityLogService {
         }
     }
 
+    public List<Object> getRecordingByUserId(UUID userId, String sessionId) {
+        return resolveRecordingEmail(userId)
+                .map(email -> getRecording(email, sessionId))
+                .orElseGet(List::of);
+    }
+
     public List<Map<String, Object>> getRecordingSessions(String email) {
         if (!isSafeRecordingPathPart(email)) {
             log.warn("Skipped listing rrweb sessions because email contains unsafe path characters. email={}", email);
@@ -1062,6 +1068,22 @@ public class AdminActivityLogService {
             log.error("Failed to get recording sessions for {}: {}", email, e.getMessage());
             return List.of();
         }
+    }
+
+    public List<Map<String, Object>> getRecordingSessionsByUserId(UUID userId) {
+        return resolveRecordingEmail(userId)
+                .map(this::getRecordingSessions)
+                .orElseGet(List::of);
+    }
+
+    private Optional<String> resolveRecordingEmail(UUID userId) {
+        if (userId == null) {
+            return Optional.empty();
+        }
+
+        return accountUserRepository.findById(userId)
+                .map(AccountUser::getEmail)
+                .filter(email -> email != null && !email.isBlank());
     }
 
     public void deleteRecording(String email, String sessionId) {
