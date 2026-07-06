@@ -10,9 +10,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -390,9 +390,8 @@ public class ApprovalService {
             entity.setTargetShifts(shifts);
         }
 
+        validateLeaveRequestDoesNotOverlap(employee, entity);
         leaveManagementService.ensureQuotas(employee, request.getStartDate().getYear());
-        BigDecimal requestedAmount = leaveManagementService.calculateAmount(entity);
-        leaveManagementService.assertWithinQuota(employee, leaveType, request.getStartDate().getYear(), requestedAmount, null, true);
 
         LeaveRequest saved = leaveRequestRepository.save(entity);
 
@@ -425,18 +424,6 @@ public class ApprovalService {
         checkLock(request.getEndDate());
 
         boolean isCancelRequest = request.getStatus() == ApprovalStatus.CANCEL_PENDING;
-
-        if (!isCancelRequest && status == ApprovalStatus.APPROVED) {
-            BigDecimal requestedAmount = leaveManagementService.calculateAmount(request);
-            leaveManagementService.assertWithinQuota(
-                    request.getEmployee(),
-                    request.getLeaveType(),
-                    request.getStartDate().getYear(),
-                    requestedAmount,
-                    request.getId(),
-                    false
-            );
-        }
 
         UUID userId = SecurityContextUtils.getCurrentUserId();
         AccountUser user = userId != null ? accountUserRepository.findById(userId).orElse(null) : null;
@@ -545,6 +532,90 @@ public class ApprovalService {
         if (!request.getEndTime().isAfter(request.getStartTime())) {
             throw new RuntimeException("Giờ kết thúc phải sau giờ bắt đầu.");
         }
+    }
+
+    private void validateLeaveRequestDoesNotOverlap(Employee employee, LeaveRequest candidate) {
+        List<LeaveRequest> activeLeaves = leaveRequestRepository.findActiveLeavesForEmployeeInRangeWithDetails(
+                employee.getId(),
+                candidate.getStartDate(),
+                candidate.getEndDate(),
+                activeLeaveStatuses()
+        );
+
+        for (LeaveRequest existing : activeLeaves) {
+            if (leaveRequestsOverlap(candidate, existing)) {
+                throw new RuntimeException(duplicateLeaveMessage(candidate));
+            }
+        }
+    }
+
+    private boolean leaveRequestsOverlap(LeaveRequest candidate, LeaveRequest existing) {
+        if (candidate.getLeaveType().getUnit() == LeaveTypeUnit.HOUR) {
+            return hourLeaveOverlaps(candidate, existing);
+        }
+        if (candidate.getTargetShifts() != null && !candidate.getTargetShifts().isEmpty()) {
+            return shiftLeaveOverlaps(candidate, existing);
+        }
+        return true;
+    }
+
+    private boolean shiftLeaveOverlaps(LeaveRequest candidate, LeaveRequest existing) {
+        if (existing.getTargetShifts() == null || existing.getTargetShifts().isEmpty()) {
+            if (existing.getStartTime() != null && existing.getEndTime() != null) {
+                return candidate.getTargetShifts().stream()
+                        .filter(shift -> shift != null && shift.getStartTime() != null && shift.getEndTime() != null)
+                        .anyMatch(shift -> timeRangesOverlap(shift.getStartTime(), shift.getEndTime(), existing.getStartTime(), existing.getEndTime()));
+            }
+            return true;
+        }
+
+        return candidate.getTargetShifts().stream()
+                .filter(shift -> shift != null && shift.getId() != null)
+                .anyMatch(candidateShift -> existing.getTargetShifts().stream()
+                        .filter(existingShift -> existingShift != null && existingShift.getId() != null)
+                        .anyMatch(existingShift -> candidateShift.getId().equals(existingShift.getId())));
+    }
+
+    private boolean hourLeaveOverlaps(LeaveRequest candidate, LeaveRequest existing) {
+        if (existing.getTargetShifts() == null || existing.getTargetShifts().isEmpty()) {
+            if (existing.getStartTime() == null || existing.getEndTime() == null) {
+                return true;
+            }
+            return timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), existing.getStartTime(), existing.getEndTime());
+        }
+
+        return existing.getTargetShifts().stream()
+                .filter(shift -> shift != null && shift.getStartTime() != null && shift.getEndTime() != null)
+                .anyMatch(shift -> timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), shift.getStartTime(), shift.getEndTime()));
+    }
+
+    private boolean timeRangesOverlap(LocalTime firstStart, LocalTime firstEnd, LocalTime secondStart, LocalTime secondEnd) {
+        if (firstStart == null || firstEnd == null || secondStart == null || secondEnd == null) {
+            return false;
+        }
+        return firstStart.isBefore(secondEnd) && secondStart.isBefore(firstEnd);
+    }
+
+    private List<ApprovalStatus> activeLeaveStatuses() {
+        return List.of(ApprovalStatus.PENDING, ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING);
+    }
+
+    private String duplicateLeaveMessage(LeaveRequest candidate) {
+        if (candidate.getLeaveType().getUnit() == LeaveTypeUnit.HOUR) {
+            return String.format("Khung gio %s - %s ngay %s da co yeu cau nghi dang cho/da duyet.",
+                    candidate.getStartTime(),
+                    candidate.getEndTime(),
+                    candidate.getStartDate());
+        }
+        if (candidate.getTargetShifts() != null && !candidate.getTargetShifts().isEmpty()) {
+            String shiftName = candidate.getTargetShifts().stream()
+                    .map(Shift::getName)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse("da chon");
+            return String.format("Ca %s ngay %s da co yeu cau nghi dang cho/da duyet.", shiftName, candidate.getStartDate());
+        }
+        return String.format("Ngay %s den %s da co yeu cau nghi dang cho/da duyet.", candidate.getStartDate(), candidate.getEndDate());
     }
 
     private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift) {

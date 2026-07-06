@@ -34,10 +34,10 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, UUID
     @EntityGraph(attributePaths = {"employee"})
     List<LeaveRequest> findByStatus(ApprovalStatus status);
 
-    @EntityGraph(attributePaths = {"employee", "leaveType"})
+    @EntityGraph(attributePaths = {"employee", "leaveType", "targetShifts"})
     List<LeaveRequest> findByStatusIn(List<ApprovalStatus> statuses);
 
-    @EntityGraph(attributePaths = {"employee", "leaveType"})
+    @EntityGraph(attributePaths = {"employee", "leaveType", "targetShifts"})
     List<LeaveRequest> findByEmployeeIdOrderByRequestedAtDesc(UUID employeeId);
 
     @EntityGraph(attributePaths = {"employee", "leaveType"})
@@ -59,6 +59,15 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, UUID
     @Query("SELECT l FROM LeaveRequest l WHERE l.employee.id = :empId AND l.status IN :statuses AND " +
            "l.startDate <= :end AND l.endDate >= :start")
     List<LeaveRequest> findLeavesForEmployeeInRangeWithStatuses(
+            @Param("empId") UUID employeeId,
+            @Param("start") LocalDate start,
+            @Param("end") LocalDate end,
+            @Param("statuses") List<ApprovalStatus> statuses);
+
+    @EntityGraph(attributePaths = {"employee", "leaveType", "targetShifts"})
+    @Query("SELECT DISTINCT l FROM LeaveRequest l WHERE l.employee.id = :empId AND l.status IN :statuses AND " +
+           "l.startDate <= :end AND l.endDate >= :start")
+    List<LeaveRequest> findActiveLeavesForEmployeeInRangeWithDetails(
             @Param("empId") UUID employeeId,
             @Param("start") LocalDate start,
             @Param("end") LocalDate end,
