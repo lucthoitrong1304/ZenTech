@@ -156,17 +156,29 @@ public class AdminActivityLogController {
 
     @GetMapping("/recordings")
     public ResponseEntity<ApiResponse<List<Object>>> getRecording(
-            @RequestParam("email") String email,
+            @RequestParam(value = "email", required = false, defaultValue = "") String email,
+            @RequestParam(value = "userId", required = false) UUID userId,
             @RequestParam(value = "sessionId", required = false) String sessionId
     ) {
+        if (userId != null) {
+            log.debug("Request get rrweb recording for userId {} session {}", userId, sessionId);
+            return ResponseEntity.ok(ApiResponse.success(activityLogService.getRecordingByUserId(userId, sessionId)));
+        }
+
         log.debug("Request get rrweb recording for {} session {}", email, sessionId);
         return ResponseEntity.ok(ApiResponse.success(activityLogService.getRecording(email, sessionId)));
     }
 
     @GetMapping("/recordings/sessions")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getRecordingSessions(
-            @RequestParam("email") String email
+            @RequestParam(value = "email", required = false, defaultValue = "") String email,
+            @RequestParam(value = "userId", required = false) UUID userId
     ) {
+        if (userId != null) {
+            log.debug("Request get rrweb sessions list for userId {}", userId);
+            return ResponseEntity.ok(ApiResponse.success(activityLogService.getRecordingSessionsByUserId(userId)));
+        }
+
         log.debug("Request get rrweb sessions list for {}", email);
         return ResponseEntity.ok(ApiResponse.success(activityLogService.getRecordingSessions(email)));
     }
