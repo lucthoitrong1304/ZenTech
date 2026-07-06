@@ -94,7 +94,7 @@ public class NotificationService {
                 .isRead(notification.isRead())
                 .type(notification.getType())
                 .referenceId(notification.getReferenceId())
-                .createdAt(notification.getCreatedAt())
+                .createdAt(notification.getCreatedAt() != null ? notification.getCreatedAt() : java.time.Instant.now())
                 .build();
     }
 }

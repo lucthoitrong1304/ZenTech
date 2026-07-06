@@ -44,6 +44,7 @@ public class AdminIncidentService {
     private final LokiService lokiService;
     private final SimpMessagingTemplate messagingTemplate;
     private final AdminActivityLogService activityLogService;
+    private final NotificationService notificationService;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
@@ -401,6 +402,7 @@ public class AdminIncidentService {
         try {
             messagingTemplate.convertAndSend("/topic/admin.incidents", response);
             messagingTemplate.convertAndSend("/topic/admin.incidents.new", response);
+            sendIncidentNotificationToCurrentUser(user, saved);
         } catch (Exception e) {
             log.error("Failed to send websocket notification for incident: {}", saved.getCode(), e);
         }
@@ -622,6 +624,7 @@ public class AdminIncidentService {
                 List<IncidentResponseDto.OccurrenceDto> occurrences = getIncidentOccurrences(saved);
                 IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysisResponseDto) null, ticketCode, affectedEmails, occurrences);
                 messagingTemplate.convertAndSend("/topic/admin.incidents", response);
+                sendIncidentNotificationToCurrentUser(user, saved);
             } catch (Exception e) {
                 log.error("Failed to send websocket notification for duplicate incident: {}", saved.getCode(), e);
             }
@@ -667,6 +670,7 @@ public class AdminIncidentService {
             IncidentResponseDto response = incidentMapper.toResponseDto(saved, (AiAnalysisResponseDto) null, null, affectedEmails, occurrences);
             messagingTemplate.convertAndSend("/topic/admin.incidents", response);
             messagingTemplate.convertAndSend("/topic/admin.incidents.new", response);
+            sendIncidentNotificationToCurrentUser(user, saved);
         } catch (Exception e) {
             log.error("Failed to send websocket notification for automatically created incident: {}", saved.getCode(), e);
         }
@@ -814,5 +818,42 @@ public class AdminIncidentService {
         PrintWriter pw = new PrintWriter(sw);
         throwable.printStackTrace(pw);
         return sw.toString();
+    }
+
+    private void sendIncidentNotificationToCurrentUser(AccountUser currentUser, Incident saved) {
+        if (currentUser != null) {
+            try {
+                String friendlyMsg = saved.getErrorMessage();
+                if (friendlyMsg == null || friendlyMsg.isBlank()) {
+                    friendlyMsg = "Lỗi hệ thống (" + saved.getStatusCode() + ")";
+                }
+                
+                // Dịch thông điệp lỗi kỹ thuật sang ngôn ngữ thân thiện
+                if (friendlyMsg.contains("Cannot create MoMo payment") || friendlyMsg.toLowerCase().contains("momo")) {
+                    friendlyMsg = "Không thể khởi tạo thanh toán qua ví MoMo";
+                } else if (friendlyMsg.contains("checkout") || friendlyMsg.contains("Cannot checkout")) {
+                    friendlyMsg = "Lỗi tiến trình đặt hàng & thanh toán (Checkout)";
+                } else if (friendlyMsg.contains("login") || friendlyMsg.contains("auth")) {
+                    friendlyMsg = "Lỗi đăng nhập hệ thống/Xác thực tài khoản";
+                }
+                
+                notificationService.createNotification(
+                        currentUser.getId(),
+                        "Phát hiện sự cố hệ thống",
+                        "Hệ thống vừa ghi nhận lỗi: \"" + friendlyMsg + "\". Chúng mình đang kiểm tra.",
+                        NotificationType.SYSTEM,
+                        saved.getId()
+                );
+            } catch (Exception e) {
+                log.error("Failed to send customer incident notification", e);
+            }
+        }
+        
+        // Kích hoạt làm mới giao diện Chatbox của khách hàng realtime
+        try {
+            messagingTemplate.convertAndSend("/topic/customer.tickets", Map.of("type", "TICKET_UPDATED"));
+        } catch (Exception e) {
+            log.error("Failed to send customer ticket status refresh notification from incident", e);
+        }
     }
 }

@@ -15,6 +15,7 @@ import java.time.Instant;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CustomerTicketStatusResponse {
+    private String ticketCode;
     private TicketStatus status;
     private String message;
     private Instant updatedAt;

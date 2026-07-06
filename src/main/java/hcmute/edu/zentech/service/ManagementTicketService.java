@@ -10,6 +10,10 @@ import hcmute.edu.zentech.model.TicketPriority;
 import hcmute.edu.zentech.model.TicketStatus;
 import hcmute.edu.zentech.repository.AccountUserRepository;
 import hcmute.edu.zentech.repository.TicketRepository;
+import hcmute.edu.zentech.model.Incident;
+import hcmute.edu.zentech.model.IncidentStatus;
+import hcmute.edu.zentech.model.IncidentSeverity;
+import hcmute.edu.zentech.repository.IncidentRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -32,6 +36,7 @@ public class ManagementTicketService {
     private final AccountUserRepository accountUserRepository;
     private final TicketMapper ticketMapper;
     private final TicketAudienceService ticketAudienceService;
+    private final IncidentRepository incidentRepository;
 
     @Transactional(readOnly = true)
     public Page<TicketResponseDto> getTickets(
@@ -54,7 +59,7 @@ public class ManagementTicketService {
         String normalizedCustomerEmail = customerEmail.trim().toLowerCase();
         String normalizedSearch = search == null ? "" : search.trim().toLowerCase();
 
-        List<TicketResponseDto> filtered = ticketRepository.findAll(Sort.by(
+        List<TicketResponseDto> filtered = new java.util.ArrayList<>(ticketRepository.findAll(Sort.by(
                         Sort.Order.asc("status"),
                         Sort.Order.desc("createdAt")
                 )).stream()
@@ -66,7 +71,40 @@ public class ManagementTicketService {
                 .filter(ticket -> normalizedSearch.isBlank() || matchesTicketSearch(ticket, normalizedSearch))
                 .filter(ticket -> ticketAudienceService.matchesCustomerEmail(ticket, normalizedCustomerEmail))
                 .map(this::toResponseDto)
-                .toList();
+                .toList());
+
+        if (status == null || status == TicketStatus.OPEN) {
+            List<Incident> activeIncidents = incidentRepository.findAll().stream()
+                    .filter(incident -> incident.getUser() != null && normalizedCustomerEmail.equalsIgnoreCase(incident.getUser().getEmail()))
+                    .filter(incident -> incident.getStatus() == IncidentStatus.OPEN || incident.getStatus() == IncidentStatus.INVESTIGATING)
+                    .filter(incident -> ticketRepository.findByIncidentId(incident.getId()).isEmpty())
+                    .sorted(Comparator.comparing(Incident::getOccurredAt).reversed())
+                    .toList();
+
+            for (Incident incident : activeIncidents) {
+                String title = incident.getErrorMessage();
+                if (title == null || title.isBlank()) {
+                    title = "Lỗi hệ thống (" + incident.getStatusCode() + ")";
+                }
+
+                TicketResponseDto incidentDto = TicketResponseDto.builder()
+                        .id(incident.getId())
+                        .code(incident.getCode())
+                        .incidentId(incident.getId())
+                        .incidentCode(incident.getCode())
+                        .title("Sự cố hệ thống: " + title)
+                        .description(incident.getErrorMessage())
+                        .priority(incident.getSeverity() == IncidentSeverity.CRITICAL ? TicketPriority.HIGH : TicketPriority.MEDIUM)
+                        .status(TicketStatus.OPEN)
+                        .createdAt(incident.getOccurredAt())
+                        .createdByEmail(incident.getUser() != null ? incident.getUser().getEmail() : null)
+                        .createdByName(incident.getUser() != null ? ticketMapper.resolveDisplayName(incident.getUser()) : null)
+                        .affectedUserEmails(List.of(normalizedCustomerEmail))
+                        .build();
+
+                filtered.add(0, incidentDto);
+            }
+        }
 
         int start = (int) Math.min(pageable.getOffset(), filtered.size());
         int end = Math.min(start + pageable.getPageSize(), filtered.size());
@@ -76,7 +114,7 @@ public class ManagementTicketService {
     @Transactional(readOnly = true)
     public TicketResponseDto getTicketById(UUID id) {
         Ticket ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Kh?ng t?m th?y Ticket h? tr? v?i ID: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Không tìm thấy Ticket hỗ trợ với ID: " + id));
         return toResponseDto(ticket);
     }
 
@@ -92,17 +130,61 @@ public class ManagementTicketService {
         }
 
         String normalizedEmail = currentUser.getEmail().trim().toLowerCase();
-        return ticketRepository.findAll().stream()
+        List<Ticket> customerTickets = ticketRepository.findAll().stream()
                 .filter(ticket -> ticketAudienceService.matchesCustomerEmail(ticket, normalizedEmail))
+                .toList();
+
+        Optional<Ticket> primaryTicket = customerTickets.stream()
                 .max(Comparator
                         .comparingInt((Ticket ticket) -> ticketStatusRank(ticket.getStatus()))
-                        .thenComparing(this::ticketUpdatedAt))
-                .map(ticket -> CustomerTicketStatusResponse.builder()
+                        .thenComparing(this::ticketUpdatedAt));
+
+        if (primaryTicket.isPresent()) {
+            Ticket ticket = primaryTicket.get();
+            if (ticket.getStatus() != TicketStatus.CLOSED) {
+                return Optional.of(CustomerTicketStatusResponse.builder()
+                        .ticketCode(ticket.getCode())
                         .status(ticket.getStatus())
-                        .message(buildCustomerTicketMessage(ticket.getStatus()))
+                        .message(buildCustomerTicketMessage(ticket.getStatus(), ticket.getTitle()))
                         .updatedAt(ticketUpdatedAt(ticket))
                         .resolvedAt(ticket.getResolvedAt())
                         .build());
+            }
+        }
+
+        List<Incident> activeIncidents = incidentRepository.findAll().stream()
+                .filter(incident -> incident.getUser() != null && normalizedEmail.equalsIgnoreCase(incident.getUser().getEmail()))
+                .filter(incident -> incident.getStatus() == IncidentStatus.OPEN || incident.getStatus() == IncidentStatus.INVESTIGATING)
+                .filter(incident -> ticketRepository.findByIncidentId(incident.getId()).isEmpty())
+                .sorted(Comparator.comparing(Incident::getOccurredAt).reversed())
+                .toList();
+
+        if (!activeIncidents.isEmpty()) {
+            Incident latestIncident = activeIncidents.get(0);
+            String title = latestIncident.getErrorMessage();
+            if (title == null || title.isBlank()) {
+                title = "Lỗi hệ thống (" + latestIncident.getStatusCode() + ")";
+            }
+            return Optional.of(CustomerTicketStatusResponse.builder()
+                    .ticketCode(latestIncident.getCode())
+                    .status(TicketStatus.OPEN)
+                    .message("Hệ thống ghi nhận sự cố: \"" + title + "\". Chúng tôi đang tiến hành kiểm tra.")
+                    .updatedAt(latestIncident.getOccurredAt())
+                    .build());
+        }
+
+        if (primaryTicket.isPresent()) {
+            Ticket ticket = primaryTicket.get();
+            return Optional.of(CustomerTicketStatusResponse.builder()
+                    .ticketCode(ticket.getCode())
+                    .status(ticket.getStatus())
+                    .message(buildCustomerTicketMessage(ticket.getStatus(), ticket.getTitle()))
+                    .updatedAt(ticketUpdatedAt(ticket))
+                    .resolvedAt(ticket.getResolvedAt())
+                    .build());
+        }
+
+        return Optional.empty();
     }
 
     private TicketResponseDto toResponseDto(Ticket ticket) {
@@ -149,10 +231,10 @@ public class ManagementTicketService {
         return ticket.getCreatedAt() != null ? ticket.getCreatedAt() : Instant.EPOCH;
     }
 
-    private String buildCustomerTicketMessage(TicketStatus status) {
+    private String buildCustomerTicketMessage(TicketStatus status, String title) {
         if (status == TicketStatus.RESOLVED || status == TicketStatus.CLOSED) {
-            return "S? c? ?? ???c kh?c ph?c. B?n c? th? th? l?i ho?c nh?n nh?n vi?n n?u v?n g?p l?i.";
+            return "Sự cố \"" + title + "\" đã được khắc phục. Bạn có thể thử lại hoặc nhắn nhân viên nếu vẫn gặp lỗi.";
         }
-        return "ZenTech ?? ghi nh?n s? c? b?n g?p ph?i v? ?ang x? l?.";
+        return "Hệ thống ghi nhận sự cố: \"" + title + "\". Chúng tôi đang tiến hành kiểm tra.";
     }
 }

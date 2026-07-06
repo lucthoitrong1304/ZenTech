@@ -40,6 +40,7 @@ public class AdminTicketService {
     private final SimpMessagingTemplate messagingTemplate;
     private final AdminActivityLogService activityLogService;
     private final TicketAudienceService ticketAudienceService;
+    private final NotificationService notificationService;
 
     private synchronized String generateTicketCode() {
         long count = ticketRepository.countAllTickets();
@@ -179,6 +180,14 @@ public class AdminTicketService {
         try {
             messagingTemplate.convertAndSend("/topic/admin.tickets", response);
             notifyCustomerTicketStatusChanged();
+            
+            // Gửi thông báo quả chuông cho các khách hàng bị ảnh hưởng
+            String friendlyTitle = getFriendlyTicketTitle(saved.getTitle());
+            sendNotificationToAffectedUsers(
+                saved,
+                "Đội kỹ thuật đang khắc phục",
+                "Sự cố: \"" + friendlyTitle + "\" đã được tiếp nhận và đang được đội ngũ kỹ thuật xử lý."
+            );
         } catch (Exception e) {
             log.error("Failed to send ticket create websocket notification", e);
         }
@@ -290,6 +299,16 @@ public class AdminTicketService {
         try {
             messagingTemplate.convertAndSend("/topic/admin.tickets", response);
             notifyCustomerTicketStatusChanged();
+            
+            // Gửi thông báo quả chuông khi sự cố được khắc phục xong
+            if (status == TicketStatus.RESOLVED || status == TicketStatus.CLOSED) {
+                String friendlyTitle = getFriendlyTicketTitle(saved.getTitle());
+                sendNotificationToAffectedUsers(
+                    saved,
+                    "Sự cố đã được khắc phục",
+                    "Sự cố \"" + friendlyTitle + "\" đã xử lý xong. Bạn có thể thực hiện lại giao dịch."
+                );
+            }
         } catch (Exception e) {
             log.error("Failed to send ticket status update websocket notification", e);
         }
@@ -368,6 +387,44 @@ public class AdminTicketService {
             log.error("Failed to send ticket assignee update websocket notification", e);
         }
         return response;
+    }
+
+    private String getFriendlyTicketTitle(String title) {
+        if (title == null) return "";
+        String friendly = title;
+        if (friendly.contains("Cannot create MoMo payment") || friendly.toLowerCase().contains("momo")) {
+            friendly = friendly.replace("Cannot create MoMo payment", "Không thể khởi tạo thanh toán qua ví MoMo");
+        }
+        if (friendly.contains("checkout") || friendly.contains("Cannot checkout")) {
+            friendly = friendly.replace("Cannot checkout", "Lỗi tiến trình đặt hàng & thanh toán (Checkout)");
+        }
+        if (friendly.contains("login") || friendly.contains("auth")) {
+            friendly = friendly.replace("login", "Đăng nhập hệ thống").replace("auth", "Xác thực tài khoản");
+        }
+        friendly = friendly.replace("Sửa lỗi sự cố", "Khắc phục lỗi");
+        
+        // Loại bỏ các mã tiền tố kỹ thuật khi hiển thị cho khách hàng
+        friendly = friendly.replaceAll("(?i)(?:Sửa lỗi sự cố|Khắc phục lỗi)\\s+INC-\\d+:\\s*", "");
+        return friendly;
+    }
+
+    private void sendNotificationToAffectedUsers(Ticket ticket, String title, String content) {
+        try {
+            List<String> emails = ticketAudienceService.getAffectedUserEmails(ticket);
+            for (String email : emails) {
+                accountUserRepository.findByEmailIgnoreCase(email).ifPresent(user -> {
+                    notificationService.createNotification(
+                            user.getId(),
+                            title,
+                            content,
+                            hcmute.edu.zentech.model.NotificationType.SYSTEM,
+                            ticket.getId()
+                    );
+                });
+            }
+        } catch (Exception e) {
+            log.error("Failed to send notification to affected users for ticket " + ticket.getCode(), e);
+        }
     }
 }
 
