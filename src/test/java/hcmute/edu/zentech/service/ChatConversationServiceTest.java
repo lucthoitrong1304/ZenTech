@@ -3,13 +3,17 @@ package hcmute.edu.zentech.service;
 import hcmute.edu.zentech.dto.response.ChatMessageResponse;
 import hcmute.edu.zentech.dto.response.ConversationResponse;
 import hcmute.edu.zentech.mapper.ChatMapper;
+import hcmute.edu.zentech.model.AccountUser;
 import hcmute.edu.zentech.model.ChatMessage;
 import hcmute.edu.zentech.model.Conversation;
 import hcmute.edu.zentech.model.ConversationParticipant;
 import hcmute.edu.zentech.model.ConversationStatus;
+import hcmute.edu.zentech.model.Customer;
 import hcmute.edu.zentech.model.Employee;
+import hcmute.edu.zentech.model.NotificationType;
 import hcmute.edu.zentech.model.ParticipantStatus;
 import hcmute.edu.zentech.model.ParticipantType;
+import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.repository.ChatMessageRepository;
 import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
@@ -75,6 +79,7 @@ class ChatConversationServiceTest {
                 .id(conversationId)
                 .status(ConversationStatus.AGENT_HANDLING)
                 .title("Support conversation")
+                .customer(Customer.builder().id(UUID.randomUUID()).fullName("Khách Hàng A").build())
                 .build();
         staffParticipant = ConversationParticipant.builder()
                 .id(UUID.randomUUID())
@@ -105,7 +110,7 @@ class ChatConversationServiceTest {
 
         Employee employee = new Employee();
         employee.setId(staffReferenceId);
-        employee.setFullName("Nhan vien A");
+        employee.setFullName("Nhân viên A");
         lenient().when(employeeRepository.findById(staffReferenceId)).thenReturn(Optional.of(employee));
 
         lenient().when(chatMapper.toConversationResponse(any(Conversation.class), any()))
@@ -166,7 +171,7 @@ class ChatConversationServiceTest {
 
         verify(chatMessageRepository).save(messageCaptor.capture());
         assertThat(messageCaptor.getValue().getContent())
-                .isEqualTo("Nhân viên Nhan vien A đã rời cuộc trò chuyện");
+                .isEqualTo("Nhân viên Nhân viên A đã rời cuộc trò chuyện");
     }
 
     @Test
@@ -190,5 +195,70 @@ class ChatConversationServiceTest {
 
         verify(chatParticipantService, never()).getActiveParticipant(any(), any());
         verify(participantRepository, never()).save(any());
+    }
+
+    @Test
+    void requestAgentFromAiMovesBotConsultingConversationToQueue() {
+        conversation.setStatus(ConversationStatus.BOT_CONSULTING);
+        when(employeeRepository.findActiveStaff(any())).thenReturn(List.of());
+
+        Optional<ConversationResponse> response = chatConversationService.requestAgentFromAi(conversationId);
+
+        assertThat(response).isPresent();
+        assertThat(response.get().getStatus()).isEqualTo(ConversationStatus.WAITING_FOR_AGENT);
+        assertThat(conversation.getStatus()).isEqualTo(ConversationStatus.WAITING_FOR_AGENT);
+        verify(conversationRepository).save(conversation);
+        verify(messagingTemplate).convertAndSend("/topic/conversations." + conversationId, response.get());
+        verify(messagingTemplate).convertAndSend("/topic/management.chat.queue", response.get());
+    }
+
+    @Test
+    void requestAgentFromAiNotifiesActiveStaff() {
+        conversation.setStatus(ConversationStatus.BOT_CONSULTING);
+        UUID activeStaffAccountId = UUID.randomUUID();
+        Employee activeStaff = new Employee();
+        activeStaff.setUserInfo(AccountUser.builder()
+                .id(activeStaffAccountId)
+                .email("staff@zentech.vn")
+                .role(Role.EMPLOYEE)
+                .isActive(true)
+                .build());
+        when(employeeRepository.findActiveStaff(any())).thenReturn(List.of(activeStaff));
+
+        chatConversationService.requestAgentFromAi(conversationId);
+
+        verify(notificationService).createNotification(
+                activeStaffAccountId,
+                "Yêu cầu hỗ trợ mới",
+                "Khách hàng Khách Hàng A đang cần nhân viên hỗ trợ.",
+                NotificationType.AGENT_REQUEST,
+                conversationId
+        );
+    }
+
+    @Test
+    void requestAgentFromAiIgnoresConversationAlreadyOutsideBotConsulting() {
+        conversation.setStatus(ConversationStatus.WAITING_FOR_AGENT);
+
+        Optional<ConversationResponse> response = chatConversationService.requestAgentFromAi(conversationId);
+
+        assertThat(response).isEmpty();
+        verify(conversationRepository, never()).save(any());
+        verify(messagingTemplate, never()).convertAndSend(any(String.class), any(ConversationResponse.class));
+        verify(notificationService, never()).createNotification(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void requestAgentReturnsCurrentQueueStateWithoutDuplicateNotification() {
+        Customer customer = conversation.getCustomer();
+        conversation.setStatus(ConversationStatus.WAITING_FOR_AGENT);
+        when(chatParticipantService.getCurrentCustomer()).thenReturn(customer);
+
+        ConversationResponse response = chatConversationService.requestAgent(conversationId);
+
+        assertThat(response.getStatus()).isEqualTo(ConversationStatus.WAITING_FOR_AGENT);
+        verify(chatParticipantService).ensureCustomerOwnsConversation(conversation, customer.getId());
+        verify(conversationRepository, never()).save(any());
+        verify(notificationService, never()).createNotification(any(), any(), any(), any(), any());
     }
 }

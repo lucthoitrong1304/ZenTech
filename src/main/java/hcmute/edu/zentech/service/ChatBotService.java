@@ -54,6 +54,7 @@ public class ChatBotService {
     private final ChatMapper chatMapper;
     private final R2StorageService r2StorageService;
     private final AiManagementService aiManagementService;
+    private final ChatConversationService chatConversationService;
     private final TransactionTemplate transactionTemplate;
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
@@ -138,6 +139,7 @@ public class ChatBotService {
         java.io.InputStream inputStream = streamResponseOpt.get().body();
         StringBuilder accumulatedContent = new StringBuilder();
         List<RecommendationPayload> recommendations = new ArrayList<>();
+        boolean handoffRecommended = false;
         try (inputStream; BufferedReader reader = new BufferedReader(
                 new InputStreamReader(inputStream, java.nio.charset.StandardCharsets.UTF_8))) {
             String event = null;
@@ -154,6 +156,7 @@ public class ChatBotService {
                             broadcastChunk(conversationId, botParticipant.get().getId(), chunk);
                         }
                     } else if ("complete".equals(event)) {
+                        handoffRecommended = data.path("handoffRecommended").asBoolean(false);
                         for (JsonNode product : data.path("recommendedProducts")) {
                             RecommendationPayload payload = RecommendationPayload.from(product);
                             if (payload != null) {
@@ -183,6 +186,19 @@ public class ChatBotService {
                 replyToSave,
                 recommendations
         ));
+
+        if (handoffRecommended) {
+            try {
+                chatConversationService.requestAgentFromAi(conversation.getId())
+                        .ifPresent(response -> log.info(
+                                "AI handoff requested for conversation {}, status={}",
+                                conversation.getId(),
+                                response.getStatus()
+                        ));
+            } catch (RuntimeException ex) {
+                log.warn("Failed to request agent from AI handoff for conversation {}", conversation.getId(), ex);
+            }
+        }
     }
 
     private void broadcastChunk(UUID conversationId, UUID botParticipantId, String chunk) {

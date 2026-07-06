@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -112,20 +113,42 @@ public class ChatConversationService {
         Customer customer = chatParticipantService.getCurrentCustomer();
         Conversation conversation = getConversation(conversationId);
         chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
-        ensureNotClosed(conversation);
 
+        if (conversation.getStatus() != ConversationStatus.BOT_CONSULTING) {
+            return toConversationResponse(conversation);
+        }
+
+        return moveToAgentQueue(conversation, customer);
+    }
+
+    @Transactional
+    public Optional<ConversationResponse> requestAgentFromAi(UUID conversationId) {
+        Conversation conversation = getConversation(conversationId);
+        if (conversation.getStatus() != ConversationStatus.BOT_CONSULTING) {
+            return Optional.empty();
+        }
+
+        return Optional.of(moveToAgentQueue(conversation, conversation.getCustomer()));
+    }
+
+    private ConversationResponse moveToAgentQueue(Conversation conversation, Customer customer) {
+        UUID conversationId = conversation.getId();
         conversation.setStatus(ConversationStatus.WAITING_FOR_AGENT);
         conversation.setUpdatedAt(Instant.now());
         Conversation savedConversation = conversationRepository.save(conversation);
         ConversationResponse response = toConversationResponse(savedConversation);
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
         messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
 
         List<Role> staffRoles = List.of(Role.EMPLOYEE, Role.MANAGER, Role.OWNER, Role.ADMIN);
+        String customerName = customer != null && customer.getFullName() != null && !customer.getFullName().isBlank()
+                ? customer.getFullName()
+                : "khách hàng";
         employeeRepository.findActiveStaff(staffRoles).forEach(staff -> {
             notificationService.createNotification(
                     staff.getUserInfo().getId(),
                     "Yêu cầu hỗ trợ mới",
-                    "Khách hàng " + customer.getFullName() + " đang cần nhân viên hỗ trợ.",
+                    "Khách hàng " + customerName + " đang cần nhân viên hỗ trợ.",
                     NotificationType.AGENT_REQUEST,
                     conversationId
             );
