@@ -361,6 +361,12 @@ public class ChatConversationService {
         conversation.setClosedAt(null);
         conversation.setUpdatedAt(Instant.now());
         
+        chatParticipantService.addOrUpdateParticipant(
+                conversation,
+                ParticipantType.CUSTOMER,
+                customer.getId(),
+                ParticipantStatus.ACTIVE
+        );
         chatParticipantService.makeBotSilent(conversation);
         
         ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
