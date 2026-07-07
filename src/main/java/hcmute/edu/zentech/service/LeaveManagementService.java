@@ -217,6 +217,41 @@ public class LeaveManagementService {
     }
 
     @Transactional(readOnly = true)
+    public LeaveQuotaImpact calculateQuotaImpact(LeaveRequest request) {
+        if (request == null
+                || request.getEmployee() == null
+                || request.getLeaveType() == null
+                || request.getStartDate() == null) {
+            return new LeaveQuotaImpact(false, BigDecimal.ZERO, BigDecimal.ZERO);
+        }
+
+        int year = request.getStartDate().getYear();
+        BigDecimal entitlement = employeeLeaveQuotaRepository
+                .findByEmployeeIdAndLeaveTypeIdAndYear(
+                        request.getEmployee().getId(),
+                        request.getLeaveType().getId(),
+                        year
+                )
+                .map(EmployeeLeaveQuota::getEntitlement)
+                .orElse(defaultEntitlement(request.getLeaveType()));
+        BigDecimal usedBeforeRequest = sumUsage(
+                request.getEmployee().getId(),
+                request.getLeaveType().getId(),
+                year,
+                request.getId(),
+                true
+        );
+        BigDecimal remainingBeforeRequest = entitlement.subtract(usedBeforeRequest);
+        BigDecimal remainingAfterRequest = remainingBeforeRequest.subtract(calculateAmount(request));
+
+        return new LeaveQuotaImpact(
+                remainingAfterRequest.compareTo(BigDecimal.ZERO) < 0,
+                remainingBeforeRequest,
+                remainingAfterRequest
+        );
+    }
+
+    @Transactional(readOnly = true)
     public BigDecimal sumUsage(UUID employeeId, UUID leaveTypeId, int year, UUID excludingRequestId, boolean includePending) {
         List<ApprovalStatus> statuses = includePending
                 ? List.of(ApprovalStatus.APPROVED, ApprovalStatus.PENDING, ApprovalStatus.CANCEL_PENDING)
@@ -269,6 +304,13 @@ public class LeaveManagementService {
 
     private String unitLabel(LeaveType leaveType) {
         return leaveType.getUnit() == LeaveTypeUnit.HOUR ? "giờ" : "ngày";
+    }
+
+    public record LeaveQuotaImpact(
+            boolean overQuota,
+            BigDecimal remainingBeforeRequest,
+            BigDecimal remainingAfterRequest
+    ) {
     }
 
     private int nextSortOrder() {

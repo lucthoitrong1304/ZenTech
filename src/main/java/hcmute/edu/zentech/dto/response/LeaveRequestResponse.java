@@ -26,6 +26,9 @@ public class LeaveRequestResponse {
     private LocalTime endTime;
     private LeaveTypeResponse leaveType;
     private BigDecimal amount;
+    private boolean overQuota;
+    private BigDecimal quotaRemainingBeforeRequest;
+    private BigDecimal quotaRemainingAfterRequest;
     private String reason;
     private ApprovalStatus status;
     private LocalDateTime requestedAt;

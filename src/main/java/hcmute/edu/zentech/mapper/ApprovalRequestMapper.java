@@ -11,21 +11,22 @@ import hcmute.edu.zentech.model.Employee;
 import hcmute.edu.zentech.model.LeaveRequest;
 import hcmute.edu.zentech.model.Shift;
 import hcmute.edu.zentech.model.ShiftSwapRequest;
+import hcmute.edu.zentech.service.LeaveManagementService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.Duration;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 @Component
+@RequiredArgsConstructor
 public class ApprovalRequestMapper {
+    private final LeaveManagementService leaveManagementService;
 
     public LeaveRequestResponse toLeaveResponse(LeaveRequest request) {
         if (request == null) {
             return null;
         }
+        LeaveManagementService.LeaveQuotaImpact quotaImpact = leaveManagementService.calculateQuotaImpact(request);
 
         return LeaveRequestResponse.builder()
                 .id(request.getId())
@@ -35,7 +36,10 @@ public class ApprovalRequestMapper {
                 .startTime(request.getStartTime())
                 .endTime(request.getEndTime())
                 .leaveType(toLeaveTypeResponse(request.getLeaveType()))
-                .amount(calculateAmount(request))
+                .amount(leaveManagementService.calculateAmount(request))
+                .overQuota(quotaImpact.overQuota())
+                .quotaRemainingBeforeRequest(quotaImpact.remainingBeforeRequest())
+                .quotaRemainingAfterRequest(quotaImpact.remainingAfterRequest())
                 .reason(request.getReason())
                 .status(request.getStatus())
                 .requestedAt(request.getRequestedAt())
@@ -119,30 +123,6 @@ public class ApprovalRequestMapper {
                 .systemDefault(leaveType.isSystemDefault())
                 .sortOrder(leaveType.getSortOrder())
                 .build();
-    }
-
-    private BigDecimal calculateAmount(LeaveRequest request) {
-        if (request.getLeaveType() == null || request.getLeaveType().getUnit() == null) {
-            return BigDecimal.ZERO;
-        }
-
-        return switch (request.getLeaveType().getUnit()) {
-            case DAY -> {
-                if (request.getStartDate() == null || request.getEndDate() == null) {
-                    yield BigDecimal.ZERO;
-                }
-                long days = ChronoUnit.DAYS.between(request.getStartDate(), request.getEndDate()) + 1;
-                yield BigDecimal.valueOf(Math.max(0, days));
-            }
-            case HOUR -> {
-                if (request.getStartTime() == null || request.getEndTime() == null) {
-                    yield BigDecimal.ZERO;
-                }
-                long minutes = Duration.between(request.getStartTime(), request.getEndTime()).toMinutes();
-                yield BigDecimal.valueOf(Math.max(0, minutes))
-                        .divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
-            }
-        };
     }
 
     private ApprovalShiftResponse toShiftResponse(Shift shift) {
