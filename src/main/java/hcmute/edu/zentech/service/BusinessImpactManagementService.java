@@ -38,6 +38,7 @@ public class BusinessImpactManagementService {
     private final AccountUserRepository accountUserRepository;
     private final CustomerRepository customerRepository;
     private final R2StorageService r2StorageService;
+    private final AdminAiRealtimeLogPublisher realtimeLogPublisher;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
@@ -308,6 +309,7 @@ public class BusinessImpactManagementService {
         payload.put("severity", dto.getSeverity().toString());
 
         try {
+            realtimeLogPublisher.publishAiInfo("Starting LLM call for management impact analysis: incident_code=" + dto.getIncidentCode());
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             addTraceIdHeader(headers);
@@ -317,9 +319,11 @@ public class BusinessImpactManagementService {
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 String aiSummary = (String) response.getBody().get("aiSummary");
                 dto.setAiSummary(aiSummary);
+                realtimeLogPublisher.publishAiInfo("Management impact analysis completed: incident_code=" + dto.getIncidentCode());
                 return dto;
             }
         } catch (Exception e) {
+            realtimeLogPublisher.publishAiError("Management impact analysis failed: incident_code=" + dto.getIncidentCode(), e);
             log.error("AI management impact analysis failed: {}", e.getMessage(), e);
             throw new RuntimeException("Dịch vụ phân tích AI không khả dụng: " + e.getMessage());
         }
