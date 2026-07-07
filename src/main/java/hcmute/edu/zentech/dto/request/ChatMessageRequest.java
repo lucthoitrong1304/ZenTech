@@ -25,4 +25,7 @@ public class ChatMessageRequest {
     private List<@NotNull(message = "attachment is required") @Valid ChatAttachmentRequest> attachments;
 
     private Map<String, Object> pageContext;
+
+    @Size(max = 64, message = "traceId must not exceed 64 characters")
+    private String traceId;
 }
