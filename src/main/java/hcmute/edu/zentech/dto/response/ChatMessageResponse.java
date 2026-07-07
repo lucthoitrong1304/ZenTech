@@ -29,4 +29,5 @@ public class ChatMessageResponse {
     private List<ChatRecommendedProductResponse> recommendedProducts;
     private Instant createdAt;
     private Instant deletedAt;
+    private String traceId;
 }

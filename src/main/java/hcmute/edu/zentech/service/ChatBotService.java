@@ -20,6 +20,7 @@ import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -63,9 +64,15 @@ public class ChatBotService {
             UUID conversationId,
             ChatMessageResponse message,
             Map<String, Object> pageContext,
-            UUID accountId
+            UUID accountId,
+            String traceId
     ) {
-        log.info("Starting async handleCustomerMessage for conversation: {}, messageId: {}", conversationId, message.getId());
+        String previousTraceId = MDC.get("traceId");
+        if (traceId != null && !traceId.isBlank()) {
+            MDC.put("traceId", traceId.trim());
+        }
+        try {
+            log.info("Starting async handleCustomerMessage for conversation: {}, messageId: {}", conversationId, message.getId());
         String customerContent = normalizeContent(message.getContent());
         List<AiAgentRuntimeRequest.Attachment> attachments = buildAnalyzableAttachments(message);
         boolean hasAttachments = message.getAttachments() != null && !message.getAttachments().isEmpty();
@@ -183,6 +190,13 @@ public class ChatBotService {
                 replyToSave,
                 recommendations
         ));
+        } finally {
+            if (previousTraceId != null && !previousTraceId.isBlank()) {
+                MDC.put("traceId", previousTraceId);
+            } else {
+                MDC.remove("traceId");
+            }
+        }
     }
 
     private void broadcastChunk(UUID conversationId, UUID botParticipantId, String chunk) {
@@ -194,6 +208,7 @@ public class ChatBotService {
                 .content(chunk)
                 .recommendedProducts(List.of())
                 .createdAt(Instant.now())
+                .traceId(MDC.get("traceId"))
                 .build();
         messagingTemplate.convertAndSend("/topic/conversations." + conversationId, chunkResponse);
     }
@@ -265,7 +280,9 @@ public class ChatBotService {
         conversation.setUpdatedAt(Instant.now());
         conversationRepository.saveAndFlush(conversation);
 
-        return Optional.of(chatMapper.toChatMessageResponse(savedMessage));
+        ChatMessageResponse response = chatMapper.toChatMessageResponse(savedMessage);
+        response.setTraceId(MDC.get("traceId"));
+        return Optional.of(response);
     }
 
     private Optional<String> requestAiReply(

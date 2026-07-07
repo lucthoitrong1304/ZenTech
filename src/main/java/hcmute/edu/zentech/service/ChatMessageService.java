@@ -142,7 +142,8 @@ public class ChatMessageService {
                         conversationId,
                         persistedMessage.message(),
                         persistedMessage.pageContext(),
-                        accountId
+                        accountId,
+                        persistedMessage.traceId()
                 );
             } catch (RuntimeException ex) {
                 log.warn("Failed to trigger bot response for conversation {}", conversationId, ex);
@@ -184,13 +185,14 @@ public class ChatMessageService {
         Conversation savedConversation = conversationRepository.saveAndFlush(conversation);
 
         ChatMessageResponse response = toChatMessageResponse(savedMessage);
+        response.setTraceId(request.getTraceId());
 
         List<ConversationParticipant> participants = participantRepository.findByConversation_Id(conversationId);
         ConversationResponse convResponse = chatMapper.toConversationResponse(savedConversation, participants);
         boolean shouldTriggerBot = savedConversation.getStatus() == ConversationStatus.BOT_CONSULTING
                 && participant.getUserType() == ParticipantType.CUSTOMER;
 
-        return new PersistedMessage(response, convResponse, participant.getId(), shouldTriggerBot, request.getPageContext());
+        return new PersistedMessage(response, convResponse, participant.getId(), shouldTriggerBot, request.getPageContext(), request.getTraceId());
     }
 
     private void broadcastMessage(UUID conversationId, ChatMessageResponse response) {
@@ -233,7 +235,8 @@ public class ChatMessageService {
             ConversationResponse conversation,
             UUID senderParticipantId,
             boolean shouldTriggerBot,
-            Map<String, Object> pageContext
+            Map<String, Object> pageContext,
+            String traceId
     ) {
     }
 
