@@ -45,6 +45,7 @@ public class AdminIncidentService {
     private final SimpMessagingTemplate messagingTemplate;
     private final AdminActivityLogService activityLogService;
     private final NotificationService notificationService;
+    private final AdminAiRealtimeLogPublisher realtimeLogPublisher;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
@@ -761,6 +762,7 @@ public class AdminIncidentService {
         log.info("Calling ZenTech-AI analysis URL (aggregated, on-the-fly): {}", analyzeUrl);
 
         try {
+            realtimeLogPublisher.publishAiInfo("Starting LLM call for incident analysis: incident_code=" + incident.getCode());
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
             addTraceIdHeader(headers);
@@ -786,7 +788,7 @@ public class AdminIncidentService {
                     confidenceScore = ((Number) scoreObj).doubleValue();
                 }
 
-                return AiAnalysisResponseDto.builder()
+                AiAnalysisResponseDto analysis = AiAnalysisResponseDto.builder()
                         .incidentId(incidentId)
                         .summary((String) body.get("summary"))
                         .rootCause((String) body.get("root_cause"))
@@ -795,8 +797,11 @@ public class AdminIncidentService {
                         .confidenceScore(confidenceScore)
                         .createdAt(Instant.now())
                         .build();
+                realtimeLogPublisher.publishAiInfo("Incident analysis completed: incident_code=" + incident.getCode());
+                return analysis;
             }
         } catch (Exception e) {
+            realtimeLogPublisher.publishAiError("Incident analysis failed: incident_code=" + incident.getCode(), e);
             log.error("AI analysis failed for incident {}: {}", incidentId, e.getMessage(), e);
             throw new RuntimeException("Dịch vụ phân tích AI không khả dụng: " + e.getMessage());
         }

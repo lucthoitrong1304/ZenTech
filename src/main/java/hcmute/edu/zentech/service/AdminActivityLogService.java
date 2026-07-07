@@ -62,6 +62,7 @@ public class AdminActivityLogService {
     private String aiBaseUrl;
 
     private final RestTemplate restTemplate = new RestTemplate();
+    private final AdminAiRealtimeLogPublisher realtimeLogPublisher;
 
     private static final String ACTIVITY_LOG_TOPIC = "/topic/admin.activity-logs";
     private static final long RECORDING_RETENTION_MS = 7L * 24 * 60 * 60 * 1000;
@@ -366,6 +367,7 @@ public class AdminActivityLogService {
     ) {
         String url = normalizeAiBaseUrl(aiBaseUrl) + "/admin/activity-timeline/summary";
         try {
+            realtimeLogPublisher.publishAiInfo("Starting LLM call for activity timeline summary: log_count=" + requestPayload.getLogs().size());
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
             String traceId = MDC.get("traceId");
@@ -382,9 +384,11 @@ public class AdminActivityLogService {
             );
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                realtimeLogPublisher.publishAiInfo("Activity timeline summary completed: log_count=" + requestPayload.getLogs().size());
                 return Optional.of(response.getBody());
             }
         } catch (Exception ex) {
+            realtimeLogPublisher.publishAiError("Activity timeline summary failed", ex);
             log.warn("Failed to summarize activity timeline using AI service: {}", ex.getMessage());
         }
         return Optional.empty();

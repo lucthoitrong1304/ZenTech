@@ -44,6 +44,7 @@ class BusinessImpactManagementServiceTest {
     @Mock private AccountUserRepository accountUserRepository;
     @Mock private CustomerRepository customerRepository;
     @Mock private R2StorageService r2StorageService;
+    @Mock private AdminAiRealtimeLogPublisher realtimeLogPublisher;
 
     private BusinessImpactManagementService service;
 
@@ -57,7 +58,8 @@ class BusinessImpactManagementServiceTest {
                 activityLogRepository,
                 accountUserRepository,
                 customerRepository,
-                r2StorageService
+                r2StorageService,
+                realtimeLogPublisher
         );
 
         lenient().when(incidentRepository.findFirstByApiPathAndHttpMethodAndStatusOrderByResolvedAtDesc(

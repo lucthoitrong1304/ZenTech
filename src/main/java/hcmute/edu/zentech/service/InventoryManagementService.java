@@ -59,6 +59,7 @@ public class InventoryManagementService {
     private final CustomerRepository customerRepository;
     private final OrderRepository orderRepository;
     private final R2StorageService r2StorageService;
+    private final AdminAiRealtimeLogPublisher realtimeLogPublisher;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
@@ -294,6 +295,7 @@ public class InventoryManagementService {
                 .build();
 
         try {
+            realtimeLogPublisher.publishAiInfo("Starting LLM call for inventory recommendation: item_count=" + itemDtos.size());
             org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
             headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
             addTraceIdHeader(headers);
@@ -304,9 +306,11 @@ public class InventoryManagementService {
             );
             
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                realtimeLogPublisher.publishAiInfo("Inventory recommendation completed: item_count=" + itemDtos.size());
                 return response.getBody();
             }
         } catch (Exception e) {
+            realtimeLogPublisher.publishAiError("Inventory recommendation failed", e);
             log.error("Failed to fetch AI inventory recommendations: {}", e.getMessage());
             return AiInventoryRecommendResponse.builder()
                     .content("### 🚨 Lỗi kết nối hệ thống AI\n\nKhông thể kết nối đến máy chủ AI ZenTech để phân tích dữ liệu kho. Vui lòng kiểm tra lại dịch vụ AI hoặc thử lại sau.")

@@ -83,6 +83,7 @@ public class AiManagementService {
     private final RolePermissionRepository rolePermissionRepository;
     private final JwtUtils jwtUtils;
     private final ObjectMapper objectMapper;
+    private final AdminAiRealtimeLogPublisher realtimeLogPublisher;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
@@ -259,6 +260,7 @@ public class AiManagementService {
             Map<String, Object> businessContext
     ) {
         try {
+            realtimeLogPublisher.publishAiInfo("Starting streaming LLM call: role=" + role);
             AiAgentRuntimeRequest runtimeRequest = buildRuntimeRequest(role, message, history, attachments, businessContext);
 
             java.net.http.HttpRequest httpRequest = aiRequestBuilder("/agents/respond/stream")
@@ -275,8 +277,10 @@ public class AiManagementService {
                 return Optional.empty();
             }
 
+            realtimeLogPublisher.publishAiInfo("Streaming LLM call connected: role=" + role);
             return Optional.of(response);
         } catch (Exception ex) {
+            realtimeLogPublisher.publishAiError("Streaming LLM call failed: role=" + role, ex);
             log.warn("AI agent stream service failed", ex);
             return Optional.empty();
         }
@@ -340,6 +344,7 @@ public class AiManagementService {
             Map<String, Object> businessContext
     ) {
         try {
+            realtimeLogPublisher.publishAiInfo("Starting LLM call for agent reply: role=" + role);
             AiAgentRuntimeRequest runtimeRequest = buildRuntimeRequest(role, message, history, attachments, businessContext);
 
             HttpRequest httpRequest = aiRequestBuilder("/agents/respond")
@@ -357,8 +362,10 @@ public class AiManagementService {
                 return Optional.empty();
             }
 
+            realtimeLogPublisher.publishAiInfo("Agent reply completed: role=" + role);
             return Optional.of(objectMapper.readValue(response.body(), AiAgentRuntimeResponse.class));
         } catch (Exception ex) {
+            realtimeLogPublisher.publishAiError("Agent reply failed: role=" + role, ex);
             log.warn("AI agent service failed", ex);
             return Optional.empty();
         }
@@ -407,6 +414,7 @@ public class AiManagementService {
 
     private void ingestDocument(AiDocument document) {
         try {
+            realtimeLogPublisher.publishAiInfo("Starting AI document ingest: document_id=" + document.getId());
             AiKnowledgeIngestRequest request = AiKnowledgeIngestRequest.builder()
                     .datasetId(document.getDataset().getId())
                     .documentId(document.getId())
@@ -434,9 +442,11 @@ public class AiManagementService {
 
             AiKnowledgeIngestResponse ingestResponse = objectMapper.readValue(response.body(), AiKnowledgeIngestResponse.class);
             document.setChunkCount(ingestResponse.getChunkCount());
+            realtimeLogPublisher.publishAiInfo("AI document ingest completed: document_id=" + document.getId() + " chunk_count=" + ingestResponse.getChunkCount());
             document.setIngestStatus(AiDocumentStatus.READY);
             document.setErrorMessage(null);
         } catch (Exception ex) {
+            realtimeLogPublisher.publishAiError("AI document ingest failed: document_id=" + document.getId(), ex);
             document.setIngestStatus(AiDocumentStatus.FAILED);
             document.setErrorMessage(ex.getMessage());
             log.warn("Could not ingest AI document {}", document.getId(), ex);
@@ -484,6 +494,7 @@ public class AiManagementService {
         }
 
         try {
+            realtimeLogPublisher.publishAiInfo("Starting product vector sync: product_id=" + productId + " variant_count=" + variantsPayload.size());
             Map<String, Object> payload = Map.of("variants", variantsPayload);
             HttpRequest httpRequest = aiRequestBuilder("/api/internal/products/sync")
                     .header("Content-Type", "application/json")
@@ -500,6 +511,7 @@ public class AiManagementService {
                 return;
             }
 
+            realtimeLogPublisher.publishAiInfo("Product vector sync completed: product_id=" + productId + " variant_count=" + variantsPayload.size());
             Instant now = Instant.now();
             for (AiProductVectorStatus status : syncingStatuses) {
                 status.setSyncStatus(AiProductVectorSyncStatus.SYNCED);
@@ -508,6 +520,7 @@ public class AiManagementService {
                 status.setErrorMessage(null);
             }
         } catch (Exception ex) {
+            realtimeLogPublisher.publishAiError("Product vector sync failed: product_id=" + productId, ex);
             markProductSyncFailed(syncingStatuses, "Không kết nối được ZenTech-AI tại " + normalizeBaseUrl(aiBaseUrl) + ": " + resolveExceptionMessage(ex));
             log.error("Could not sync product {} to AI service", productId, ex);
         }
@@ -516,6 +529,7 @@ public class AiManagementService {
     @Transactional
     public void reindexProductsToAi() {
         try {
+            realtimeLogPublisher.publishAiInfo("Starting product vector reindex");
             HttpRequest reindexRequest = aiRequestBuilder("/api/internal/products/reindex")
                     .POST(HttpRequest.BodyPublishers.noBody())
                     .build();
@@ -530,12 +544,14 @@ public class AiManagementService {
                 return;
             }
 
+            realtimeLogPublisher.publishAiInfo("Product vector collection cleared, starting product sync batch");
             for (Product product : productRepository.findAll()) {
                 if (!product.isDeleted()) {
                     syncProductToAi(product.getId());
                 }
             }
         } catch (Exception ex) {
+            realtimeLogPublisher.publishAiError("Product vector reindex failed", ex);
             log.error("Failed to reindex products to AI service", ex);
         }
     }
@@ -590,6 +606,7 @@ public class AiManagementService {
         }
 
         try {
+            realtimeLogPublisher.publishAiInfo("Starting product vector verify: item_count=" + statuses.size());
             AiProductVectorVerifyRequest request = AiProductVectorVerifyRequest.builder()
                     .items(statuses.stream()
                             .map(status -> AiProductVectorVerifyRequest.Item.builder()
@@ -619,6 +636,7 @@ public class AiManagementService {
                     .getItems()
                     .stream()
                     .collect(Collectors.toMap(AiProductVectorVerifyResponse.Item::getVariantId, Function.identity()));
+            realtimeLogPublisher.publishAiInfo("Product vector verify completed: item_count=" + statuses.size());
             Instant now = Instant.now();
             for (AiProductVectorStatus status : statuses) {
                 AiProductVectorVerifyResponse.Item item = resultByVariantId.get(status.getVariantId());
@@ -630,6 +648,7 @@ public class AiManagementService {
                 status.setErrorMessage(item.isPresent() ? null : "Không tìm thấy vector trong Qdrant");
             }
         } catch (Exception ex) {
+            realtimeLogPublisher.publishAiError("Product vector verify failed: item_count=" + statuses.size(), ex);
             statuses.forEach(status -> status.setErrorMessage(ex.getMessage()));
             log.warn("Could not verify product vectors", ex);
         }

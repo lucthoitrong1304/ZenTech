@@ -38,6 +38,7 @@ public class ReportManagementService {
     private final OrderDetailRepository orderDetailRepository;
     private final ProductVariantRepository productVariantRepository;
     private final R2StorageService r2StorageService;
+    private final AdminAiRealtimeLogPublisher realtimeLogPublisher;
 
     @Value("${app.ai.base-url:http://localhost:8000}")
     private String aiBaseUrl;
@@ -473,6 +474,7 @@ public class ReportManagementService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             addTraceIdHeader(headers);
             HttpEntity<ReportManagementAIAnalyzeRequest> entity = new HttpEntity<>(aiRequest, headers);
+            realtimeLogPublisher.publishAiInfo("Starting LLM call for management report analysis: category=" + tab.toUpperCase());
             ResponseEntity<ReportManagementAIAnalyzeResponse> response = restTemplate.postForEntity(
                     normalizeAiBaseUrl(aiBaseUrl) + "/management/analyze/report",
                     entity,
@@ -488,8 +490,10 @@ public class ReportManagementService {
                 }
                 aiResponse.setContent(content);
             }
+            realtimeLogPublisher.publishAiInfo("Management report analysis completed: category=" + tab.toUpperCase());
             return aiResponse;
         } catch (Exception e) {
+            realtimeLogPublisher.publishAiError("Management report analysis failed: category=" + tab.toUpperCase(), e);
             throw new RuntimeException("Failed to analyze report using AI module", e);
         }
     }
