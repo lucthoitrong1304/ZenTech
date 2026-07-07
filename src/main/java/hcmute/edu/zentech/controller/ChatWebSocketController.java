@@ -8,6 +8,8 @@ import hcmute.edu.zentech.security.CustomUserDetails;
 import hcmute.edu.zentech.service.ChatMessageService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -21,6 +23,7 @@ import java.util.UUID;
 
 @Controller
 @RequiredArgsConstructor
+@Slf4j
 public class ChatWebSocketController {
     private final ChatMessageService chatMessageService;
     private final SimpMessagingTemplate messagingTemplate;
@@ -35,7 +38,11 @@ public class ChatWebSocketController {
             return;
         }
 
+        String traceId = normalizeTraceId(request.getTraceId());
+        MDC.put("traceId", traceId);
         try {
+            request.setTraceId(traceId);
+            log.info("WebSocket chat message received. conversationId={}", conversationId);
             chatMessageService.sendMessage(
                     conversationId,
                     request,
@@ -43,6 +50,8 @@ public class ChatWebSocketController {
             );
         } catch (RuntimeException ex) {
             sendError(principal, ex.getMessage());
+        } finally {
+            MDC.remove("traceId");
         }
     }
 
@@ -69,6 +78,13 @@ public class ChatWebSocketController {
         } catch (RuntimeException ex) {
             sendError(principal, ex.getMessage());
         }
+    }
+
+    private String normalizeTraceId(String traceId) {
+        if (traceId != null && !traceId.trim().isEmpty()) {
+            return traceId.trim();
+        }
+        return "ZT-" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
     }
 
     private UUID getAccountId(Principal principal) {
