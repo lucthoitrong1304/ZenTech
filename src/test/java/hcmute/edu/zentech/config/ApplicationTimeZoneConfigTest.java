@@ -17,22 +17,22 @@ class ApplicationTimeZoneConfigTest {
     }
 
     @Test
-    void configureDefaultTimeZoneUsesConfiguredUtcPlusSeven() {
+    void configureDefaultTimeZoneUsesConfiguredVietnamZone() {
         ApplicationTimeZoneConfig config = new ApplicationTimeZoneConfig();
-        ReflectionTestUtils.setField(config, "appTimeZone", "GMT+07:00");
+        ReflectionTestUtils.setField(config, "appTimeZone", "Asia/Ho_Chi_Minh");
 
         config.configureDefaultTimeZone();
 
-        assertEquals("GMT+07:00", TimeZone.getDefault().getID());
+        assertEquals("Asia/Ho_Chi_Minh", TimeZone.getDefault().getID());
     }
 
     @Test
-    void configureDefaultTimeZoneFallsBackToUtcPlusSevenWhenInvalid() {
+    void configureDefaultTimeZoneFallsBackToVietnamZoneWhenInvalid() {
         ApplicationTimeZoneConfig config = new ApplicationTimeZoneConfig();
         ReflectionTestUtils.setField(config, "appTimeZone", "not-a-zone");
 
         config.configureDefaultTimeZone();
 
-        assertEquals("GMT+07:00", TimeZone.getDefault().getID());
+        assertEquals("Asia/Ho_Chi_Minh", TimeZone.getDefault().getID());
     }
 }

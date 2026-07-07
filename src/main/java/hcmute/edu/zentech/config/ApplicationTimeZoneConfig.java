@@ -10,7 +10,7 @@ import java.util.TimeZone;
 
 @Configuration
 public class ApplicationTimeZoneConfig {
-    private static final String DEFAULT_TIME_ZONE = "GMT+07:00";
+    private static final String DEFAULT_TIME_ZONE = "Asia/Ho_Chi_Minh";
 
     @Value("${app.time-zone:" + DEFAULT_TIME_ZONE + "}")
     private String appTimeZone;
