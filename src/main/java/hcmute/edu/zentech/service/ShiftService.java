@@ -201,7 +201,12 @@ public class ShiftService {
                     
                     dailyDto.setLeave(eff.isLeave());
                     dailyDto.setWfh(eff.isWfh());
+                    dailyDto.setAfk(eff.isAfk());
                     dailyDto.setSwap(eff.isSwap());
+                    if (eff.isAfk() && eff.leaveRequest() != null) {
+                        dailyDto.setAfkStartTime(eff.leaveRequest().getStartTime());
+                        dailyDto.setAfkEndTime(eff.leaveRequest().getEndTime());
+                    }
                     dailyDto.setOriginalShiftName(eff.originalShift() != null ? eff.originalShift().getName() : null);
                     dailyDto.setOriginalStartTime(eff.originalShift() != null ? eff.originalShift().getStartTime() : null);
                     dailyDto.setOriginalEndTime(eff.originalShift() != null ? eff.originalShift().getEndTime() : null);
@@ -209,6 +214,10 @@ public class ShiftService {
                     
                     if (eff.isLeave()) {
                         dailyDto.setStatusLabel("[Nghỉ phép]");
+                    } else if (eff.isWfh() && eff.isAfk()) {
+                        dailyDto.setStatusLabel("[WFH + AFK]");
+                    } else if (eff.isAfk()) {
+                        dailyDto.setStatusLabel("[AFK]");
                     } else if (eff.isWfh()) {
                         dailyDto.setStatusLabel("[WFH]");
                     } else if (eff.isSwap()) {
@@ -682,7 +691,12 @@ public class ShiftService {
                 
                 dailyDto.setLeave(eff.isLeave());
                 dailyDto.setWfh(eff.isWfh());
+                dailyDto.setAfk(eff.isAfk());
                 dailyDto.setSwap(eff.isSwap());
+                if (eff.isAfk() && eff.leaveRequest() != null) {
+                    dailyDto.setAfkStartTime(eff.leaveRequest().getStartTime());
+                    dailyDto.setAfkEndTime(eff.leaveRequest().getEndTime());
+                }
                 dailyDto.setOriginalShiftName(eff.originalShift() != null ? eff.originalShift().getName() : null);
                 dailyDto.setOriginalStartTime(eff.originalShift() != null ? eff.originalShift().getStartTime() : null);
                 dailyDto.setOriginalEndTime(eff.originalShift() != null ? eff.originalShift().getEndTime() : null);
@@ -690,6 +704,10 @@ public class ShiftService {
                 
                 if (eff.isLeave()) {
                     dailyDto.setStatusLabel("[Nghỉ phép]");
+                } else if (eff.isWfh() && eff.isAfk()) {
+                    dailyDto.setStatusLabel("[WFH + AFK]");
+                } else if (eff.isAfk()) {
+                    dailyDto.setStatusLabel("[AFK]");
                 } else if (eff.isWfh()) {
                     dailyDto.setStatusLabel("[WFH]");
                 } else if (eff.isSwap()) {

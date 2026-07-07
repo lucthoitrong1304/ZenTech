@@ -49,7 +49,16 @@ public class AttendanceCalculator {
                 for (LeaveRequest leave : approvedLeaves) {
                     boolean coversShift = false;
                     if (leave.getTargetShifts() == null || leave.getTargetShifts().isEmpty()) {
-                        coversShift = true;
+                        if (leave.getStartTime() != null && leave.getEndTime() != null) {
+                            coversShift = timeRangesOverlap(
+                                    candidate.shift().getStartTime(),
+                                    candidate.shift().getEndTime(),
+                                    leave.getStartTime(),
+                                    leave.getEndTime()
+                            );
+                        } else {
+                            coversShift = true;
+                        }
                     } else {
                         coversShift = leave.getTargetShifts().stream()
                                 .anyMatch(s -> s.getId().equals(candidate.shift().getId()));
@@ -62,10 +71,14 @@ public class AttendanceCalculator {
                             leaveReq = leave;
                         } else if ("WFH".equals(code)) {
                             isWfh = true;
-                            leaveReq = leave;
+                            if (leaveReq == null) {
+                                leaveReq = leave;
+                            }
                         } else if ("AFK".equals(code)) {
                             isAfk = true;
-                            leaveReq = leave;
+                            if (!isLeave) {
+                                leaveReq = leave;
+                            }
                         }
                     }
                 }
@@ -98,6 +111,13 @@ public class AttendanceCalculator {
         }
 
         return result;
+    }
+
+    private boolean timeRangesOverlap(LocalTime firstStart, LocalTime firstEnd, LocalTime secondStart, LocalTime secondEnd) {
+        if (firstStart == null || firstEnd == null || secondStart == null || secondEnd == null) {
+            return false;
+        }
+        return firstStart.isBefore(secondEnd) && secondStart.isBefore(firstEnd);
     }
 
     private List<EffectiveShift> getRawEffectiveShifts(UUID employeeId, LocalDate date) {

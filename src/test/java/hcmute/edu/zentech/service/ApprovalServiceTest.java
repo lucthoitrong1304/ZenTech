@@ -1,5 +1,6 @@
 package hcmute.edu.zentech.service;
 
+import hcmute.edu.zentech.dto.request.LeaveRequestCreateRequest;
 import hcmute.edu.zentech.model.*;
 import hcmute.edu.zentech.repository.*;
 import hcmute.edu.zentech.security.SecurityContextUtils;
@@ -235,6 +236,62 @@ class ApprovalServiceTest {
         verify(shiftSwapRequestRepository).save(request);
     }
 
+    @Test
+    void requestLeave_allowsAfkInsideAssignedShiftWhenWfhExists() {
+        LeaveType afkType = leaveType(LeaveManagementService.DEFAULT_AFK_CODE, LeaveTypeUnit.HOUR);
+        LeaveRequest existingWfh = activeLeave(leaveType(LeaveManagementService.DEFAULT_WFH_CODE, LeaveTypeUnit.DAY), sourceDate);
+        LeaveRequestCreateRequest request = leaveRequest(afkType, sourceDate, LocalTime.of(9, 0), LocalTime.of(10, 0));
+
+        when(leaveTypeRepository.findById(afkType.getId())).thenReturn(Optional.of(afkType));
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(requester.getId(), sourceDate))
+                .thenReturn(List.of(sourceAssignment));
+        when(leaveRequestRepository.findActiveLeavesForEmployeeInRangeWithDetails(eq(requester.getId()), eq(sourceDate), eq(sourceDate), anyList()))
+                .thenReturn(List.of(existingWfh));
+        when(leaveRequestRepository.save(any(LeaveRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        LeaveRequest saved = approvalService.requestLeave(request);
+
+        assertEquals(ApprovalStatus.PENDING, saved.getStatus());
+        assertEquals(afkType, saved.getLeaveType());
+        verify(leaveRequestRepository).save(any(LeaveRequest.class));
+    }
+
+    @Test
+    void requestLeave_blocksAfkOutsideAssignedShift() {
+        LeaveType afkType = leaveType(LeaveManagementService.DEFAULT_AFK_CODE, LeaveTypeUnit.HOUR);
+        LeaveRequestCreateRequest request = leaveRequest(afkType, sourceDate, LocalTime.of(18, 0), LocalTime.of(19, 0));
+
+        when(leaveTypeRepository.findById(afkType.getId())).thenReturn(Optional.of(afkType));
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(requester.getId(), sourceDate))
+                .thenReturn(List.of(sourceAssignment));
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> approvalService.requestLeave(request));
+
+        assertTrue(ex.getMessage().contains("AFK"));
+        verify(leaveRequestRepository, never()).save(any());
+    }
+
+    @Test
+    void requestLeave_blocksAfkWhenNghiShiftOverlaps() {
+        LeaveType afkType = leaveType(LeaveManagementService.DEFAULT_AFK_CODE, LeaveTypeUnit.HOUR);
+        LeaveRequest existingNghi = activeLeave(leaveType(LeaveManagementService.DEFAULT_NGHI_CODE, LeaveTypeUnit.DAY), sourceDate);
+        existingNghi.setTargetShifts(List.of(sourceShift));
+        LeaveRequestCreateRequest request = leaveRequest(afkType, sourceDate, LocalTime.of(9, 30), LocalTime.of(10, 0));
+
+        when(leaveTypeRepository.findById(afkType.getId())).thenReturn(Optional.of(afkType));
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(requester.getId(), sourceDate))
+                .thenReturn(List.of(sourceAssignment));
+        when(leaveRequestRepository.findActiveLeavesForEmployeeInRangeWithDetails(eq(requester.getId()), eq(sourceDate), eq(sourceDate), anyList()))
+                .thenReturn(List.of(existingNghi));
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> approvalService.requestLeave(request));
+
+        assertTrue(ex.getMessage().contains("AFK"));
+        verify(leaveRequestRepository, never()).save(any());
+    }
+
     private ShiftSwapRequest coverRequest() {
         ShiftSwapRequest request = new ShiftSwapRequest();
         request.setTargetEmployee(targetEmployee);
@@ -294,5 +351,37 @@ class ApprovalServiceTest {
         assignment.setShift(shift);
         assignment.setWorkDate(workDate);
         return assignment;
+    }
+
+    private LeaveType leaveType(String code, LeaveTypeUnit unit) {
+        LeaveType leaveType = new LeaveType();
+        leaveType.setId(UUID.randomUUID());
+        leaveType.setCode(code);
+        leaveType.setName(code);
+        leaveType.setUnit(unit);
+        leaveType.setActive(true);
+        return leaveType;
+    }
+
+    private LeaveRequestCreateRequest leaveRequest(LeaveType leaveType, LocalDate date, LocalTime startTime, LocalTime endTime) {
+        LeaveRequestCreateRequest request = new LeaveRequestCreateRequest();
+        request.setLeaveTypeId(leaveType.getId());
+        request.setStartDate(date);
+        request.setEndDate(date);
+        request.setStartTime(startTime);
+        request.setEndTime(endTime);
+        request.setReason("AFK reason");
+        return request;
+    }
+
+    private LeaveRequest activeLeave(LeaveType leaveType, LocalDate date) {
+        LeaveRequest request = new LeaveRequest();
+        request.setId(UUID.randomUUID());
+        request.setEmployee(requester);
+        request.setLeaveType(leaveType);
+        request.setStartDate(date);
+        request.setEndDate(date);
+        request.setStatus(ApprovalStatus.PENDING);
+        return request;
     }
 }

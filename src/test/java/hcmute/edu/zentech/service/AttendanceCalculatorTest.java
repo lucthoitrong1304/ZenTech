@@ -104,6 +104,50 @@ class AttendanceCalculatorTest {
     }
 
     @Test
+    void resolveEffectiveShifts_marksAfkOnlyOnOverlappingShift() {
+        Shift nightShift = new Shift();
+        nightShift.setId(UUID.randomUUID());
+        nightShift.setName("Night");
+        nightShift.setStartTime(LocalTime.of(18, 0));
+        nightShift.setEndTime(LocalTime.of(22, 0));
+        nightShift.setType(ShiftType.NORMAL);
+
+        EmployeeShift amAssignment = new EmployeeShift();
+        amAssignment.setShift(baseShift);
+        EmployeeShift nightAssignment = new EmployeeShift();
+        nightAssignment.setShift(nightShift);
+
+        LeaveType afkType = LeaveType.builder()
+                .id(UUID.randomUUID())
+                .code("AFK")
+                .name("AFK")
+                .unit(LeaveTypeUnit.HOUR)
+                .active(true)
+                .systemDefault(true)
+                .sortOrder(30)
+                .build();
+        LeaveRequest afk = new LeaveRequest();
+        afk.setLeaveType(afkType);
+        afk.setStartTime(LocalTime.of(9, 0));
+        afk.setEndTime(LocalTime.of(10, 0));
+
+        when(scheduleAdjustmentRepository.findByEmployeeIdAndWorkDateBetween(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(shiftSwapRequestRepository.findApprovedSwapsForEmployeeInRange(any(), any(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), workDate))
+                .thenReturn(List.of(amAssignment, nightAssignment));
+        when(leaveRequestRepository.findLeavesForEmployeeInRangeWithStatuses(eq(employee.getId()), eq(workDate), eq(workDate), anyList()))
+                .thenReturn(List.of(afk));
+
+        List<AttendanceCalculator.EffectiveShift> shifts = attendanceCalculator.resolveEffectiveShifts(employee.getId(), workDate);
+
+        assertEquals(2, shifts.size());
+        assertTrue(shifts.get(0).isAfk());
+        assertFalse(shifts.get(1).isAfk());
+    }
+
+    @Test
     void testCalculateDayAttendance_OnTime() {
         // Arrange
         EmployeeShift es = new EmployeeShift();

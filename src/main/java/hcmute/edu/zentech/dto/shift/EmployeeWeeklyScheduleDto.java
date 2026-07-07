@@ -35,9 +35,13 @@ public class EmployeeWeeklyScheduleDto {
         private boolean isLeave;
         @JsonProperty("isWfh")
         private boolean isWfh;
+        @JsonProperty("isAfk")
+        private boolean isAfk;
         @JsonProperty("isSwap")
         private boolean isSwap;
         private String statusLabel;
+        private LocalTime afkStartTime;
+        private LocalTime afkEndTime;
         private String originalShiftName;
         private LocalTime originalStartTime;
         private LocalTime originalEndTime;

@@ -379,6 +379,10 @@ public class ApprovalService {
         entity.setRequestedAt(LocalDateTime.now());
         entity.setStatus(ApprovalStatus.PENDING);
 
+        if (isAfkLeave(leaveType) && request.getShiftIds() != null && !request.getShiftIds().isEmpty()) {
+            throw new RuntimeException("AFK không hỗ trợ chọn ca. Vui lòng nhập khung giờ AFK.");
+        }
+
         if (request.getShiftIds() != null && !request.getShiftIds().isEmpty()) {
             if (!request.getStartDate().equals(request.getEndDate())) {
                 throw new RuntimeException("Chỉ hỗ trợ chọn ca nghỉ khi nghỉ phép trong cùng một ngày.");
@@ -390,6 +394,7 @@ public class ApprovalService {
             entity.setTargetShifts(shifts);
         }
 
+        validateAfkWithinAssignedShift(employee, entity);
         validateLeaveRequestDoesNotOverlap(employee, entity);
         leaveManagementService.ensureQuotas(employee, request.getStartDate().getYear());
 
@@ -549,7 +554,31 @@ public class ApprovalService {
         }
     }
 
+    private void validateAfkWithinAssignedShift(Employee employee, LeaveRequest candidate) {
+        if (!isAfkLeave(candidate)) {
+            return;
+        }
+
+        List<EmployeeShift> assignments = employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), candidate.getStartDate());
+        boolean inAssignedWorkingShift = assignments.stream()
+                .map(EmployeeShift::getShift)
+                .filter(Objects::nonNull)
+                .filter(shift -> shift.getType() != ShiftType.OFF)
+                .filter(shift -> shift.getStartTime() != null && shift.getEndTime() != null)
+                .anyMatch(shift -> timeRangeContains(shift.getStartTime(), shift.getEndTime(), candidate.getStartTime(), candidate.getEndTime()));
+
+        if (!inAssignedWorkingShift) {
+            throw new RuntimeException("Khung giờ AFK phải nằm trong ca làm việc của bạn.");
+        }
+    }
+
     private boolean leaveRequestsOverlap(LeaveRequest candidate, LeaveRequest existing) {
+        if (isAfkLeave(candidate)) {
+            return afkLeaveOverlaps(candidate, existing);
+        }
+        if (isWfhLeave(candidate) && isAfkLeave(existing)) {
+            return false;
+        }
         if (candidate.getLeaveType().getUnit() == LeaveTypeUnit.HOUR) {
             return hourLeaveOverlaps(candidate, existing);
         }
@@ -557,6 +586,27 @@ public class ApprovalService {
             return shiftLeaveOverlaps(candidate, existing);
         }
         return true;
+    }
+
+    private boolean afkLeaveOverlaps(LeaveRequest candidate, LeaveRequest existing) {
+        if (isWfhLeave(existing)) {
+            return false;
+        }
+        if (isAfkLeave(existing)) {
+            return timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), existing.getStartTime(), existing.getEndTime());
+        }
+        if (!isNghiLeave(existing)) {
+            return false;
+        }
+        if (existing.getTargetShifts() == null || existing.getTargetShifts().isEmpty()) {
+            if (existing.getStartTime() == null || existing.getEndTime() == null) {
+                return true;
+            }
+            return timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), existing.getStartTime(), existing.getEndTime());
+        }
+        return existing.getTargetShifts().stream()
+                .filter(shift -> shift != null && shift.getStartTime() != null && shift.getEndTime() != null)
+                .anyMatch(shift -> timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), shift.getStartTime(), shift.getEndTime()));
     }
 
     private boolean shiftLeaveOverlaps(LeaveRequest candidate, LeaveRequest existing) {
@@ -596,13 +646,50 @@ public class ApprovalService {
         return firstStart.isBefore(secondEnd) && secondStart.isBefore(firstEnd);
     }
 
+    private boolean timeRangeContains(LocalTime containerStart, LocalTime containerEnd, LocalTime innerStart, LocalTime innerEnd) {
+        if (containerStart == null || containerEnd == null || innerStart == null || innerEnd == null) {
+            return false;
+        }
+        return !innerStart.isBefore(containerStart) && !innerEnd.isAfter(containerEnd);
+    }
+
     private List<ApprovalStatus> activeLeaveStatuses() {
         return List.of(ApprovalStatus.PENDING, ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING);
     }
 
+    private boolean isAfkLeave(LeaveRequest request) {
+        return request != null && isAfkLeave(request.getLeaveType());
+    }
+
+    private boolean isAfkLeave(LeaveType leaveType) {
+        return hasLeaveTypeCode(leaveType, LeaveManagementService.DEFAULT_AFK_CODE);
+    }
+
+    private boolean isNghiLeave(LeaveRequest request) {
+        return request != null && hasLeaveTypeCode(request.getLeaveType(), LeaveManagementService.DEFAULT_NGHI_CODE);
+    }
+
+    private boolean isWfhLeave(LeaveRequest request) {
+        return request != null && isWfhLeave(request.getLeaveType());
+    }
+
+    private boolean isWfhLeave(LeaveType leaveType) {
+        return hasLeaveTypeCode(leaveType, LeaveManagementService.DEFAULT_WFH_CODE);
+    }
+
+    private boolean hasLeaveTypeCode(LeaveType leaveType, String code) {
+        return leaveType != null && leaveType.getCode() != null && leaveType.getCode().equalsIgnoreCase(code);
+    }
+
     private String duplicateLeaveMessage(LeaveRequest candidate) {
+        if (isAfkLeave(candidate)) {
+            return String.format("Khung giờ AFK %s - %s ngày %s đã có yêu cầu AFK/nghỉ trùng thời gian.",
+                    candidate.getStartTime(),
+                    candidate.getEndTime(),
+                    candidate.getStartDate());
+        }
         if (candidate.getLeaveType().getUnit() == LeaveTypeUnit.HOUR) {
-            return String.format("Khung gio %s - %s ngay %s da co yeu cau nghi dang cho/da duyet.",
+            return String.format("Khung giờ %s - %s ngày %s đã có yêu cầu nghỉ đang chờ/đã duyệt.",
                     candidate.getStartTime(),
                     candidate.getEndTime(),
                     candidate.getStartDate());
@@ -612,10 +699,10 @@ public class ApprovalService {
                     .map(Shift::getName)
                     .filter(Objects::nonNull)
                     .findFirst()
-                    .orElse("da chon");
-            return String.format("Ca %s ngay %s da co yeu cau nghi dang cho/da duyet.", shiftName, candidate.getStartDate());
+                    .orElse("đã chọn");
+            return String.format("Ca %s ngày %s đã có yêu cầu nghỉ đang chờ/đã duyệt.", shiftName, candidate.getStartDate());
         }
-        return String.format("Ngay %s den %s da co yeu cau nghi dang cho/da duyet.", candidate.getStartDate(), candidate.getEndDate());
+        return String.format("Ngày %s đến %s đã có yêu cầu nghỉ đang chờ/đã duyệt.", candidate.getStartDate(), candidate.getEndDate());
     }
 
     private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift) {
