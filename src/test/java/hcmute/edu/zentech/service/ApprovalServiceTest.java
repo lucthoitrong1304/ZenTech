@@ -8,6 +8,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -21,6 +22,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -290,6 +292,36 @@ class ApprovalServiceTest {
 
         assertTrue(ex.getMessage().contains("AFK"));
         verify(leaveRequestRepository, never()).save(any());
+    }
+
+    @Test
+    void cancelApprovedLeave_sendsPendingCancelNotificationToManagers() {
+        LeaveRequest request = activeLeave(leaveType(LeaveManagementService.DEFAULT_NGHI_CODE, LeaveTypeUnit.DAY), sourceDate);
+        request.setStatus(ApprovalStatus.APPROVED);
+        AccountUser manager = new AccountUser();
+        manager.setId(UUID.randomUUID());
+
+        when(leaveRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(leaveRequestRepository.save(any(LeaveRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(accountUserRepository.findByRoleInAndIsActiveTrue(any())).thenReturn(List.of(manager));
+
+        approvalService.cancelLeaveRequest(request.getId());
+
+        assertEquals(ApprovalStatus.CANCEL_PENDING, request.getStatus());
+
+        ArgumentCaptor<String> titleCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
+        verify(notificationService).createNotification(
+                eq(manager.getId()),
+                titleCaptor.capture(),
+                contentCaptor.capture(),
+                eq(NotificationType.REQUEST_SUBMITTED),
+                eq(request.getId())
+        );
+        assertEquals("Yêu cầu hủy nghỉ phép", titleCaptor.getValue());
+        assertFalse(titleCaptor.getValue().contains("đã duyệt"));
+        assertTrue(contentCaptor.getValue().contains("đang chờ duyệt"));
+        assertFalse(contentCaptor.getValue().contains("đã được duyệt"));
     }
 
     private ShiftSwapRequest coverRequest() {
