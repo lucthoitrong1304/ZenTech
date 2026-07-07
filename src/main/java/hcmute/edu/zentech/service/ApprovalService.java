@@ -803,8 +803,8 @@ public class ApprovalService {
             List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
                     List.of(Role.ADMIN, Role.MANAGER, Role.OWNER)
             );
-            String title = "Yêu cầu hủy nghỉ phép đã duyệt";
-            String content = String.format("Nhân viên %s yêu cầu hủy đơn nghỉ phép từ %s đến %s đã được duyệt.", 
+            String title = "Yêu cầu hủy nghỉ phép";
+            String content = String.format("Nhân viên %s yêu cầu hủy đơn nghỉ phép từ %s đến %s, đang chờ duyệt.",
                     request.getEmployee().getFullName(), request.getStartDate(), request.getEndDate());
             for (AccountUser mgr : managers) {
                 notificationService.createNotification(
@@ -842,8 +842,8 @@ public class ApprovalService {
             List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
                     List.of(Role.ADMIN, Role.MANAGER, Role.OWNER)
             );
-            String title = "Yêu cầu hủy đổi ca đã duyệt";
-            String content = String.format("Nhân viên %s yêu cầu hủy đơn đổi ca ngày %s đã được duyệt.", 
+            String title = "Yêu cầu hủy đổi ca";
+            String content = String.format("Nhân viên %s yêu cầu hủy đơn đổi ca ngày %s, đang chờ duyệt.",
                     request.getRequester().getFullName(), request.getWorkDate());
             for (AccountUser mgr : managers) {
                 notificationService.createNotification(
@@ -878,8 +878,8 @@ public class ApprovalService {
             List<AccountUser> managers = accountUserRepository.findByRoleInAndIsActiveTrue(
                     List.of(Role.ADMIN, Role.MANAGER, Role.OWNER)
             );
-            String title = "Yêu cầu hủy chỉnh công đã duyệt";
-            String content = String.format("Nhân viên %s yêu cầu hủy đơn chỉnh công ngày %s đã được duyệt.", 
+            String title = "Yêu cầu hủy chỉnh công";
+            String content = String.format("Nhân viên %s yêu cầu hủy đơn chỉnh công ngày %s, đang chờ duyệt.",
                     request.getEmployee().getFullName(), request.getWorkDate());
             for (AccountUser mgr : managers) {
                 notificationService.createNotification(
