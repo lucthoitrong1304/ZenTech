@@ -138,10 +138,10 @@ public class AiToolController {
     @GetMapping("/catalog/overview")
     public ResponseEntity<ApiResponse<CatalogOverviewDto>> getCatalogOverview(
             @RequestParam(required = false) String categoryName,
-            @RequestParam(defaultValue = "3") int productsPerCategory,
+            @RequestParam(defaultValue = "5") int productsPerCategory,
             @RequestParam(defaultValue = "true") boolean includeEmpty
     ) {
-        int safeLimit = Math.max(1, Math.min(productsPerCategory, 5));
+        int safeLimit = Math.max(1, Math.min(productsPerCategory, 100));
         List<ProductCategory> allCategories = productCategoryRepository.findAllWithParent().stream()
                 .filter(ProductCategory::isVisible)
                 .toList();
