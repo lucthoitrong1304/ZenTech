@@ -261,4 +261,46 @@ class ChatConversationServiceTest {
         verify(conversationRepository, never()).save(any());
         verify(notificationService, never()).createNotification(any(), any(), any(), any(), any());
     }
+
+    @Test
+    void reopenConversationReactivatesCustomerParticipant() {
+        Customer customer = conversation.getCustomer();
+        conversation.setStatus(ConversationStatus.CLOSED);
+        conversation.setClosedAt(java.time.Instant.now());
+        customerParticipant.setReferenceId(customer.getId());
+        customerParticipant.setStatus(ParticipantStatus.LEFT);
+        when(chatParticipantService.getCurrentCustomer()).thenReturn(customer);
+
+        ConversationResponse response = chatConversationService.reopenConversation(conversationId);
+
+        assertThat(response.getStatus()).isEqualTo(ConversationStatus.WAITING_FOR_AGENT);
+        assertThat(conversation.getStatus()).isEqualTo(ConversationStatus.WAITING_FOR_AGENT);
+        assertThat(conversation.getClosedAt()).isNull();
+        verify(chatParticipantService).ensureCustomerOwnsConversation(conversation, customer.getId());
+        verify(chatParticipantService).addOrUpdateParticipant(
+                conversation,
+                ParticipantType.CUSTOMER,
+                customer.getId(),
+                ParticipantStatus.ACTIVE
+        );
+        verify(chatParticipantService).makeBotSilent(conversation);
+        verify(conversationRepository).save(conversation);
+        verify(messagingTemplate).convertAndSend("/topic/conversations." + conversationId, response);
+        verify(messagingTemplate).convertAndSend("/topic/management.chat.queue", response);
+    }
+
+    @Test
+    void reopenConversationRejectsNonClosedConversation() {
+        Customer customer = conversation.getCustomer();
+        conversation.setStatus(ConversationStatus.WAITING_FOR_AGENT);
+        when(chatParticipantService.getCurrentCustomer()).thenReturn(customer);
+
+        assertThatThrownBy(() -> chatConversationService.reopenConversation(conversationId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(chatParticipantService).ensureCustomerOwnsConversation(conversation, customer.getId());
+        verify(chatParticipantService, never()).addOrUpdateParticipant(any(), any(), any(), any());
+        verify(chatParticipantService, never()).makeBotSilent(any());
+        verify(conversationRepository, never()).save(any());
+    }
 }
