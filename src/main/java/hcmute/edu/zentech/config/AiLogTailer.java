@@ -28,6 +28,10 @@ public class AiLogTailer {
 
     @Value("${app.dashboard.zone-id:Asia/Ho_Chi_Minh}")
     private String dashboardZoneId;
+
+    @Value("${app.ai.log-file:../docker/logs/ai.log}")
+    private String aiLogFilePath;
+
     private Thread tailerThread;
     private volatile boolean running = true;
 
@@ -39,7 +43,7 @@ public class AiLogTailer {
 
     @PostConstruct
     public void startTailing() {
-        log.info("[AiLogTailer] Starting tailer thread for ai.log");
+        log.info("[AiLogTailer] Starting tailer thread for ai.log. configuredPath={}", aiLogFilePath);
         tailerThread = new Thread(this::tailLogFile, "AiLogTailer-Thread");
         tailerThread.setDaemon(true);
         tailerThread.start();
@@ -55,11 +59,13 @@ public class AiLogTailer {
     }
 
     private void tailLogFile() {
-        File logFile = new File("../docker/logs/ai.log");
+        File logFile = resolveLogFile();
+        log.info("[AiLogTailer] Resolved ai.log path: {}", logFile.getAbsolutePath());
         long lastKnownPosition = 0;
 
         // Wait until log file exists
         while (running && !logFile.exists()) {
+            log.warn("[AiLogTailer] Waiting for ai.log file: {}", logFile.getAbsolutePath());
             try {
                 Thread.sleep(2000);
             } catch (InterruptedException e) {
@@ -104,6 +110,27 @@ public class AiLogTailer {
                 break;
             }
         }
+    }
+
+    private File resolveLogFile() {
+        File configuredFile = new File(aiLogFilePath);
+        if (configuredFile.exists() || configuredFile.isAbsolute()) {
+            return configuredFile;
+        }
+
+        File[] candidates = {
+                configuredFile,
+                new File("docker/logs/ai.log"),
+                new File("../docker/logs/ai.log")
+        };
+
+        for (File candidate : candidates) {
+            if (candidate.exists()) {
+                return candidate;
+            }
+        }
+
+        return configuredFile;
     }
 
     private Instant parseAiLogTimestamp(String rawTime) {
