@@ -1,0 +1,100 @@
+classDiagram
+direction LR
+
+class Product {
+  +UUID id
+  +String productName
+  +String specifications
+  +String compatibility
+  +String boxContents
+  +String supportInfo
+  +Instant createdAt
+  +Instant updatedAt
+  +boolean deleted
+  +Instant deletedAt
+  +String representativeImageKey
+  +List~String~ imageKeys
+  +ProductGroup productGroup
+  +Set~ProductVariant~ variants
+  +Set~ProductCategory~ categories
+}
+
+class ProductVariant {
+  +UUID id
+  +double originalPrice
+  +Double salePrice
+  +String name
+  +String nameColor
+  +String colorCode
+  +Instant saleStartAt
+  +Instant saleEndAt
+  +int stockQuantity
+  +int faultyQuantity
+  +boolean deleted
+  +Instant deletedAt
+  +Product product
+}
+
+class ProductGroup {
+  +UUID id
+  +String groupName
+  +String description
+  +Instant updatedAt
+  +boolean deleted
+  +Instant deletedAt
+  +Set~Product~ products
+}
+
+class ProductCategory {
+  +UUID id
+  +String categoryName
+  +String shortName
+  +Integer priority
+  +boolean visible
+  +ProductCategory parent
+  +Set~ProductCategory~ children
+  +Set~Product~ productList
+}
+
+class InventoryTransaction {
+  +UUID id
+  +ProductVariant productVariant
+  +InventoryTransactionType type
+  +int quantity
+  +InventoryTransactionReason reason
+  +String note
+  +Instant createdAt
+  +UUID createdBy
+  +String targetWarehouse
+}
+
+class InventoryTransactionType {
+  <<enumeration>>
+  IMPORT
+  EXPORT
+}
+
+class InventoryTransactionReason {
+  <<enumeration>>
+  NEW_STOCK
+  ADJUSTMENT_ADD
+  CUSTOMER_ORDER
+  DAMAGED
+  ADJUSTMENT_SUB
+  RETURN
+}
+
+%% Entity relationships mapped by JPA
+ProductGroup "1" o-- "0..*" Product : groups
+Product "1" *-- "0..*" ProductVariant : variants
+Product "0..*" -- "0..*" ProductCategory : product_category_mapping
+ProductCategory "0..1" o-- "0..*" ProductCategory : parent/children
+ProductVariant "1" o-- "0..*" InventoryTransaction : inventory history
+
+%% Enum fields stored as strings
+InventoryTransaction --> InventoryTransactionType : type
+InventoryTransaction --> InventoryTransactionReason : reason
+
+%% Extra DB table from ElementCollection:
+%% Product.imageKeys maps to product_images(product_id, image_key, image_order).
+%% ProductReview is excluded from this core catalog-inventory diagram because it belongs to customer feedback.

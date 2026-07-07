@@ -10,10 +10,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,6 +32,8 @@ public class ApprovalService {
     private final NotificationService notificationService;
     private final ShiftRepository shiftRepository;
     private final EmployeeShiftRepository employeeShiftRepository;
+    private final ShiftOverlapService shiftOverlapService;
+    private final AttendanceEventRepository attendanceEventRepository;
 
     private void checkLock(LocalDate date) {
         Optional<PayPeriod> p = payPeriodRepository.findPeriodActiveAt(date);
@@ -165,6 +168,9 @@ public class ApprovalService {
             targetShift = shiftRepository.findById(request.getTargetShift().getId())
                     .orElseThrow(() -> new RuntimeException("Không tìm thấy ca đổi."));
         }
+        if (request.getType() == SwapRequestType.SWAP && (request.getTargetWorkDate() == null || targetShift == null)) {
+            throw new RuntimeException("Vui lòng chọn ngày và ca đối ứng khi tạo yêu cầu đổi ca.");
+        }
 
         // 1. Time constraints check (must request before shift start time)
         LocalDateTime now = LocalDateTime.now();
@@ -179,6 +185,19 @@ public class ApprovalService {
             if (!now.isBefore(targetShiftStart)) {
                 throw new RuntimeException("Không thể tạo yêu cầu cho ca làm việc đối ứng đã bắt đầu hoặc đã qua.");
             }
+        }
+
+        EmployeeShift sourceAssignment = resolveAssignment(employee.getId(), request.getWorkDate(), shift, "ca nguồn");
+        assertNoAttendanceEvents(sourceAssignment, "ca nguồn");
+
+        if (request.getType() == SwapRequestType.SWAP && targetShift != null && request.getTargetWorkDate() != null) {
+            EmployeeShift targetAssignment = resolveAssignment(
+                    targetEmployee.getId(),
+                    request.getTargetWorkDate(),
+                    targetShift,
+                    "ca đối ứng"
+            );
+            assertNoAttendanceEvents(targetAssignment, "ca đối ứng");
         }
 
         // 2. Overlap checks
@@ -248,6 +267,13 @@ public class ApprovalService {
         AccountUser user = userId != null ? accountUserRepository.findById(userId).orElse(null) : null;
 
         boolean isCancelRequest = request.getStatus() == ApprovalStatus.CANCEL_PENDING;
+        boolean approvingPendingRequest = !isCancelRequest
+                && request.getStatus() == ApprovalStatus.PENDING
+                && status == ApprovalStatus.APPROVED;
+
+        if (approvingPendingRequest) {
+            assertSwapAssignmentsHaveNoAttendanceEvents(request);
+        }
 
         if (isCancelRequest) {
             if (status == ApprovalStatus.APPROVED) {
@@ -353,6 +379,10 @@ public class ApprovalService {
         entity.setRequestedAt(LocalDateTime.now());
         entity.setStatus(ApprovalStatus.PENDING);
 
+        if (isAfkLeave(leaveType) && request.getShiftIds() != null && !request.getShiftIds().isEmpty()) {
+            throw new RuntimeException("AFK không hỗ trợ chọn ca. Vui lòng nhập khung giờ AFK.");
+        }
+
         if (request.getShiftIds() != null && !request.getShiftIds().isEmpty()) {
             if (!request.getStartDate().equals(request.getEndDate())) {
                 throw new RuntimeException("Chỉ hỗ trợ chọn ca nghỉ khi nghỉ phép trong cùng một ngày.");
@@ -364,9 +394,9 @@ public class ApprovalService {
             entity.setTargetShifts(shifts);
         }
 
+        validateAfkWithinAssignedShift(employee, entity);
+        validateLeaveRequestDoesNotOverlap(employee, entity);
         leaveManagementService.ensureQuotas(employee, request.getStartDate().getYear());
-        BigDecimal requestedAmount = leaveManagementService.calculateAmount(entity);
-        leaveManagementService.assertWithinQuota(employee, leaveType, request.getStartDate().getYear(), requestedAmount, null, true);
 
         LeaveRequest saved = leaveRequestRepository.save(entity);
 
@@ -399,18 +429,6 @@ public class ApprovalService {
         checkLock(request.getEndDate());
 
         boolean isCancelRequest = request.getStatus() == ApprovalStatus.CANCEL_PENDING;
-
-        if (!isCancelRequest && status == ApprovalStatus.APPROVED) {
-            BigDecimal requestedAmount = leaveManagementService.calculateAmount(request);
-            leaveManagementService.assertWithinQuota(
-                    request.getEmployee(),
-                    request.getLeaveType(),
-                    request.getStartDate().getYear(),
-                    requestedAmount,
-                    request.getId(),
-                    false
-            );
-        }
 
         UUID userId = SecurityContextUtils.getCurrentUserId();
         AccountUser user = userId != null ? accountUserRepository.findById(userId).orElse(null) : null;
@@ -521,27 +539,243 @@ public class ApprovalService {
         }
     }
 
-    private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift) {
-        if (newShift.getType() == ShiftType.OFF || newShift.getStartTime() == null || newShift.getEndTime() == null) {
+    private void validateLeaveRequestDoesNotOverlap(Employee employee, LeaveRequest candidate) {
+        List<LeaveRequest> activeLeaves = leaveRequestRepository.findActiveLeavesForEmployeeInRangeWithDetails(
+                employee.getId(),
+                candidate.getStartDate(),
+                candidate.getEndDate(),
+                activeLeaveStatuses()
+        );
+
+        for (LeaveRequest existing : activeLeaves) {
+            if (leaveRequestsOverlap(candidate, existing)) {
+                throw new RuntimeException(duplicateLeaveMessage(candidate));
+            }
+        }
+    }
+
+    private void validateAfkWithinAssignedShift(Employee employee, LeaveRequest candidate) {
+        if (!isAfkLeave(candidate)) {
             return;
         }
 
+        List<EmployeeShift> assignments = employeeShiftRepository.findByEmployeeIdAndWorkDate(employee.getId(), candidate.getStartDate());
+        boolean inAssignedWorkingShift = assignments.stream()
+                .map(EmployeeShift::getShift)
+                .filter(Objects::nonNull)
+                .filter(shift -> shift.getType() != ShiftType.OFF)
+                .filter(shift -> shift.getStartTime() != null && shift.getEndTime() != null)
+                .anyMatch(shift -> timeRangeContains(shift.getStartTime(), shift.getEndTime(), candidate.getStartTime(), candidate.getEndTime()));
+
+        if (!inAssignedWorkingShift) {
+            throw new RuntimeException("Khung giờ AFK phải nằm trong ca làm việc của bạn.");
+        }
+    }
+
+    private boolean leaveRequestsOverlap(LeaveRequest candidate, LeaveRequest existing) {
+        if (isAfkLeave(candidate)) {
+            return afkLeaveOverlaps(candidate, existing);
+        }
+        if (isWfhLeave(candidate) && isAfkLeave(existing)) {
+            return false;
+        }
+        if (candidate.getLeaveType().getUnit() == LeaveTypeUnit.HOUR) {
+            return hourLeaveOverlaps(candidate, existing);
+        }
+        if (candidate.getTargetShifts() != null && !candidate.getTargetShifts().isEmpty()) {
+            return shiftLeaveOverlaps(candidate, existing);
+        }
+        return true;
+    }
+
+    private boolean afkLeaveOverlaps(LeaveRequest candidate, LeaveRequest existing) {
+        if (isWfhLeave(existing)) {
+            return false;
+        }
+        if (isAfkLeave(existing)) {
+            return timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), existing.getStartTime(), existing.getEndTime());
+        }
+        if (!isNghiLeave(existing)) {
+            return false;
+        }
+        if (existing.getTargetShifts() == null || existing.getTargetShifts().isEmpty()) {
+            if (existing.getStartTime() == null || existing.getEndTime() == null) {
+                return true;
+            }
+            return timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), existing.getStartTime(), existing.getEndTime());
+        }
+        return existing.getTargetShifts().stream()
+                .filter(shift -> shift != null && shift.getStartTime() != null && shift.getEndTime() != null)
+                .anyMatch(shift -> timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), shift.getStartTime(), shift.getEndTime()));
+    }
+
+    private boolean shiftLeaveOverlaps(LeaveRequest candidate, LeaveRequest existing) {
+        if (existing.getTargetShifts() == null || existing.getTargetShifts().isEmpty()) {
+            if (existing.getStartTime() != null && existing.getEndTime() != null) {
+                return candidate.getTargetShifts().stream()
+                        .filter(shift -> shift != null && shift.getStartTime() != null && shift.getEndTime() != null)
+                        .anyMatch(shift -> timeRangesOverlap(shift.getStartTime(), shift.getEndTime(), existing.getStartTime(), existing.getEndTime()));
+            }
+            return true;
+        }
+
+        return candidate.getTargetShifts().stream()
+                .filter(shift -> shift != null && shift.getId() != null)
+                .anyMatch(candidateShift -> existing.getTargetShifts().stream()
+                        .filter(existingShift -> existingShift != null && existingShift.getId() != null)
+                        .anyMatch(existingShift -> candidateShift.getId().equals(existingShift.getId())));
+    }
+
+    private boolean hourLeaveOverlaps(LeaveRequest candidate, LeaveRequest existing) {
+        if (existing.getTargetShifts() == null || existing.getTargetShifts().isEmpty()) {
+            if (existing.getStartTime() == null || existing.getEndTime() == null) {
+                return true;
+            }
+            return timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), existing.getStartTime(), existing.getEndTime());
+        }
+
+        return existing.getTargetShifts().stream()
+                .filter(shift -> shift != null && shift.getStartTime() != null && shift.getEndTime() != null)
+                .anyMatch(shift -> timeRangesOverlap(candidate.getStartTime(), candidate.getEndTime(), shift.getStartTime(), shift.getEndTime()));
+    }
+
+    private boolean timeRangesOverlap(LocalTime firstStart, LocalTime firstEnd, LocalTime secondStart, LocalTime secondEnd) {
+        if (firstStart == null || firstEnd == null || secondStart == null || secondEnd == null) {
+            return false;
+        }
+        return firstStart.isBefore(secondEnd) && secondStart.isBefore(firstEnd);
+    }
+
+    private boolean timeRangeContains(LocalTime containerStart, LocalTime containerEnd, LocalTime innerStart, LocalTime innerEnd) {
+        if (containerStart == null || containerEnd == null || innerStart == null || innerEnd == null) {
+            return false;
+        }
+        return !innerStart.isBefore(containerStart) && !innerEnd.isAfter(containerEnd);
+    }
+
+    private List<ApprovalStatus> activeLeaveStatuses() {
+        return List.of(ApprovalStatus.PENDING, ApprovalStatus.APPROVED, ApprovalStatus.CANCEL_PENDING);
+    }
+
+    private boolean isAfkLeave(LeaveRequest request) {
+        return request != null && isAfkLeave(request.getLeaveType());
+    }
+
+    private boolean isAfkLeave(LeaveType leaveType) {
+        return hasLeaveTypeCode(leaveType, LeaveManagementService.DEFAULT_AFK_CODE);
+    }
+
+    private boolean isNghiLeave(LeaveRequest request) {
+        return request != null && hasLeaveTypeCode(request.getLeaveType(), LeaveManagementService.DEFAULT_NGHI_CODE);
+    }
+
+    private boolean isWfhLeave(LeaveRequest request) {
+        return request != null && isWfhLeave(request.getLeaveType());
+    }
+
+    private boolean isWfhLeave(LeaveType leaveType) {
+        return hasLeaveTypeCode(leaveType, LeaveManagementService.DEFAULT_WFH_CODE);
+    }
+
+    private boolean hasLeaveTypeCode(LeaveType leaveType, String code) {
+        return leaveType != null && leaveType.getCode() != null && leaveType.getCode().equalsIgnoreCase(code);
+    }
+
+    private String duplicateLeaveMessage(LeaveRequest candidate) {
+        if (isAfkLeave(candidate)) {
+            return String.format("Khung giờ AFK %s - %s ngày %s đã có yêu cầu AFK/nghỉ trùng thời gian.",
+                    candidate.getStartTime(),
+                    candidate.getEndTime(),
+                    candidate.getStartDate());
+        }
+        if (candidate.getLeaveType().getUnit() == LeaveTypeUnit.HOUR) {
+            return String.format("Khung giờ %s - %s ngày %s đã có yêu cầu nghỉ đang chờ/đã duyệt.",
+                    candidate.getStartTime(),
+                    candidate.getEndTime(),
+                    candidate.getStartDate());
+        }
+        if (candidate.getTargetShifts() != null && !candidate.getTargetShifts().isEmpty()) {
+            String shiftName = candidate.getTargetShifts().stream()
+                    .map(Shift::getName)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse("đã chọn");
+            return String.format("Ca %s ngày %s đã có yêu cầu nghỉ đang chờ/đã duyệt.", shiftName, candidate.getStartDate());
+        }
+        return String.format("Ngày %s đến %s đã có yêu cầu nghỉ đang chờ/đã duyệt.", candidate.getStartDate(), candidate.getEndDate());
+    }
+
+    private void validateNoOverlap(UUID employeeId, LocalDate workDate, Shift newShift) {
+        if (!shiftOverlapService.hasCaptureWindow(newShift)) {
+            return;
+        }
+
+        ShiftOverlapService.CaptureWindow newWindow = shiftOverlapService.captureWindow(workDate, newShift);
         List<EmployeeShift> existingAssignments = employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate);
         for (EmployeeShift existing : existingAssignments) {
             Shift existingShift = existing.getShift();
-            if (existingShift == null || existingShift.getType() == ShiftType.OFF
-                    || existingShift.getStartTime() == null || existingShift.getEndTime() == null) {
+            if (!shiftOverlapService.hasCaptureWindow(existingShift)) {
                 continue;
             }
-            boolean overlaps = newShift.getStartTime().isBefore(existingShift.getEndTime())
-                    && newShift.getEndTime().isAfter(existingShift.getStartTime());
-            if (overlaps) {
+            ShiftOverlapService.CaptureWindow existingWindow = shiftOverlapService.captureWindow(workDate, existingShift);
+            if (shiftOverlapService.overlapsInclusive(newWindow, existingWindow)) {
                 throw new RuntimeException(String.format(
-                        "Ca làm việc mới bị trùng thời gian với ca %s của nhân viên ngày %s.",
+                        "Ca làm việc mới %s (%s) bị trùng vùng chấm công với ca %s (%s) của nhân viên ngày %s.",
+                        newShift.getName(),
+                        shiftOverlapService.format(newWindow),
                         existingShift.getName(),
+                        shiftOverlapService.format(existingWindow),
                         workDate
                 ));
             }
+        }
+    }
+
+    private void assertSwapAssignmentsHaveNoAttendanceEvents(ShiftSwapRequest request) {
+        EmployeeShift sourceAssignment = resolveAssignment(
+                request.getRequester().getId(),
+                request.getWorkDate(),
+                request.getShift(),
+                "ca nguồn"
+        );
+        assertNoAttendanceEvents(sourceAssignment, "ca nguồn");
+
+        if (request.getType() == SwapRequestType.SWAP) {
+            if (request.getTargetEmployee() == null || request.getTargetWorkDate() == null || request.getTargetShift() == null) {
+                throw new RuntimeException("Yêu cầu đổi ca thiếu ngày hoặc ca đối ứng.");
+            }
+            EmployeeShift targetAssignment = resolveAssignment(
+                    request.getTargetEmployee().getId(),
+                    request.getTargetWorkDate(),
+                    request.getTargetShift(),
+                    "ca đối ứng"
+            );
+            assertNoAttendanceEvents(targetAssignment, "ca đối ứng");
+        }
+    }
+
+    private EmployeeShift resolveAssignment(UUID employeeId, LocalDate workDate, Shift shift, String label) {
+        if (employeeId == null || workDate == null || shift == null || shift.getId() == null) {
+            throw new RuntimeException("Không xác định được " + label + " trong lịch làm việc.");
+        }
+
+        List<EmployeeShift> matches = employeeShiftRepository.findByEmployeeIdAndWorkDate(employeeId, workDate).stream()
+                .filter(assignment -> assignment.getShift() != null)
+                .filter(assignment -> Objects.equals(shift.getId(), assignment.getShift().getId()))
+                .toList();
+
+        if (matches.isEmpty()) {
+            throw new RuntimeException("Ca " + label + " không tồn tại trong lịch của nhân viên ngày " + workDate + ".");
+        }
+        if (matches.size() > 1) {
+            throw new RuntimeException("Không xác định được duy nhất " + label + " trong lịch của nhân viên ngày " + workDate + ".");
+        }
+        return matches.get(0);
+    }
+
+    private void assertNoAttendanceEvents(EmployeeShift assignment, String label) {
+        if (attendanceEventRepository.existsByEmployeeShift_Id(assignment.getId())) {
+            throw new RuntimeException("Ca " + label + " đã phát sinh dữ liệu chấm công. Vui lòng thực hiện qua luồng điều chỉnh công hoặc điều chỉnh lịch có lý do.");
         }
     }
 

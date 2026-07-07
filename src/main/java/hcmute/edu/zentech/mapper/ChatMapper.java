@@ -115,6 +115,8 @@ public class ChatMapper {
                                 .name(item.getName())
                                 .imageUrl(r2StorageService.getPublicUrl(item.getImageKey()))
                                 .price(item.getPrice())
+                                .originalPrice(item.getOriginalPrice())
+                                .salePrice(item.getSalePrice())
                                 .stock(item.getStock())
                                 .productUrl("/products/" + item.getProductId())
                                 .build())

@@ -13,6 +13,8 @@ import java.util.UUID;
 @Repository
 public interface AttendanceEventRepository extends JpaRepository<AttendanceEvent, UUID> {
 
+    boolean existsByEmployeeShift_Id(UUID employeeShiftId);
+
     List<AttendanceEvent> findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(
             UUID employeeId, LocalDateTime start, LocalDateTime end);
 

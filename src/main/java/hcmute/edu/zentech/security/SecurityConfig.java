@@ -72,7 +72,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/me/**").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
-                        .requestMatchers("/internal/ai/**").permitAll()
+                        .requestMatchers("/api/ai/tools/**").authenticated()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/api/payments/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/business-events").permitAll()

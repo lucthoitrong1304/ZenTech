@@ -17,6 +17,7 @@ import hcmute.edu.zentech.model.ProductReview;
 import hcmute.edu.zentech.model.ProductVariant;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -179,11 +180,13 @@ public class ProductMapper {
         if (product.getVariants() != null && !product.getVariants().isEmpty()) {
             ProductVariant representativeVariant = product.getVariants().stream()
                     .filter(v -> !v.isDeleted())
-                    .min(java.util.Comparator.comparing(ProductVariant::getId, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
+                    .min(java.util.Comparator
+                            .comparing((ProductVariant variant) -> getEffectivePrice(variant, Instant.now()))
+                            .thenComparing(ProductVariant::getId, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
                     .orElse(null);
 
             if (representativeVariant != null) {
-                price = representativeVariant.getSalePrice() != null ? representativeVariant.getSalePrice() : representativeVariant.getOriginalPrice();
+                price = getEffectivePrice(representativeVariant, Instant.now());
             }
 
             stock = product.getVariants().stream()
@@ -243,5 +246,15 @@ public class ProductMapper {
                 .updatedAt(product.getUpdatedAt())
                 .deletedAt(product.getDeletedAt())
                 .build();
+    }
+
+    private double getEffectivePrice(ProductVariant variant, Instant now) {
+        if (variant.getSalePrice() != null
+                && variant.getSalePrice() < variant.getOriginalPrice()
+                && (variant.getSaleStartAt() == null || !now.isBefore(variant.getSaleStartAt()))
+                && (variant.getSaleEndAt() == null || !now.isAfter(variant.getSaleEndAt()))) {
+            return variant.getSalePrice();
+        }
+        return variant.getOriginalPrice();
     }
 }

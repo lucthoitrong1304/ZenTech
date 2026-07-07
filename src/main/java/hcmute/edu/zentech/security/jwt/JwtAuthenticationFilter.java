@@ -37,6 +37,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String jwt = parseJwt(request);
             if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
+                if (isAiToolRequest(request) && !jwtUtils.validateAiToolJwtToken(jwt)) {
+                    filterChain.doFilter(request, response);
+                    return;
+                }
                 String email = jwtUtils.getEmailFromJwtToken(jwt);
                 UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
@@ -58,5 +62,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return headerAuth.substring(7);
         }
         return null;
+    }
+
+    private boolean isAiToolRequest(HttpServletRequest request) {
+        return request.getRequestURI() != null && request.getRequestURI().startsWith("/api/ai/tools/");
     }
 }

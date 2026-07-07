@@ -196,8 +196,9 @@ public class ProductService {
 
         Optional<ProductVariant> representativeVariant = getRepresentativeVariant(product);
         Double originalPrice = representativeVariant.map(ProductVariant::getOriginalPrice).orElse(null);
-        Double salePrice = representativeVariant.map(ProductVariant::getSalePrice).orElse(null);
-        Double effectivePrice = salePrice != null ? salePrice : originalPrice;
+        Instant now = Instant.now();
+        Double salePrice = representativeVariant.map(variant -> getActiveSalePrice(variant, now)).orElse(null);
+        Double effectivePrice = representativeVariant.map(variant -> getEffectivePrice(variant, now)).orElse(null);
         boolean hasComparablePrice = currentEffectivePrice != null && effectivePrice != null;
         Integer stockQuantity = product.getVariants() != null ? product.getVariants().stream()
                 .filter(Objects::nonNull)
@@ -259,14 +260,36 @@ public class ProductService {
         if (product.getVariants() == null || product.getVariants().isEmpty()) {
             return Optional.empty();
         }
+        Instant now = Instant.now();
         return product.getVariants().stream()
                 .filter(Objects::nonNull)
-                .min(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())));
+                .filter(variant -> !variant.isDeleted())
+                .min(Comparator
+                        .comparing((ProductVariant variant) -> getEffectivePrice(variant, now), Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(ProductVariant::getId, Comparator.nullsLast(Comparator.naturalOrder())));
     }
 
     // Lấy giá tiền của sản phẩm biến thể.
     private Double getEffectivePrice(ProductVariant variant) {
-        return variant.getSalePrice() != null ? variant.getSalePrice() : variant.getOriginalPrice();
+        return getEffectivePrice(variant, Instant.now());
+    }
+
+    private Double getEffectivePrice(ProductVariant variant, Instant now) {
+        if (variant == null) {
+            return null;
+        }
+        Double salePrice = getActiveSalePrice(variant, now);
+        return salePrice != null ? salePrice : variant.getOriginalPrice();
+    }
+
+    private Double getActiveSalePrice(ProductVariant variant, Instant now) {
+        if (variant.getSalePrice() != null
+                && variant.getSalePrice() < variant.getOriginalPrice()
+                && (variant.getSaleStartAt() == null || !now.isBefore(variant.getSaleStartAt()))
+                && (variant.getSaleEndAt() == null || !now.isAfter(variant.getSaleEndAt()))) {
+            return variant.getSalePrice();
+        }
+        return null;
     }
 
     private String getRepresentativeImageUrl(Product product) {
@@ -367,8 +390,9 @@ public class ProductService {
     private ProductListingView buildListingView(Product product) {
         Optional<ProductVariant> representativeVariant = getRepresentativeVariant(product);
         Double originalPrice = representativeVariant.map(ProductVariant::getOriginalPrice).orElse(null);
-        Double salePrice = representativeVariant.map(ProductVariant::getSalePrice).orElse(null);
-        Double effectivePrice = salePrice != null ? salePrice : originalPrice;
+        Instant now = Instant.now();
+        Double salePrice = representativeVariant.map(variant -> getActiveSalePrice(variant, now)).orElse(null);
+        Double effectivePrice = representativeVariant.map(variant -> getEffectivePrice(variant, now)).orElse(null);
         Integer stockQuantity = product.getVariants() != null ? product.getVariants().stream()
                 .filter(Objects::nonNull)
                 .filter(variant -> !variant.isDeleted())
