@@ -16,4 +16,9 @@ public class AttendanceEventTimelineResponse {
     private LocalDateTime timestamp;
     private String source;
     private String faceImageUrl;
+    private Double latitude;
+    private Double longitude;
+    private Double accuracyMeters;
+    private Boolean locationValid;
+    private Double distanceMeters;
 }
