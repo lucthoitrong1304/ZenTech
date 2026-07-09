@@ -88,6 +88,39 @@ public class AttendanceLocationPolicyService {
                 .orElse(false);
     }
 
+    @Transactional(readOnly = true)
+    public Double distanceToAllowedAreaMeters(Double latitude, Double longitude) {
+        if (!isValidLatitude(latitude) || !isValidLongitude(longitude)) {
+            return null;
+        }
+
+        Optional<AttendanceLocationPolicy> policyOpt = policyRepository.findTopByOrderByUpdatedAtDesc();
+        if (policyOpt.isEmpty() || !policyOpt.get().isEnabled()) {
+            return null;
+        }
+
+        AttendanceLocationPolicy policy = policyOpt.get();
+        if (policy.getShapeType() == AttendanceLocationShapeType.CIRCLE) {
+            if (!isValidLatitude(policy.getCenterLatitude()) || !isValidLongitude(policy.getCenterLongitude())) {
+                return null;
+            }
+            return haversineMeters(policy.getCenterLatitude(), policy.getCenterLongitude(), latitude, longitude);
+        }
+
+        if (policy.getShapeType() == AttendanceLocationShapeType.POLYGON) {
+            List<GeoPointDto> points = readPolygonPoints(policy.getPolygonPointsJson());
+            if (points.size() < 3) {
+                return null;
+            }
+            if (isInsidePolygon(points, latitude, longitude)) {
+                return 0.0;
+            }
+            return distanceToPolygonMeters(points, latitude, longitude);
+        }
+
+        return null;
+    }
+
     private AttendanceLocationPolicyDto defaultPolicy() {
         AttendanceLocationPolicyDto dto = new AttendanceLocationPolicyDto();
         dto.setEnabled(false);
@@ -202,6 +235,37 @@ public class AttendanceLocationPolicyService {
         double minLng = Math.min(a.getLng(), b.getLng()) - 1e-10;
         double maxLng = Math.max(a.getLng(), b.getLng()) + 1e-10;
         return latitude >= minLat && latitude <= maxLat && longitude >= minLng && longitude <= maxLng;
+    }
+
+    private double distanceToPolygonMeters(List<GeoPointDto> points, double latitude, double longitude) {
+        double minDistance = Double.MAX_VALUE;
+        for (int i = 0; i < points.size(); i++) {
+            GeoPointDto start = points.get(i);
+            GeoPointDto end = points.get((i + 1) % points.size());
+            minDistance = Math.min(minDistance, distanceToSegmentMeters(start, end, latitude, longitude));
+        }
+        return minDistance == Double.MAX_VALUE ? 0.0 : minDistance;
+    }
+
+    private double distanceToSegmentMeters(GeoPointDto start, GeoPointDto end, double latitude, double longitude) {
+        double latScale = EARTH_RADIUS_METERS * Math.PI / 180.0;
+        double lngScale = latScale * Math.cos(Math.toRadians(latitude));
+        double ax = (start.getLng() - longitude) * lngScale;
+        double ay = (start.getLat() - latitude) * latScale;
+        double bx = (end.getLng() - longitude) * lngScale;
+        double by = (end.getLat() - latitude) * latScale;
+
+        double dx = bx - ax;
+        double dy = by - ay;
+        double lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared == 0.0) {
+            return Math.sqrt(ax * ax + ay * ay);
+        }
+
+        double projection = Math.max(0.0, Math.min(1.0, -(ax * dx + ay * dy) / lengthSquared));
+        double closestX = ax + projection * dx;
+        double closestY = ay + projection * dy;
+        return Math.sqrt(closestX * closestX + closestY * closestY);
     }
 
     private boolean isValidLatitude(Double latitude) {

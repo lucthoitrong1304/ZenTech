@@ -25,6 +25,7 @@ public class AttendanceCalculator {
     private final AttendanceAdjustmentRepository attendanceAdjustmentRepository;
     private final LeaveRequestRepository leaveRequestRepository;
     private final R2StorageService r2StorageService;
+    private final AttendanceLocationPolicyService attendanceLocationPolicyService;
 
     public Shift resolveEffectiveShift(UUID employeeId, LocalDate date) {
         return resolveEffectiveShifts(employeeId, date).stream()
@@ -330,6 +331,11 @@ public class AttendanceCalculator {
                         .timestamp(entry.timestamp())
                         .source(entry.source())
                         .faceImageUrl(entry.faceImageKey() != null ? r2StorageService.getPresignedGetUrl(entry.faceImageKey()) : null)
+                        .latitude(entry.latitude())
+                        .longitude(entry.longitude())
+                        .accuracyMeters(entry.accuracyMeters())
+                        .locationValid(entry.locationValid())
+                        .distanceMeters(resolveDistanceMeters(entry))
                         .build())
                 .toList();
 
@@ -441,19 +447,35 @@ public class AttendanceCalculator {
         for (AttendanceEvent event : rawEvents) {
             if (assignmentId != null && event.getEmployeeShift() != null
                     && assignmentId.equals(event.getEmployeeShift().getId())) {
-                entries.add(new TimeEntry(event.getTimestamp(), event.getEventType().name(), event.getSource(), event.getFaceImageKey()));
+                entries.add(TimeEntry.fromEvent(event));
             } else if (event.getEmployeeShift() == null && isWithinShiftCaptureRange(event.getTimestamp().toLocalTime(), shift)) {
-                entries.add(new TimeEntry(event.getTimestamp(), event.getEventType().name(), event.getSource(), event.getFaceImageKey()));
+                entries.add(TimeEntry.fromEvent(event));
             }
         }
 
         for (AttendanceAdjustment adjustment : adjustments) {
             if (isWithinShiftCaptureRange(adjustment.getProposedTime(), shift)) {
-                entries.add(new TimeEntry(LocalDateTime.of(date, adjustment.getProposedTime()), adjustment.getType().name(), "APPROVED_ADJUSTMENT", null));
+                entries.add(new TimeEntry(
+                        LocalDateTime.of(date, adjustment.getProposedTime()),
+                        adjustment.getType().name(),
+                        "APPROVED_ADJUSTMENT",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null
+                ));
             }
         }
 
         return entries;
+    }
+
+    private Double resolveDistanceMeters(TimeEntry entry) {
+        if (entry.latitude() == null || entry.longitude() == null || attendanceLocationPolicyService == null) {
+            return null;
+        }
+        return attendanceLocationPolicyService.distanceToAllowedAreaMeters(entry.latitude(), entry.longitude());
     }
 
     private String classifyCheckIn(Shift shift, LocalTime checkIn) {
@@ -603,6 +625,27 @@ public class AttendanceCalculator {
         return value == null ? fallback : Math.max(0, value);
     }
 
-    private record TimeEntry(LocalDateTime timestamp, String type, String source, String faceImageKey) {
+    private record TimeEntry(
+            LocalDateTime timestamp,
+            String type,
+            String source,
+            String faceImageKey,
+            Double latitude,
+            Double longitude,
+            Double accuracyMeters,
+            Boolean locationValid
+    ) {
+        private static TimeEntry fromEvent(AttendanceEvent event) {
+            return new TimeEntry(
+                    event.getTimestamp(),
+                    event.getEventType().name(),
+                    event.getSource(),
+                    event.getFaceImageKey(),
+                    event.getLatitude(),
+                    event.getLongitude(),
+                    event.getAccuracyMeters(),
+                    event.getLocationValid()
+            );
+        }
     }
 }
