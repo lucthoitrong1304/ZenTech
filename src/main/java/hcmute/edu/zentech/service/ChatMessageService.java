@@ -162,6 +162,7 @@ public class ChatMessageService {
     private PersistedMessage persistMessage(UUID conversationId, ChatMessageRequest request, UUID accountId) {
         Conversation conversation = getConversation(conversationId);
         ensureNotClosed(conversation);
+        ensureNotArchived(conversation);
         ConversationParticipant participant = chatParticipantService.getActiveParticipant(conversationId, accountId);
         validateMessage(request, accountId);
 
@@ -361,6 +362,12 @@ public class ChatMessageService {
     private void ensureNotClosed(Conversation conversation) {
         if (conversation.getStatus() == ConversationStatus.CLOSED) {
             throw new AccessDeniedException("Conversation is closed");
+        }
+    }
+
+    private void ensureNotArchived(Conversation conversation) {
+        if (conversation.isArchived()) {
+            throw new AccessDeniedException("Conversation is archived");
         }
     }
 

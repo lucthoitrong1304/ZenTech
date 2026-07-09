@@ -49,6 +49,8 @@ public class ChatMapper {
                 .createdAt(conversation.getCreatedAt())
                 .updatedAt(conversation.getUpdatedAt())
                 .closedAt(conversation.getClosedAt())
+                .archived(conversation.isArchived())
+                .archivedAt(conversation.getArchivedAt())
                 .participants(participants == null ? List.of() : participants.stream()
                         .map(this::toParticipantResponse)
                         .toList())

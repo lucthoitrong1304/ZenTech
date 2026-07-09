@@ -17,13 +17,13 @@ import java.util.UUID;
 @Repository
 public interface ConversationRepository extends JpaRepository<Conversation, UUID> {
     @EntityGraph(attributePaths = {"customer", "customer.userInfo"})
-    Optional<Conversation> findFirstByCustomer_IdAndStatusInOrderByUpdatedAtDesc(
+    Optional<Conversation> findFirstByCustomer_IdAndStatusInAndArchivedFalseOrderByUpdatedAtDesc(
             UUID customerId,
             Collection<ConversationStatus> statuses
     );
 
     @EntityGraph(attributePaths = {"customer", "customer.userInfo"})
-    Page<Conversation> findByCustomer_IdOrderByUpdatedAtDesc(UUID customerId, Pageable pageable);
+    Page<Conversation> findByCustomer_IdAndArchivedOrderByUpdatedAtDesc(UUID customerId, boolean archived, Pageable pageable);
 
     @EntityGraph(attributePaths = {"customer", "customer.userInfo"})
     @Query(
@@ -32,7 +32,8 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
                     FROM Conversation c
                     JOIN c.customer customer
                     JOIN customer.userInfo account
-                    WHERE (:status IS NULL OR c.status = :status)
+                    WHERE c.archived = false
+                      AND (:status IS NULL OR c.status = :status)
                       AND (:keyword IS NULL
                         OR LOWER(customer.fullName) LIKE LOWER(CONCAT('%', :keyword, '%'))
                         OR LOWER(account.email) LIKE LOWER(CONCAT('%', :keyword, '%'))
@@ -43,7 +44,8 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
                     FROM Conversation c
                     JOIN c.customer customer
                     JOIN customer.userInfo account
-                    WHERE (:status IS NULL OR c.status = :status)
+                    WHERE c.archived = false
+                      AND (:status IS NULL OR c.status = :status)
                       AND (:keyword IS NULL
                         OR LOWER(customer.fullName) LIKE LOWER(CONCAT('%', :keyword, '%'))
                         OR LOWER(account.email) LIKE LOWER(CONCAT('%', :keyword, '%'))
