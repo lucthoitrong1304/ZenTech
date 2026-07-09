@@ -8,7 +8,9 @@ import hcmute.edu.zentech.service.ChatConversationService;
 import hcmute.edu.zentech.service.ChatMessageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -41,9 +43,10 @@ public class ChatController {
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<PageResponse<ConversationResponse>>> getMyConversations(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "false") boolean archived
     ) {
-        return ResponseEntity.ok(ApiResponse.success(chatConversationService.getMyConversations(page, size)));
+        return ResponseEntity.ok(ApiResponse.success(chatConversationService.getMyConversations(page, size, archived)));
     }
 
     // Lấy danh sách message trong 1 cuộc hội thoại.
@@ -93,5 +96,21 @@ public class ChatController {
     @PostMapping("/{conversationId}/reopen")
     public ResponseEntity<ApiResponse<ConversationResponse>> reopenConversation(@PathVariable UUID conversationId) {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.reopenConversation(conversationId)));
+    }
+
+    @PatchMapping("/{conversationId}/archive")
+    public ResponseEntity<ApiResponse<ConversationResponse>> archiveConversation(@PathVariable UUID conversationId) {
+        return ResponseEntity.ok(ApiResponse.success(chatConversationService.archiveConversation(conversationId)));
+    }
+
+    @PatchMapping("/{conversationId}/unarchive")
+    public ResponseEntity<ApiResponse<ConversationResponse>> unarchiveConversation(@PathVariable UUID conversationId) {
+        return ResponseEntity.ok(ApiResponse.success(chatConversationService.unarchiveConversation(conversationId)));
+    }
+
+    @DeleteMapping("/{conversationId}")
+    public ResponseEntity<ApiResponse<Void>> deleteConversation(@PathVariable UUID conversationId) {
+        chatConversationService.deleteConversation(conversationId);
+        return ResponseEntity.ok(ApiResponse.success(null));
     }
 }

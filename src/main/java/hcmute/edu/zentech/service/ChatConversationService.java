@@ -19,9 +19,13 @@ import hcmute.edu.zentech.service.NotificationService;
 import hcmute.edu.zentech.model.ChatMessage;
 import hcmute.edu.zentech.model.ChatMessageType;
 import hcmute.edu.zentech.repository.ChatMessageRepository;
+import hcmute.edu.zentech.repository.ChatMessageAttachmentRepository;
+import hcmute.edu.zentech.repository.ChatMessageRecommendationRepository;
 import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import hcmute.edu.zentech.repository.EmployeeRepository;
+import hcmute.edu.zentech.repository.NotificationRepository;
+import hcmute.edu.zentech.repository.TransferRequestRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -57,6 +61,10 @@ public class ChatConversationService {
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationService notificationService;
     private final ChatMessageRepository chatMessageRepository;
+    private final ChatMessageAttachmentRepository chatMessageAttachmentRepository;
+    private final ChatMessageRecommendationRepository chatMessageRecommendationRepository;
+    private final TransferRequestRepository transferRequestRepository;
+    private final NotificationRepository notificationRepository;
 
     @Transactional
     public ConversationResponse createOrGetCurrentCustomerConversation() {
@@ -64,7 +72,7 @@ public class ChatConversationService {
         Customer customer = chatParticipantService.getCurrentCustomer();
 
         // Hàm map chỉ được gọi khi hàm find trả về 1 đối tượng conversation.
-        return conversationRepository.findFirstByCustomer_IdAndStatusInOrderByUpdatedAtDesc(customer.getId(), ACTIVE_STATUSES)
+        return conversationRepository.findFirstByCustomer_IdAndStatusInAndArchivedFalseOrderByUpdatedAtDesc(customer.getId(), ACTIVE_STATUSES)
                 .map(this::toConversationResponse)
                 .orElseGet(() -> createConversation(customer));
     }
@@ -76,11 +84,12 @@ public class ChatConversationService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<ConversationResponse> getMyConversations(int page, int size) {
+    public PageResponse<ConversationResponse> getMyConversations(int page, int size, boolean archived) {
         Customer customer = chatParticipantService.getCurrentCustomer();
         Pageable pageable = PageRequest.of(normalizePage(page), normalizeSize(size), defaultSort());
-        Page<Conversation> conversationPage = conversationRepository.findByCustomer_IdOrderByUpdatedAtDesc(
+        Page<Conversation> conversationPage = conversationRepository.findByCustomer_IdAndArchivedOrderByUpdatedAtDesc(
                 customer.getId(),
+                archived,
                 pageable
         );
         return PageResponse.from(conversationPage, conversationPage.getContent().stream()
@@ -113,6 +122,7 @@ public class ChatConversationService {
         Customer customer = chatParticipantService.getCurrentCustomer();
         Conversation conversation = getConversation(conversationId);
         chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
+        ensureNotArchived(conversation);
 
         if (conversation.getStatus() != ConversationStatus.BOT_CONSULTING) {
             return toConversationResponse(conversation);
@@ -124,6 +134,9 @@ public class ChatConversationService {
     @Transactional
     public Optional<ConversationResponse> requestAgentFromAi(UUID conversationId) {
         Conversation conversation = getConversation(conversationId);
+        if (conversation.isArchived()) {
+            return Optional.empty();
+        }
         if (conversation.getStatus() != ConversationStatus.BOT_CONSULTING) {
             return Optional.empty();
         }
@@ -162,6 +175,7 @@ public class ChatConversationService {
         ChatParticipantService.StaffIdentity staff = chatParticipantService.getCurrentStaffIdentity();
         Conversation conversation = getConversation(conversationId);
         ensureNotClosed(conversation);
+        ensureNotArchived(conversation);
 
         chatParticipantService.addOrUpdateParticipant(
                 conversation,
@@ -209,6 +223,7 @@ public class ChatConversationService {
         ChatParticipantService.StaffIdentity staff = chatParticipantService.getCurrentStaffIdentity();
         Conversation conversation = getConversation(conversationId);
         ensureNotClosed(conversation);
+        ensureNotArchived(conversation);
 
         chatParticipantService.addOrUpdateParticipant(
                 conversation,
@@ -227,6 +242,7 @@ public class ChatConversationService {
         ChatParticipantService.StaffIdentity staff = chatParticipantService.getCurrentStaffIdentity();
         Conversation conversation = getConversation(conversationId);
         ensureNotClosed(conversation);
+        ensureNotArchived(conversation);
 
         ConversationParticipant participant = chatParticipantService.getActiveParticipant(
                 conversationId,
@@ -269,6 +285,7 @@ public class ChatConversationService {
                         customer -> chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId()),
                         chatParticipantService::getCurrentStaffIdentity
                 );
+        ensureNotArchived(conversation);
 
         conversation.setStatus(ConversationStatus.CLOSED);
         conversation.setClosedAt(Instant.now());
@@ -286,6 +303,7 @@ public class ChatConversationService {
         ChatParticipantService.StaffIdentity currentStaff = chatParticipantService.getCurrentStaffIdentity();
         Conversation conversation = getConversation(conversationId);
         ensureNotClosed(conversation);
+        ensureNotArchived(conversation);
         
         chatParticipantService.getActiveParticipant(conversationId, currentStaff.accountId());
 
@@ -352,6 +370,7 @@ public class ChatConversationService {
         Customer customer = chatParticipantService.getCurrentCustomer();
         Conversation conversation = getConversation(conversationId);
         chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
+        ensureNotArchived(conversation);
 
         if (conversation.getStatus() != ConversationStatus.CLOSED) {
             throw new AccessDeniedException("Conversation is not closed");
@@ -373,6 +392,56 @@ public class ChatConversationService {
         messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
         messagingTemplate.convertAndSend("/topic/management.chat.queue", response);
         return response;
+    }
+
+    @Transactional
+    public ConversationResponse archiveConversation(UUID conversationId) {
+        Customer customer = chatParticipantService.getCurrentCustomer();
+        Conversation conversation = getConversation(conversationId);
+        chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
+
+        if (!conversation.isArchived()) {
+            Instant now = Instant.now();
+            conversation.setArchived(true);
+            conversation.setArchivedAt(now);
+            conversation.setUpdatedAt(now);
+        }
+
+        ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        return response;
+    }
+
+    @Transactional
+    public ConversationResponse unarchiveConversation(UUID conversationId) {
+        Customer customer = chatParticipantService.getCurrentCustomer();
+        Conversation conversation = getConversation(conversationId);
+        chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
+
+        if (conversation.isArchived()) {
+            conversation.setArchived(false);
+            conversation.setArchivedAt(null);
+            conversation.setUpdatedAt(Instant.now());
+        }
+
+        ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
+        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        return response;
+    }
+
+    @Transactional
+    public void deleteConversation(UUID conversationId) {
+        Customer customer = chatParticipantService.getCurrentCustomer();
+        Conversation conversation = getConversation(conversationId);
+        chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
+
+        transferRequestRepository.deleteByConversationId(conversationId);
+        notificationRepository.deleteByReferenceId(conversationId);
+        chatMessageAttachmentRepository.deleteByConversationId(conversationId);
+        chatMessageRecommendationRepository.deleteByConversationId(conversationId);
+        chatMessageRepository.deleteByConversationId(conversationId);
+        participantRepository.deleteByConversationId(conversationId);
+        conversationRepository.delete(conversation);
     }
 
     @Transactional(readOnly = true)
@@ -455,6 +524,12 @@ public class ChatConversationService {
     private void ensureNotClosed(Conversation conversation) {
         if (conversation.getStatus() == ConversationStatus.CLOSED) {
             throw new AccessDeniedException("Conversation is closed");
+        }
+    }
+
+    private void ensureNotArchived(Conversation conversation) {
+        if (conversation.isArchived()) {
+            throw new AccessDeniedException("Conversation is archived");
         }
     }
 

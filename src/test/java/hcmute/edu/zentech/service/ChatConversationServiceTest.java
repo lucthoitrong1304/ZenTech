@@ -15,9 +15,13 @@ import hcmute.edu.zentech.model.ParticipantStatus;
 import hcmute.edu.zentech.model.ParticipantType;
 import hcmute.edu.zentech.model.Role;
 import hcmute.edu.zentech.repository.ChatMessageRepository;
+import hcmute.edu.zentech.repository.ChatMessageAttachmentRepository;
+import hcmute.edu.zentech.repository.ChatMessageRecommendationRepository;
 import hcmute.edu.zentech.repository.ConversationParticipantRepository;
 import hcmute.edu.zentech.repository.ConversationRepository;
 import hcmute.edu.zentech.repository.EmployeeRepository;
+import hcmute.edu.zentech.repository.NotificationRepository;
+import hcmute.edu.zentech.repository.TransferRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,6 +62,14 @@ class ChatConversationServiceTest {
     private NotificationService notificationService;
     @Mock
     private ChatMessageRepository chatMessageRepository;
+    @Mock
+    private ChatMessageAttachmentRepository chatMessageAttachmentRepository;
+    @Mock
+    private ChatMessageRecommendationRepository chatMessageRecommendationRepository;
+    @Mock
+    private TransferRequestRepository transferRequestRepository;
+    @Mock
+    private NotificationRepository notificationRepository;
 
     @InjectMocks
     private ChatConversationService chatConversationService;
@@ -301,6 +313,68 @@ class ChatConversationServiceTest {
         verify(chatParticipantService).ensureCustomerOwnsConversation(conversation, customer.getId());
         verify(chatParticipantService, never()).addOrUpdateParticipant(any(), any(), any(), any());
         verify(chatParticipantService, never()).makeBotSilent(any());
+        verify(conversationRepository, never()).save(any());
+    }
+
+    @Test
+    void archiveConversationMarksOwnedConversationArchived() {
+        Customer customer = conversation.getCustomer();
+        when(chatParticipantService.getCurrentCustomer()).thenReturn(customer);
+
+        ConversationResponse response = chatConversationService.archiveConversation(conversationId);
+
+        assertThat(response.getId()).isEqualTo(conversationId);
+        assertThat(conversation.isArchived()).isTrue();
+        assertThat(conversation.getArchivedAt()).isNotNull();
+        verify(chatParticipantService).ensureCustomerOwnsConversation(conversation, customer.getId());
+        verify(conversationRepository).save(conversation);
+        verify(messagingTemplate).convertAndSend("/topic/conversations." + conversationId, response);
+    }
+
+    @Test
+    void unarchiveConversationRestoresOwnedConversation() {
+        Customer customer = conversation.getCustomer();
+        conversation.setArchived(true);
+        conversation.setArchivedAt(java.time.Instant.now());
+        when(chatParticipantService.getCurrentCustomer()).thenReturn(customer);
+
+        ConversationResponse response = chatConversationService.unarchiveConversation(conversationId);
+
+        assertThat(response.getId()).isEqualTo(conversationId);
+        assertThat(conversation.isArchived()).isFalse();
+        assertThat(conversation.getArchivedAt()).isNull();
+        verify(chatParticipantService).ensureCustomerOwnsConversation(conversation, customer.getId());
+        verify(conversationRepository).save(conversation);
+    }
+
+    @Test
+    void deleteConversationRemovesConversationDependenciesBeforeConversation() {
+        Customer customer = conversation.getCustomer();
+        when(chatParticipantService.getCurrentCustomer()).thenReturn(customer);
+
+        chatConversationService.deleteConversation(conversationId);
+
+        verify(chatParticipantService).ensureCustomerOwnsConversation(conversation, customer.getId());
+        verify(transferRequestRepository).deleteByConversationId(conversationId);
+        verify(notificationRepository).deleteByReferenceId(conversationId);
+        verify(chatMessageAttachmentRepository).deleteByConversationId(conversationId);
+        verify(chatMessageRecommendationRepository).deleteByConversationId(conversationId);
+        verify(chatMessageRepository).deleteByConversationId(conversationId);
+        verify(participantRepository).deleteByConversationId(conversationId);
+        verify(conversationRepository).delete(conversation);
+    }
+
+    @Test
+    void requestAgentRejectsArchivedConversation() {
+        Customer customer = conversation.getCustomer();
+        conversation.setStatus(ConversationStatus.BOT_CONSULTING);
+        conversation.setArchived(true);
+        when(chatParticipantService.getCurrentCustomer()).thenReturn(customer);
+
+        assertThatThrownBy(() -> chatConversationService.requestAgent(conversationId))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verify(chatParticipantService).ensureCustomerOwnsConversation(conversation, customer.getId());
         verify(conversationRepository, never()).save(any());
     }
 }

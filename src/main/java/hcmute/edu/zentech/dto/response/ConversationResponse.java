@@ -26,5 +26,7 @@ public class ConversationResponse {
     private Instant createdAt;
     private Instant updatedAt;
     private Instant closedAt;
+    private boolean archived;
+    private Instant archivedAt;
     private List<ParticipantResponse> participants;
 }

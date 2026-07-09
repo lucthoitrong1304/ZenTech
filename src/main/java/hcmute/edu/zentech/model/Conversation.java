@@ -29,6 +29,7 @@ import java.util.UUID;
         indexes = {
                 @Index(name = "idx_conversations_customer", columnList = "customer_id"),
                 @Index(name = "idx_conversations_status", columnList = "status"),
+                @Index(name = "idx_conversations_archived", columnList = "archived"),
                 @Index(name = "idx_conversations_updated_at", columnList = "updated_at")
         }
 )
@@ -63,4 +64,11 @@ public class Conversation {
 
     @Column(name = "closed_at")
     private Instant closedAt;
+
+    @Builder.Default
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean archived = false;
+
+    @Column(name = "archived_at")
+    private Instant archivedAt;
 }
