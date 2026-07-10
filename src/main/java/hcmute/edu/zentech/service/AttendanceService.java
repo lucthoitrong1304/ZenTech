@@ -10,6 +10,7 @@ import hcmute.edu.zentech.repository.*;
 import hcmute.edu.zentech.security.SecurityContextUtils;
 import hcmute.edu.zentech.utils.FaceEncryptionUtils;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AttendanceService {
     private final EmployeeRepository employeeRepository;
     private final AttendanceRepository attendanceRepository;
@@ -91,15 +93,9 @@ public class AttendanceService {
         List<AttendanceEvent> todayEvents = attendanceEventRepository
                 .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
         
-        AttendanceEventType type = AttendanceEventType.CHECK_IN;
-        if (!todayEvents.isEmpty()) {
-            AttendanceEvent lastEvent = todayEvents.get(todayEvents.size() - 1);
-            if (lastEvent.getEventType() == AttendanceEventType.CHECK_IN) {
-                type = AttendanceEventType.CHECK_OUT;
-            }
-        }
-
-        AttendanceCalculator.EffectiveShift selectedShift = resolveAttendanceShift(employee, now, type, todayEvents);
+        AttendanceAction attendanceAction = resolveAttendanceAction(employee, now, todayEvents);
+        AttendanceEventType type = attendanceAction.type();
+        AttendanceCalculator.EffectiveShift selectedShift = attendanceAction.shift();
 
         if (selectedShift.isLeave()) {
             throw new RuntimeException("Bạn đã được duyệt nghỉ phép ca " + selectedShift.shift().getName() + ".");
@@ -170,22 +166,8 @@ public class AttendanceService {
         // Thành công: Reset rate limit
         resetFailedCheckIn(accountId);
 
-        // Upload face image if provided
-        String faceImageKey = null;
-        if (request.getFaceImage() != null && !request.getFaceImage().isEmpty()) {
-            try {
-                String base64Image = request.getFaceImage();
-                if (base64Image.contains(",")) {
-                    base64Image = base64Image.split(",")[1];
-                }
-                byte[] decodedBytes = Base64.getDecoder().decode(base64Image.trim());
-                String uniqueFilename = "checkin-" + UUID.randomUUID() + ".jpg";
-                faceImageKey = "uploads/attendance-faces/" + employee.getId() + "/" + uniqueFilename;
-                r2StorageService.uploadFileBytes(faceImageKey, decodedBytes, "image/jpeg");
-            } catch (Exception e) {
-                System.err.println("Failed to upload face image to R2: " + e.getMessage());
-            }
-        }
+        FaceImageUploadResult faceImageUpload = uploadAttendanceFaceImage(request.getFaceImage(), employee.getId());
+        String faceImageKey = faceImageUpload.key();
 
         AttendanceEvent event = new AttendanceEvent();
         event.setEmployee(employee);
@@ -193,8 +175,13 @@ public class AttendanceService {
         event.setTimestamp(now);
         event.setEventType(type);
         event.setSource("FACE");
-        event.setDetails(((selectedShift.isWfh() || hasWfhRequest) ? "[WFH] " : "") + "Xác thực khuôn mặt thành công. Ca: " + selectedShift.shift().getName()
-                + ". (Khoảng cách: " + String.format("%.4f", minDistance) + ")");
+        String eventDetails = ((selectedShift.isWfh() || hasWfhRequest) ? "[WFH] " : "")
+                + "Xác thực khuôn mặt thành công. Ca: " + selectedShift.shift().getName()
+                + ". (Khoảng cách: " + String.format("%.4f", minDistance) + ")";
+        if (faceImageUpload.marker() != null) {
+            eventDetails += " " + faceImageUpload.marker();
+        }
+        event.setDetails(eventDetails);
         event.setLatitude(request.getLatitude());
         event.setLongitude(request.getLongitude());
         event.setAccuracyMeters(request.getAccuracyMeters());
@@ -219,12 +206,59 @@ public class AttendanceService {
         return mapToResponse(employee);
     }
 
-    private AttendanceCalculator.EffectiveShift resolveAttendanceShift(
+    private record FaceImageUploadResult(String key, String marker) {}
+
+    private FaceImageUploadResult uploadAttendanceFaceImage(String faceImage, UUID employeeId) {
+        if (faceImage == null || faceImage.isBlank()) {
+            log.warn("Face check-in image missing for employee {}", employeeId);
+            return new FaceImageUploadResult(null, "[FACE_IMAGE_MISSING]");
+        }
+
+        if ("data:,".equals(faceImage) || !faceImage.startsWith("data:image/jpeg;base64,")) {
+            log.warn("Invalid face check-in image payload for employee {}: prefix/format is invalid", employeeId);
+            return new FaceImageUploadResult(null, "[FACE_IMAGE_INVALID]");
+        }
+
+        String base64Image = faceImage.substring("data:image/jpeg;base64,".length()).trim();
+        if (base64Image.isBlank()) {
+            log.warn("Invalid face check-in image payload for employee {}: base64 content is blank", employeeId);
+            return new FaceImageUploadResult(null, "[FACE_IMAGE_INVALID]");
+        }
+
+        try {
+            byte[] decodedBytes = Base64.getDecoder().decode(base64Image);
+            if (decodedBytes.length == 0) {
+                log.warn("Invalid face check-in image payload for employee {}: decoded image is empty", employeeId);
+                return new FaceImageUploadResult(null, "[FACE_IMAGE_INVALID]");
+            }
+
+            String uniqueFilename = "checkin-" + UUID.randomUUID() + ".jpg";
+            String faceImageKey = "uploads/attendance-faces/" + employeeId + "/" + uniqueFilename;
+            r2StorageService.uploadFileBytes(faceImageKey, decodedBytes, "image/jpeg");
+            return new FaceImageUploadResult(faceImageKey, null);
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid base64 face check-in image for employee {}: {}", employeeId, e.getMessage());
+            return new FaceImageUploadResult(null, "[FACE_IMAGE_INVALID]");
+        } catch (Exception e) {
+            log.error("Failed to upload face check-in image to R2 for employee {}: {}", employeeId, e.getMessage(), e);
+            return new FaceImageUploadResult(null, "[FACE_IMAGE_UPLOAD_FAILED]");
+        }
+    }
+
+    private record AttendanceAction(AttendanceEventType type, AttendanceCalculator.EffectiveShift shift) {}
+
+    private AttendanceAction resolveAttendanceAction(
             Employee employee,
             LocalDateTime timestamp,
-            AttendanceEventType nextType,
             List<AttendanceEvent> todayEvents
     ) {
+        if (!todayEvents.isEmpty()) {
+            AttendanceEvent lastEvent = todayEvents.stream().max(java.util.Comparator.comparing(AttendanceEvent::getTimestamp)).orElse(null);
+            if (lastEvent != null && java.time.Duration.between(lastEvent.getTimestamp(), timestamp).abs().toSeconds() <= 10) {
+                throw new RuntimeException("Bạn thao tác quá nhanh. Vui lòng thử lại sau vài giây.");
+            }
+        }
+
         LocalDate workDate = timestamp.toLocalDate();
         LocalTime now = timestamp.toLocalTime();
         List<AttendanceCalculator.EffectiveShift> shifts = attendanceCalculator.resolveEffectiveShifts(employee.getId(), workDate);
@@ -233,68 +267,45 @@ public class AttendanceService {
             throw new RuntimeException("Hôm nay bạn không có ca làm việc.");
         }
 
-        if (nextType == AttendanceEventType.CHECK_OUT) {
-            AttendanceEvent openCheckIn = todayEvents.isEmpty() ? null : todayEvents.get(todayEvents.size() - 1);
-            AttendanceCalculator.EffectiveShift resolved = null;
-            if (openCheckIn != null && openCheckIn.getEmployeeShift() != null) {
-                UUID openAssignmentId = openCheckIn.getEmployeeShift().getId();
-                resolved = shifts.stream()
-                        .filter(item -> item.assignment() != null && item.assignment().getId().equals(openAssignmentId))
-                        .findFirst()
-                        .orElseGet(() -> new AttendanceCalculator.EffectiveShift(openCheckIn.getEmployeeShift(), openCheckIn.getEmployeeShift().getShift()));
-            } else {
-                resolved = shifts.stream()
-                        .filter(item -> isInCaptureRange(now, item.shift()))
-                        .findFirst()
-                        .orElse(shifts.get(shifts.size() - 1));
-            }
+        Optional<AttendanceCalculator.EffectiveShift> currentShiftOpt = shifts.stream()
+                .filter(item -> isInCaptureRange(now, item.shift()))
+                .findFirst();
 
-            // Check if checkout is too late
-            Shift shift = resolved.shift();
-            if (shift.getEndTime() != null) {
-                LocalTime allowedEnd = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
-                if (now.isAfter(allowedEnd)) {
-                    throw new RuntimeException("Đã quá giờ check-out cho phép của ca " + shift.getName() + ". Vui lòng gửi yêu cầu chỉnh công.");
+        if (currentShiftOpt.isEmpty()) {
+            throw new RuntimeException("Hiện tại không nằm trong thời gian điểm danh của bất kỳ ca nào.");
+        }
+
+        AttendanceCalculator.EffectiveShift currentShift = currentShiftOpt.get();
+
+        List<AttendanceEvent> shiftEvents = todayEvents.stream()
+                .filter(e -> {
+                    if (currentShift.assignment() != null && e.getEmployeeShift() != null) {
+                        return currentShift.assignment().getId().equals(e.getEmployeeShift().getId());
+                    }
+                    if (currentShift.assignment() == null && e.getEmployeeShift() == null) {
+                        return isInCaptureRange(e.getTimestamp().toLocalTime(), currentShift.shift());
+                    }
+                    return false;
+                })
+                .sorted(java.util.Comparator.comparing(AttendanceEvent::getTimestamp))
+                .toList();
+
+        long eventCount = 0;
+        AttendanceEvent lastAdded = null;
+        for (AttendanceEvent e : shiftEvents) {
+            if (lastAdded == null) {
+                lastAdded = e;
+                eventCount++;
+            } else {
+                if (java.time.Duration.between(lastAdded.getTimestamp(), e.getTimestamp()).abs().toSeconds() > 10) {
+                    lastAdded = e;
+                    eventCount++;
                 }
             }
-            return resolved;
         }
 
-        Set<UUID> checkedInAssignmentIds = todayEvents.stream()
-                .filter(event -> event.getEventType() == AttendanceEventType.CHECK_IN)
-                .map(AttendanceEvent::getEmployeeShift)
-                .filter(Objects::nonNull)
-                .map(EmployeeShift::getId)
-                .collect(Collectors.toSet());
-
-        // Find shift by matching current capture range first (allows multiple CI/CO in same shift)
-        AttendanceCalculator.EffectiveShift nextShift = shifts.stream()
-                .filter(item -> isInCaptureRange(now, item.shift()))
-                .findFirst()
-                .orElse(null);
-
-        if (nextShift == null) {
-            // Fallback to first unchecked shift
-            nextShift = shifts.stream()
-                    .filter(item -> item.assignment() == null || !checkedInAssignmentIds.contains(item.assignment().getId()))
-                    .findFirst()
-                    .orElse(shifts.get(shifts.size() - 1));
-        }
-
-        Shift shift = nextShift.shift();
-        if (shift.getStartTime() == null || shift.getEndTime() == null) {
-            return nextShift;
-        }
-
-        LocalTime allowedStart = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
-        if (now.isBefore(allowedStart)) {
-            throw new RuntimeException("Chưa tới giờ check-in ca " + shift.getName() + ".");
-        }
-        if (!now.isBefore(shift.getEndTime())) {
-            throw new RuntimeException("Ca " + shift.getName() + " đã kết thúc. Vui lòng gửi yêu cầu chỉnh công.");
-        }
-
-        return nextShift;
+        AttendanceEventType type = (eventCount % 2 == 0) ? AttendanceEventType.CHECK_IN : AttendanceEventType.CHECK_OUT;
+        return new AttendanceAction(type, currentShift);
     }
 
     private boolean isInCaptureRange(LocalTime time, Shift shift) {
@@ -303,7 +314,11 @@ public class AttendanceService {
         }
         LocalTime start = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
         LocalTime end = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
-        return !time.isBefore(start) && !time.isAfter(end);
+        if (!start.isAfter(end)) {
+            return !time.isBefore(start) && !time.isAfter(end);
+        } else {
+            return !time.isBefore(start) || !time.isAfter(end);
+        }
     }
 
     private int defaultInt(Integer value, int fallback) {

@@ -374,12 +374,18 @@ public class AttendanceCalculator {
         String status;
 
         if (checkIn == null) {
-            if (effectiveShift.isLeave() || !approvedLeaves.isEmpty()) {
+            if (effectiveShift.isLeave()) {
                 status = "ABSENT_EXCUSED";
-            } else if (date.equals(LocalDate.now()) && !hasShiftEnded(shift, LocalTime.now())) {
+            } else if (date.isAfter(LocalDate.now())) {
                 status = "NOT_STARTED";
-            } else {
+            } else if (date.isBefore(LocalDate.now())) {
                 status = "ABSENT_UNEXCUSED";
+            } else {
+                if (hasShiftStarted(shift, LocalTime.now())) {
+                    status = "ABSENT_UNEXCUSED";
+                } else {
+                    status = "NOT_STARTED";
+                }
             }
         } else {
             String inStatus = classifyCheckIn(shift, checkIn.toLocalTime());
@@ -388,8 +394,22 @@ public class AttendanceCalculator {
                 lateMinutes = Math.max(0, Duration.between(onTimeEnd, checkIn.toLocalTime()).toMinutes());
             }
 
-            if (checkOut == null) {
+            boolean missingCheckOut = false;
+            if (activeCheckIn != null) {
+                if (!date.equals(LocalDate.now()) || hasShiftEnded(shift, LocalTime.now())) {
+                    missingCheckOut = true;
+                }
+            } else if (checkOut == null) {
+                missingCheckOut = true;
+            }
+
+            if (missingCheckOut) {
                 status = effectiveShift.isWfh() ? "WFH_MISSING_CHECK_OUT" : "MISSING_CHECK_OUT";
+            } else if (activeCheckIn != null && date.equals(LocalDate.now()) && !hasShiftEnded(shift, LocalTime.now())) {
+                status = inStatus;
+                if (effectiveShift.isWfh()) {
+                    status = "WFH_" + status;
+                }
             } else {
                 String outStatus = classifyCheckOut(shift, checkOut.toLocalTime());
                 if ("EARLY_CHECKOUT".equals(outStatus) && shift.getEndTime() != null) {
@@ -514,15 +534,31 @@ public class AttendanceCalculator {
         }
         LocalTime start = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
         LocalTime end = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
-        return !time.isBefore(start) && !time.isAfter(end);
+        if (!start.isAfter(end)) {
+            return !time.isBefore(start) && !time.isAfter(end);
+        } else {
+            return !time.isBefore(start) || !time.isAfter(end);
+        }
     }
 
     private boolean hasShiftEnded(Shift shift, LocalTime now) {
-        if (shift.getEndTime() == null) {
+        if (shift.getEndTime() == null || shift.getStartTime() == null) {
             return false;
         }
+        LocalTime start = shift.getStartTime().minusMinutes(defaultInt(shift.getEarlyCheckInMinutes(), 30));
         LocalTime captureEnd = shift.getEndTime().plusMinutes(defaultInt(shift.getLateCheckOutMinutes(), 60));
-        return now.isAfter(captureEnd);
+        if (!start.isAfter(captureEnd)) {
+            return now.isAfter(captureEnd);
+        } else {
+            return false;
+        }
+    }
+
+    private boolean hasShiftStarted(Shift shift, LocalTime now) {
+        if (shift.getStartTime() == null) {
+            return false;
+        }
+        return !now.isBefore(shift.getStartTime());
     }
 
     private List<LocalDateTime> uniqueTimes(List<LocalDateTime> times) {

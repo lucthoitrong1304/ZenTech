@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
@@ -21,6 +22,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -55,6 +57,8 @@ class AttendanceServiceTest {
     private AttendanceLocationPolicyService attendanceLocationPolicyService;
     @Mock
     private AttendanceCalculator attendanceCalculator;
+    @Mock
+    private LeaveRequestRepository leaveRequestRepository;
 
     @InjectMocks
     private AttendanceService attendanceService;
@@ -90,6 +94,8 @@ class AttendanceServiceTest {
                 .thenReturn(new ArrayList<>());
         lenient().when(attendanceLocationPolicyService.isLocationAllowed(any(), any())).thenReturn(true);
         lenient().when(attendanceLocationPolicyService.isPolicyEnabled()).thenReturn(false);
+        lenient().when(leaveRequestRepository.findWfhRequestsForEmployeeOnDate(any(), any(), any()))
+                .thenReturn(Collections.emptyList());
 
         Shift shift = new Shift();
         shift.setId(UUID.randomUUID());
@@ -148,6 +154,72 @@ class AttendanceServiceTest {
                 anyString(),
                 isNull()
         );
+    }
+
+    @Test
+    void testCheckInUploadsValidFaceImageEvidence() throws Exception {
+        // Arrange
+        securityContextUtilsMock.when(SecurityContextUtils::getCurrentUserId).thenReturn(mockAccountId);
+
+        CheckInRequest request = new CheckInRequest();
+        request.setFaceDescriptor(new ArrayList<>(Collections.nCopies(128, 0.1f)));
+        request.setFaceImage("data:image/jpeg;base64," + Base64.getEncoder().encodeToString("fake-jpeg".getBytes()));
+
+        when(employeeRepository.findByUserInfo_Id(mockAccountId)).thenReturn(Optional.of(mockEmployee));
+        when(faceEncryptionUtils.decrypt("encrypted-string")).thenReturn("decrypted-json");
+
+        List<List<Float>> registeredDescriptors = new ArrayList<>();
+        registeredDescriptors.add(new ArrayList<>(Collections.nCopies(128, 0.1f)));
+
+        when(objectMapper.readValue(eq("decrypted-json"), any(com.fasterxml.jackson.core.type.TypeReference.class)))
+                .thenReturn(registeredDescriptors);
+
+        // Act
+        attendanceService.checkIn(request);
+
+        // Assert
+        verify(r2StorageService, times(1)).uploadFileBytes(
+                startsWith("uploads/attendance-faces/" + mockEmployee.getId() + "/checkin-"),
+                any(byte[].class),
+                eq("image/jpeg")
+        );
+
+        ArgumentCaptor<AttendanceEvent> eventCaptor = ArgumentCaptor.forClass(AttendanceEvent.class);
+        verify(attendanceEventRepository).save(eventCaptor.capture());
+        AttendanceEvent savedEvent = eventCaptor.getValue();
+        assertNotNull(savedEvent.getFaceImageKey());
+        assertFalse(savedEvent.getDetails().contains("FACE_IMAGE_"));
+    }
+
+    @Test
+    void testCheckInMarksInvalidFaceImageEvidence() throws Exception {
+        // Arrange
+        securityContextUtilsMock.when(SecurityContextUtils::getCurrentUserId).thenReturn(mockAccountId);
+
+        CheckInRequest request = new CheckInRequest();
+        request.setFaceDescriptor(new ArrayList<>(Collections.nCopies(128, 0.1f)));
+        request.setFaceImage("data:,");
+
+        when(employeeRepository.findByUserInfo_Id(mockAccountId)).thenReturn(Optional.of(mockEmployee));
+        when(faceEncryptionUtils.decrypt("encrypted-string")).thenReturn("decrypted-json");
+
+        List<List<Float>> registeredDescriptors = new ArrayList<>();
+        registeredDescriptors.add(new ArrayList<>(Collections.nCopies(128, 0.1f)));
+
+        when(objectMapper.readValue(eq("decrypted-json"), any(com.fasterxml.jackson.core.type.TypeReference.class)))
+                .thenReturn(registeredDescriptors);
+
+        // Act
+        attendanceService.checkIn(request);
+
+        // Assert
+        verify(r2StorageService, never()).uploadFileBytes(anyString(), any(byte[].class), anyString());
+
+        ArgumentCaptor<AttendanceEvent> eventCaptor = ArgumentCaptor.forClass(AttendanceEvent.class);
+        verify(attendanceEventRepository).save(eventCaptor.capture());
+        AttendanceEvent savedEvent = eventCaptor.getValue();
+        assertNull(savedEvent.getFaceImageKey());
+        assertTrue(savedEvent.getDetails().contains("[FACE_IMAGE_INVALID]"));
     }
 
     @Test
@@ -304,6 +376,116 @@ class AttendanceServiceTest {
         );
     }
 
+    @Test
+    void resolveAttendanceActionDuringPmSkipsEndedUncheckedAm() {
+        Shift amShift = buildAmShift();
+        Shift pmShift = buildPmShift();
+        EmployeeShift amAssignment = buildAssignment(amShift);
+        EmployeeShift pmAssignment = buildAssignment(pmShift);
+        when(attendanceCalculator.resolveEffectiveShifts(eq(mockEmployee.getId()), any()))
+                .thenReturn(List.of(
+                        new AttendanceCalculator.EffectiveShift(amAssignment, amShift),
+                        new AttendanceCalculator.EffectiveShift(pmAssignment, pmShift)
+                ));
+
+        Object action = ReflectionTestUtils.invokeMethod(
+                attendanceService,
+                "resolveAttendanceAction",
+                mockEmployee,
+                LocalDateTime.of(2026, 7, 1, 13, 45),
+                Collections.emptyList()
+        );
+
+        AttendanceEventType type = ReflectionTestUtils.invokeMethod(action, "type");
+        AttendanceCalculator.EffectiveShift resolvedShift = ReflectionTestUtils.invokeMethod(action, "shift");
+        assertEquals(AttendanceEventType.CHECK_IN, type);
+        assertNotNull(resolvedShift);
+        assertEquals(pmShift.getId(), resolvedShift.shift().getId());
+    }
+
+    @Test
+    void resolveAttendanceActionDuringPmWithDanglingAmCheckInCreatesPmCheckIn() {
+        Shift amShift = buildAmShift();
+        Shift pmShift = buildPmShift();
+        EmployeeShift amAssignment = buildAssignment(amShift);
+        EmployeeShift pmAssignment = buildAssignment(pmShift);
+        AttendanceEvent danglingAmCheckIn = new AttendanceEvent();
+        danglingAmCheckIn.setEventType(AttendanceEventType.CHECK_IN);
+        danglingAmCheckIn.setEmployeeShift(amAssignment);
+        danglingAmCheckIn.setTimestamp(LocalDateTime.of(2026, 7, 1, 9, 5));
+
+        when(attendanceCalculator.resolveEffectiveShifts(eq(mockEmployee.getId()), any()))
+                .thenReturn(List.of(
+                        new AttendanceCalculator.EffectiveShift(amAssignment, amShift),
+                        new AttendanceCalculator.EffectiveShift(pmAssignment, pmShift)
+                ));
+
+        Object action = ReflectionTestUtils.invokeMethod(
+                attendanceService,
+                "resolveAttendanceAction",
+                mockEmployee,
+                LocalDateTime.of(2026, 7, 1, 13, 45),
+                List.of(danglingAmCheckIn)
+        );
+
+        AttendanceEventType type = ReflectionTestUtils.invokeMethod(action, "type");
+        AttendanceCalculator.EffectiveShift resolvedShift = ReflectionTestUtils.invokeMethod(action, "shift");
+        assertEquals(AttendanceEventType.CHECK_IN, type);
+        assertNotNull(resolvedShift);
+        assertEquals(pmShift.getId(), resolvedShift.shift().getId());
+    }
+
+    @Test
+    void resolveAttendanceActionWithinAmAfterCheckInStillChecksOutAm() {
+        Shift amShift = buildAmShift();
+        EmployeeShift amAssignment = buildAssignment(amShift);
+        AttendanceEvent amCheckIn = new AttendanceEvent();
+        amCheckIn.setEventType(AttendanceEventType.CHECK_IN);
+        amCheckIn.setEmployeeShift(amAssignment);
+        amCheckIn.setTimestamp(LocalDateTime.of(2026, 7, 1, 9, 5));
+
+        when(attendanceCalculator.resolveEffectiveShifts(eq(mockEmployee.getId()), any()))
+                .thenReturn(List.of(new AttendanceCalculator.EffectiveShift(amAssignment, amShift)));
+
+        Object action = ReflectionTestUtils.invokeMethod(
+                attendanceService,
+                "resolveAttendanceAction",
+                mockEmployee,
+                LocalDateTime.of(2026, 7, 1, 10, 0),
+                List.of(amCheckIn)
+        );
+
+        AttendanceEventType type = ReflectionTestUtils.invokeMethod(action, "type");
+        AttendanceCalculator.EffectiveShift resolvedShift = ReflectionTestUtils.invokeMethod(action, "shift");
+        assertEquals(AttendanceEventType.CHECK_OUT, type);
+        assertNotNull(resolvedShift);
+        assertEquals(amShift.getId(), resolvedShift.shift().getId());
+    }
+
+    @Test
+    void resolveAttendanceActionBeforePmAfterAmPassedReportsPmNotAm() {
+        Shift amShift = buildAmShift();
+        Shift pmShift = buildPmShift();
+        pmShift.setEarlyCheckInMinutes(0);
+        EmployeeShift amAssignment = buildAssignment(amShift);
+        EmployeeShift pmAssignment = buildAssignment(pmShift);
+        when(attendanceCalculator.resolveEffectiveShifts(eq(mockEmployee.getId()), any()))
+                .thenReturn(List.of(
+                        new AttendanceCalculator.EffectiveShift(amAssignment, amShift),
+                        new AttendanceCalculator.EffectiveShift(pmAssignment, pmShift)
+                ));
+
+        RuntimeException exception = assertThrows(RuntimeException.class, () -> ReflectionTestUtils.invokeMethod(
+                attendanceService,
+                "resolveAttendanceAction",
+                mockEmployee,
+                LocalDateTime.of(2026, 7, 1, 13, 10),
+                Collections.emptyList()
+        ));
+
+        assertTrue(exception.getMessage().contains("PM"));
+    }
+
     private Shift buildAmShift() {
         Shift shift = new Shift();
         shift.setId(UUID.randomUUID());
@@ -314,5 +496,25 @@ class AttendanceServiceTest {
         shift.setEarlyCheckInMinutes(60);
         shift.setLateCheckOutMinutes(60);
         return shift;
+    }
+
+    private Shift buildPmShift() {
+        Shift shift = new Shift();
+        shift.setId(UUID.randomUUID());
+        shift.setName("PM");
+        shift.setType(ShiftType.NORMAL);
+        shift.setStartTime(LocalTime.of(13, 30));
+        shift.setEndTime(LocalTime.of(18, 0));
+        shift.setEarlyCheckInMinutes(30);
+        shift.setLateCheckOutMinutes(60);
+        return shift;
+    }
+
+    private EmployeeShift buildAssignment(Shift shift) {
+        EmployeeShift employeeShift = new EmployeeShift();
+        employeeShift.setId(UUID.randomUUID());
+        employeeShift.setEmployee(mockEmployee);
+        employeeShift.setShift(shift);
+        return employeeShift;
     }
 }
