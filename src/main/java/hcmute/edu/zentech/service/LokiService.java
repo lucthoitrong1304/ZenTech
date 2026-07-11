@@ -33,7 +33,7 @@ public class LokiService {
     // Regex để bóc tách level (INFO/WARN/ERROR/DEBUG) trong câu log
     private static final Pattern LEVEL_PATTERN = Pattern.compile("\\b(INFO|WARN|ERROR|DEBUG)\\b");
     // Regex để bóc tách traceId dạng ZT-xxxxxxx
-    private static final Pattern TRACE_ID_PATTERN = Pattern.compile("(?<=\\[|\\s|^)(ZT-(?:FE-)?[A-Fa-f0-9a-zA-Z]{8})(?=\\]|\\s|$)");
+    private static final Pattern TRACE_ID_PATTERN = Pattern.compile("(?<=\\[|\\s|^)(ZT-(?:(?:FE|AI)-)?[A-Za-z0-9]{8})(?=\\]|\\s|$)");
     private static final Pattern JSON_STATUS_CODE_PATTERN = Pattern.compile("\"(?:statusCode|status_code|status)\"\\s*:\\s*(\\d{3})");
     private static final Pattern BUSINESS_STATUS_CODE_PATTERN = Pattern.compile("\\b(?:Business error|Validation error|Argument type mismatch|Access denied|Unexpected server error) \\((\\d{3})\\)");
     private static final Pattern RESPONSE_STATUS_CODE_PATTERN = Pattern.compile("\\b(?:Outgoing Response|Response):\\s*(\\d{3})\\b");
@@ -51,7 +51,7 @@ public class LokiService {
 
             // Lọc theo traceId
             if (traceId != null && !traceId.trim().isEmpty()) {
-                logql.append(" |= \"").append(traceId.trim()).append("\"");
+                logql.append(" |= \"").append(escapeLogQlLiteral(traceId.trim())).append("\"");
             }
 
             // Lọc theo level (chỉ lọc nếu level không phải ALL)
@@ -61,7 +61,7 @@ public class LokiService {
 
             // Lọc theo từ khóa tìm kiếm
             if (search != null && !search.trim().isEmpty()) {
-                logql.append(" |= \"").append(search.trim()).append("\"");
+                logql.append(" |= \"").append(escapeLogQlLiteral(search.trim())).append("\"");
             }
 
             UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(lokiUrl)
@@ -166,10 +166,7 @@ public class LokiService {
         }
 
         // Trích xuất traceId từ dòng log
-        Matcher traceMatcher = TRACE_ID_PATTERN.matcher(rawLine);
-        if (traceMatcher.find()) {
-            traceId = traceMatcher.group(1);
-        }
+        traceId = extractTraceId(rawLine);
 
         // Làm sạch message hiển thị chính: lấy phần nội dung sau dấu "-" đầu tiên nếu có để hiển thị gọn
         int hyphenIndex = rawLine.indexOf(" - ");
@@ -191,6 +188,22 @@ public class LokiService {
             logMap.put("statusCode", statusCode);
         }
         return logMap;
+    }
+
+    static String extractTraceId(String rawLine) {
+        Matcher traceMatcher = TRACE_ID_PATTERN.matcher(rawLine == null ? "" : rawLine);
+        return traceMatcher.find() ? traceMatcher.group(1) : "";
+    }
+
+    static String escapeLogQlLiteral(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n");
     }
 
     private Integer extractStatusCode(String rawLine) {

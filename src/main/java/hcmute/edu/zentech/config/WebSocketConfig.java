@@ -15,6 +15,7 @@ import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.util.StringUtils;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
@@ -73,10 +74,26 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
                 if (accessor != null && StompCommand.CONNECT.equals(accessor.getCommand())) {
                     authenticate(accessor);
+                } else if (accessor != null && StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+                    authorizeSubscription(accessor);
                 }
                 return message;
             }
         });
+    }
+
+    void authorizeSubscription(StompHeaderAccessor accessor) {
+        String destination = accessor.getDestination();
+        if (destination == null || !destination.startsWith("/topic/admin.")) {
+            return;
+        }
+
+        if (!(accessor.getUser() instanceof Authentication authentication)
+                || !authentication.isAuthenticated()
+                || authentication.getAuthorities().stream()
+                .noneMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()))) {
+            throw new AccessDeniedException("Admin role is required for admin websocket topics");
+        }
     }
 
     private void authenticate(StompHeaderAccessor accessor) {
