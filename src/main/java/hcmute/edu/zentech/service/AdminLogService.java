@@ -18,7 +18,6 @@ import java.util.Map;
 public class AdminLogService {
 
     private final LokiService lokiService;
-    private final AdminAiRealtimeLogPublisher realtimeLogPublisher;
 
     // Sử dụng logger riêng biệt đã cấu hình trong logback-spring.xml để ghi log vào frontend.log
     private static final Logger frontendLogger = LoggerFactory.getLogger("frontend-logger");
@@ -79,7 +78,6 @@ public class AdminLogService {
     @SuppressWarnings("unchecked")
     public Map<String, Object> explainLogError(Map<String, Object> payload) {
         try {
-            realtimeLogPublisher.publishAiInfo("Starting LLM call for admin log explanation");
             String explainUrl = aiBaseUrl + "/admin/logs/explain";
             log.info("Calling AI service to explain log: {}", explainUrl);
 
@@ -100,11 +98,9 @@ public class AdminLogService {
 
             ResponseEntity<Map> response = restTemplate.postForEntity(explainUrl, entity, Map.class);
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                realtimeLogPublisher.publishAiInfo("Admin log explanation completed");
                 return (Map<String, Object>) response.getBody();
             }
         } catch (Exception e) {
-            realtimeLogPublisher.publishAiError("Admin log explanation failed", e);
             log.error("Failed to explain log using AI: {}", e.getMessage());
             return Map.of("explanation", "Không thể liên kết với AI Service để giải thích lỗi này.");
         }
@@ -117,7 +113,6 @@ public class AdminLogService {
     @SuppressWarnings("unchecked")
     public Map<String, Object> chatFollowUp(Map<String, Object> payload) {
         try {
-            realtimeLogPublisher.publishAiInfo("Starting LLM call for admin log follow-up chat");
             String chatUrl = aiBaseUrl + "/admin/chat/follow-up";
             log.info("Calling AI service for chat follow-up: {}", chatUrl);
 
@@ -139,11 +134,9 @@ public class AdminLogService {
 
             ResponseEntity<Map> response = restTemplate.postForEntity(chatUrl, entity, Map.class);
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                realtimeLogPublisher.publishAiInfo("Admin log follow-up chat completed");
                 return (Map<String, Object>) response.getBody();
             }
         } catch (Exception e) {
-            realtimeLogPublisher.publishAiError("Admin log follow-up chat failed", e);
             log.error("Failed to call chat follow-up: {}", e.getMessage());
         }
         return Map.of("content", "Không thể liên kết với AI Service để thực hiện chat lúc này.");
