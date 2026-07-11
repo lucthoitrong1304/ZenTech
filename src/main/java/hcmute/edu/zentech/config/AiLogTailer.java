@@ -146,7 +146,7 @@ public class AiLogTailer {
         }
     }
 
-    private void processLogLine(String rawLine) {
+    void processLogLine(String rawLine) {
         if (rawLine == null || rawLine.trim().isEmpty()) {
             return;
         }
@@ -168,7 +168,7 @@ public class AiLogTailer {
 
                 level = matcher.group(2);
                 category = "AI-SERVICE";
-                traceId = matcher.group(4);
+                traceId = "ZT-AI-SYSTEM".equals(matcher.group(4)) ? "" : matcher.group(4);
                 message = matcher.group(5);
             }
 
