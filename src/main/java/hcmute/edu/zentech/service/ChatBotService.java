@@ -134,7 +134,7 @@ public class ChatBotService {
         );
 
         if (streamResponseOpt.isEmpty()) {
-            log.warn("Failed to get stream response, falling back for conversation: {}", conversationId);
+            log.error("Failed to get stream response, falling back for conversation: {}", conversationId);
             transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                     conversation.getId(),
                     botParticipant.get().getId(),

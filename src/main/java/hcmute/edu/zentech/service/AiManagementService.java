@@ -271,13 +271,13 @@ public class AiManagementService {
                     .send(httpRequest, java.net.http.HttpResponse.BodyHandlers.ofInputStream());
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                log.warn("AI agent stream service returned status {}", response.statusCode());
+                log.error("AI agent stream service returned status {}", response.statusCode());
                 return Optional.empty();
             }
 
             return Optional.of(response);
         } catch (Exception ex) {
-            log.warn("AI agent stream service failed", ex);
+            log.error("AI agent stream service failed", ex);
             return Optional.empty();
         }
     }
@@ -353,13 +353,13 @@ public class AiManagementService {
                     .send(httpRequest, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                log.warn("AI agent service returned status {}", response.statusCode());
+                log.error("AI agent service returned status {}", response.statusCode());
                 return Optional.empty();
             }
 
             return Optional.of(objectMapper.readValue(response.body(), AiAgentRuntimeResponse.class));
         } catch (Exception ex) {
-            log.warn("AI agent service failed", ex);
+            log.error("AI agent service failed", ex);
             return Optional.empty();
         }
     }
