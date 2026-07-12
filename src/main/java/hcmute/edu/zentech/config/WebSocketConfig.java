@@ -88,11 +88,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             return;
         }
 
+        java.util.List<String> allowedRoles = java.util.List.of("ROLE_ADMIN", "ROLE_OWNER", "ROLE_MANAGER", "ROLE_EMPLOYEE");
         if (!(accessor.getUser() instanceof Authentication authentication)
                 || !authentication.isAuthenticated()
                 || authentication.getAuthorities().stream()
-                .noneMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()))) {
-            throw new AccessDeniedException("Admin role is required for admin websocket topics");
+                .noneMatch(authority -> allowedRoles.contains(authority.getAuthority()))) {
+            throw new AccessDeniedException("Admin or staff role is required for admin websocket topics");
         }
     }
 
