@@ -114,6 +114,7 @@ public class ChatConversationService {
         Page<Conversation> conversationPage = conversationRepository.searchManagementConversations(
                 request.getStatus(),
                 normalizeKeyword(request.getKeyword()),
+                request.getArchived(),
                 pageable
         );
         return PageResponse.from(conversationPage, conversationPage.getContent().stream()
