@@ -2,6 +2,7 @@ package hcmute.edu.zentech.service;
 
 import hcmute.edu.zentech.dto.request.ChatConversationListQueryRequest;
 import hcmute.edu.zentech.dto.response.ConversationResponse;
+import hcmute.edu.zentech.dto.response.ChatConversationEventResponse;
 import hcmute.edu.zentech.dto.response.ChatMessageResponse;
 import hcmute.edu.zentech.dto.response.PageResponse;
 import hcmute.edu.zentech.exception.ResourceNotFoundException;
@@ -35,6 +36,8 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.List;
@@ -65,6 +68,7 @@ public class ChatConversationService {
     private final ChatMessageRecommendationRepository chatMessageRecommendationRepository;
     private final TransferRequestRepository transferRequestRepository;
     private final NotificationRepository notificationRepository;
+    private final ConversationReadStateService conversationReadStateService;
 
     @Transactional
     public ConversationResponse createOrGetCurrentCustomerConversation() {
@@ -408,7 +412,7 @@ public class ChatConversationService {
         }
 
         ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
-        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        publishLifecycleAfterCommit("ARCHIVED", conversation, response, customer.getUserInfo().getId(), customer.getFullName());
         return response;
     }
 
@@ -425,7 +429,7 @@ public class ChatConversationService {
         }
 
         ConversationResponse response = toConversationResponse(conversationRepository.save(conversation));
-        messagingTemplate.convertAndSend("/topic/conversations." + conversationId, response);
+        publishLifecycleAfterCommit("UNARCHIVED", conversation, response, customer.getUserInfo().getId(), customer.getFullName());
         return response;
     }
 
@@ -435,13 +439,49 @@ public class ChatConversationService {
         Conversation conversation = getConversation(conversationId);
         chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
 
+        List<UUID> notifiedAccountIds = participantRepository.findByConversation_Id(conversationId).stream()
+                .filter(this::isStaffParticipant)
+                .map(participant -> chatParticipantService.resolveAccountId(participant.getUserType(), participant.getReferenceId()))
+                .flatMap(Optional::stream)
+                .distinct()
+                .toList();
+        ChatConversationEventResponse deletedEvent = ChatConversationEventResponse.builder()
+                .eventType("DELETED")
+                .conversationId(conversationId)
+                .actorAccountId(customer.getUserInfo().getId())
+                .actorName(customer.getFullName())
+                .notifiedAccountIds(notifiedAccountIds)
+                .occurredAt(Instant.now())
+                .build();
+
         transferRequestRepository.deleteByConversationId(conversationId);
         notificationRepository.deleteByReferenceId(conversationId);
         chatMessageAttachmentRepository.deleteByConversationId(conversationId);
         chatMessageRecommendationRepository.deleteByConversationId(conversationId);
         chatMessageRepository.deleteByConversationId(conversationId);
+        conversationReadStateService.deleteByConversationId(conversationId);
         participantRepository.deleteByConversationId(conversationId);
         conversationRepository.delete(conversation);
+        sendAfterCommit(() -> {
+            messagingTemplate.convertAndSend("/topic/conversations." + conversationId, deletedEvent);
+            messagingTemplate.convertAndSend("/topic/management.chat.queue", deletedEvent);
+            messagingTemplate.convertAndSend(
+                    "/topic/customer.chat." + customer.getUserInfo().getId(), deletedEvent);
+        });
+    }
+
+    @Transactional
+    public void markConversationRead(UUID conversationId, boolean management) {
+        Conversation conversation = getConversation(conversationId);
+        UUID accountId;
+        if (management) {
+            accountId = chatParticipantService.getCurrentStaffIdentity().accountId();
+        } else {
+            Customer customer = chatParticipantService.getCurrentCustomer();
+            chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
+            accountId = customer.getUserInfo().getId();
+        }
+        conversationReadStateService.markRead(conversation, accountId);
     }
 
     @Transactional(readOnly = true)
@@ -505,7 +545,52 @@ public class ChatConversationService {
 
     private ConversationResponse toConversationResponse(Conversation conversation) {
         List<ConversationParticipant> participants = participantRepository.findByConversation_Id(conversation.getId());
-        return chatMapper.toConversationResponse(conversation, participants);
+        ConversationResponse response = chatMapper.toConversationResponse(conversation, participants);
+        response.setUnreadCount(conversationReadStateService.getUnreadCount(
+                conversation.getId(), chatParticipantService.getCurrentAccountId()));
+        return response;
+    }
+
+    private void publishLifecycleAfterCommit(
+            String eventType,
+            Conversation conversation,
+            ConversationResponse response,
+            UUID actorAccountId,
+            String actorName
+    ) {
+        List<UUID> notifiedAccountIds = participantRepository.findByConversation_Id(conversation.getId()).stream()
+                .filter(this::isStaffParticipant)
+                .map(participant -> chatParticipantService.resolveAccountId(participant.getUserType(), participant.getReferenceId()))
+                .flatMap(Optional::stream)
+                .distinct()
+                .toList();
+        ChatConversationEventResponse event = ChatConversationEventResponse.builder()
+                .eventType(eventType)
+                .conversationId(conversation.getId())
+                .conversation(response)
+                .actorAccountId(actorAccountId)
+                .actorName(actorName)
+                .notifiedAccountIds(notifiedAccountIds)
+                .occurredAt(Instant.now())
+                .build();
+        sendAfterCommit(() -> {
+            messagingTemplate.convertAndSend("/topic/conversations." + conversation.getId(), event);
+            messagingTemplate.convertAndSend("/topic/management.chat.queue", event);
+            messagingTemplate.convertAndSend("/topic/customer.chat." + actorAccountId, event);
+        });
+    }
+
+    private void sendAfterCommit(Runnable action) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            action.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                action.run();
+            }
+        });
     }
 
     private boolean isStaffParticipant(ConversationParticipant participant) {
