@@ -103,6 +103,12 @@ public class ChatController {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.archiveConversation(conversationId)));
     }
 
+    @PostMapping("/{conversationId}/read")
+    public ResponseEntity<ApiResponse<Void>> markConversationRead(@PathVariable UUID conversationId) {
+        chatConversationService.markConversationRead(conversationId, false);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
     @PatchMapping("/{conversationId}/unarchive")
     public ResponseEntity<ApiResponse<ConversationResponse>> unarchiveConversation(@PathVariable UUID conversationId) {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.unarchiveConversation(conversationId)));

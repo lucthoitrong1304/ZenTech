@@ -70,6 +70,8 @@ class ChatConversationServiceTest {
     private TransferRequestRepository transferRequestRepository;
     @Mock
     private NotificationRepository notificationRepository;
+    @Mock
+    private ConversationReadStateService conversationReadStateService;
 
     @InjectMocks
     private ChatConversationService chatConversationService;

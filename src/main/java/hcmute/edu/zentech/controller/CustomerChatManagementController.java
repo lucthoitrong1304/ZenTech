@@ -59,6 +59,12 @@ public class CustomerChatManagementController {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.claimConversation(conversationId)));
     }
 
+    @PostMapping("/conversations/{conversationId}/read")
+    public ResponseEntity<ApiResponse<Void>> markConversationRead(@PathVariable UUID conversationId) {
+        chatConversationService.markConversationRead(conversationId, true);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
     @PostMapping("/conversations/{conversationId}/leave")
     public ResponseEntity<ApiResponse<ConversationResponse>> leaveConversation(@PathVariable UUID conversationId) {
         return ResponseEntity.ok(ApiResponse.success(chatConversationService.leaveConversation(conversationId)));

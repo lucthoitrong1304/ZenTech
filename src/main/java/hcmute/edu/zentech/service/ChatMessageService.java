@@ -57,6 +57,7 @@ public class ChatMessageService {
     private final R2StorageService r2StorageService;
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationService notificationService;
+    private final ConversationReadStateService conversationReadStateService;
     private final TransactionTemplate transactionTemplate;
 
     @Transactional(readOnly = true)
@@ -135,6 +136,9 @@ public class ChatMessageService {
 
         broadcastMessage(conversationId, persistedMessage.message());
         messagingTemplate.convertAndSend("/topic/management.chat.queue", persistedMessage.conversation());
+        messagingTemplate.convertAndSend(
+                "/topic/customer.chat." + persistedMessage.customerAccountId(),
+                persistedMessage.conversation());
 
         if (persistedMessage.shouldTriggerBot()) {
             try {
@@ -184,6 +188,7 @@ public class ChatMessageService {
         
         conversation.setUpdatedAt(Instant.now());
         Conversation savedConversation = conversationRepository.saveAndFlush(conversation);
+        conversationReadStateService.incrementRecipients(savedConversation, accountId);
 
         ChatMessageResponse response = toChatMessageResponse(savedMessage);
         response.setTraceId(request.getTraceId());
@@ -193,7 +198,14 @@ public class ChatMessageService {
         boolean shouldTriggerBot = savedConversation.getStatus() == ConversationStatus.BOT_CONSULTING
                 && participant.getUserType() == ParticipantType.CUSTOMER;
 
-        return new PersistedMessage(response, convResponse, participant.getId(), shouldTriggerBot, request.getPageContext(), request.getTraceId());
+        return new PersistedMessage(
+                response,
+                convResponse,
+                participant.getId(),
+                savedConversation.getCustomer().getUserInfo().getId(),
+                shouldTriggerBot,
+                request.getPageContext(),
+                request.getTraceId());
     }
 
     private void broadcastMessage(UUID conversationId, ChatMessageResponse response) {
@@ -235,6 +247,7 @@ public class ChatMessageService {
             ChatMessageResponse message,
             ConversationResponse conversation,
             UUID senderParticipantId,
+            UUID customerAccountId,
             boolean shouldTriggerBot,
             Map<String, Object> pageContext,
             String traceId

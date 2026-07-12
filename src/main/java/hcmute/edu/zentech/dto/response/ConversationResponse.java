@@ -28,5 +28,6 @@ public class ConversationResponse {
     private Instant closedAt;
     private boolean archived;
     private Instant archivedAt;
+    private int unreadCount;
     private List<ParticipantResponse> participants;
 }
