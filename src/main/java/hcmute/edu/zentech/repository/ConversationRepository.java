@@ -32,7 +32,7 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
                     FROM Conversation c
                     JOIN c.customer customer
                     JOIN customer.userInfo account
-                    WHERE c.archived = false
+                    WHERE (:archived IS NULL OR c.archived = :archived)
                       AND (:status IS NULL OR c.status = :status)
                       AND (:keyword IS NULL
                         OR LOWER(customer.fullName) LIKE LOWER(CONCAT('%', :keyword, '%'))
@@ -44,7 +44,7 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
                     FROM Conversation c
                     JOIN c.customer customer
                     JOIN customer.userInfo account
-                    WHERE c.archived = false
+                    WHERE (:archived IS NULL OR c.archived = :archived)
                       AND (:status IS NULL OR c.status = :status)
                       AND (:keyword IS NULL
                         OR LOWER(customer.fullName) LIKE LOWER(CONCAT('%', :keyword, '%'))
@@ -55,6 +55,7 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
     Page<Conversation> searchManagementConversations(
             @Param("status") ConversationStatus status,
             @Param("keyword") String keyword,
+            @Param("archived") Boolean archived,
             Pageable pageable
     );
 }

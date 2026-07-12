@@ -12,6 +12,10 @@ import lombok.Setter;
 public class ChatConversationListQueryRequest {
     private ConversationStatus status;
     private String keyword;
+    /**
+     * Null returns both active and customer-archived conversations for staff.
+     */
+    private Boolean archived;
 
     @Min(value = 0, message = "page must be greater than or equal to 0")
     private int page = 0;
