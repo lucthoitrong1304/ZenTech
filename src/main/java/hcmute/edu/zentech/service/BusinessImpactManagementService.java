@@ -358,6 +358,7 @@ public class BusinessImpactManagementService {
                 .severity(result.getSeverity())
                 .topAffectedUsers(topAffected)
                 .aiSummary(null)
+                .errorMessage(inc.getErrorMessage())
                 .build();
     }
 

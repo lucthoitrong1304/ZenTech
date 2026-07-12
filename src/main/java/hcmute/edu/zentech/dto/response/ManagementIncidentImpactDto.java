@@ -38,5 +38,6 @@ public class ManagementIncidentImpactDto {
     private Integer affectedUsers;
     private IncidentSeverity severity;
     private String aiSummary;
+    private String errorMessage;
     private java.util.List<AffectedUserDetailDto> topAffectedUsers;
 }
