@@ -19,5 +19,12 @@ public class AttendanceStatisticsResponse {
     private long totalMissingCheckOut;
     private long totalAbsent;
     private long totalLeave;
+    private long totalEmployees;
+    private long totalShifts;
+    private long earlyArrival;
+    private long earlyCheckout;
+    private long workFromHome;
+    private long notStarted;
+    private long provisional;
 }
 

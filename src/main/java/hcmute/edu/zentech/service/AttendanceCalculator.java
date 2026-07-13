@@ -382,7 +382,7 @@ public class AttendanceCalculator {
                 status = "ABSENT_UNEXCUSED";
             } else {
                 if (hasShiftStarted(shift, LocalTime.now())) {
-                    status = "ABSENT_UNEXCUSED";
+                    status = hasShiftEnded(shift, LocalTime.now()) ? "ABSENT_UNEXCUSED" : "MISSING_CHECK_IN";
                 } else {
                     status = "NOT_STARTED";
                 }
@@ -444,6 +444,11 @@ public class AttendanceCalculator {
                 .lateMinutes(lateMinutes)
                 .earlyMinutes(earlyMinutes)
                 .status(status)
+                .earlyArrival(checkIn != null && "EARLY_CHECKIN".equals(classifyCheckIn(shift, checkIn.toLocalTime())))
+                .onTime(checkIn != null && "ON_TIME".equals(classifyCheckIn(shift, checkIn.toLocalTime())))
+                .late(checkIn != null && "LATE".equals(classifyCheckIn(shift, checkIn.toLocalTime())))
+                .earlyCheckout(checkOut != null && "EARLY_CHECKOUT".equals(classifyCheckOut(shift, checkOut.toLocalTime())))
+                .inProgress(activeCheckIn != null && date.equals(LocalDate.now()) && !hasShiftEnded(shift, LocalTime.now()))
                 .isProvisional(provisional)
                 .isLeave(effectiveShift.isLeave())
                 .isWfh(effectiveShift.isWfh())
