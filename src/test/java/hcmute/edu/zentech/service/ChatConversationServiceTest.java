@@ -141,17 +141,23 @@ class ChatConversationServiceTest {
     }
 
     @Test
-    void leaveConversationMovesLastActiveStaffConversationBackToQueue() {
+    void leaveConversationMovesLastActiveStaffConversationBackToBotConsulting() {
         when(participantRepository.findByConversation_IdAndStatus(conversationId, ParticipantStatus.ACTIVE))
                 .thenReturn(List.of(customerParticipant));
 
         ConversationResponse response = chatConversationService.leaveConversation(conversationId);
 
-        assertThat(response.getStatus()).isEqualTo(ConversationStatus.WAITING_FOR_AGENT);
-        assertThat(conversation.getStatus()).isEqualTo(ConversationStatus.WAITING_FOR_AGENT);
+        assertThat(response.getStatus()).isEqualTo(ConversationStatus.BOT_CONSULTING);
+        assertThat(conversation.getStatus()).isEqualTo(ConversationStatus.BOT_CONSULTING);
         assertThat(staffParticipant.getStatus()).isEqualTo(ParticipantStatus.LEFT);
         assertThat(staffParticipant.getLeftAt()).isNotNull();
         verify(participantRepository).save(staffParticipant);
+        verify(chatParticipantService).addOrUpdateParticipant(
+                conversation,
+                ParticipantType.BOT,
+                ChatParticipantService.BOT_REFERENCE_ID,
+                ParticipantStatus.ACTIVE
+        );
         verify(messagingTemplate).convertAndSend("/topic/management.chat.queue", response);
         verify(messagingTemplate).convertAndSend("/topic/conversations." + conversationId, response);
     }
@@ -173,6 +179,7 @@ class ChatConversationServiceTest {
         assertThat(response.getStatus()).isEqualTo(ConversationStatus.AGENT_HANDLING);
         assertThat(conversation.getStatus()).isEqualTo(ConversationStatus.AGENT_HANDLING);
         assertThat(staffParticipant.getStatus()).isEqualTo(ParticipantStatus.LEFT);
+        verify(chatParticipantService, never()).addOrUpdateParticipant(any(), any(), any(), any());
     }
 
     @Test

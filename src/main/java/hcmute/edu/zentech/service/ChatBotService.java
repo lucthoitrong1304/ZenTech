@@ -12,6 +12,7 @@ import hcmute.edu.zentech.model.ChatAttachmentType;
 import hcmute.edu.zentech.model.ChatMessageType;
 import hcmute.edu.zentech.model.Conversation;
 import hcmute.edu.zentech.model.ConversationParticipant;
+import hcmute.edu.zentech.model.ConversationStatus;
 import hcmute.edu.zentech.model.ParticipantStatus;
 import hcmute.edu.zentech.model.ParticipantType;
 import hcmute.edu.zentech.model.Role;
@@ -83,27 +84,36 @@ public class ChatBotService {
             return;
         }
 
-        Optional<ConversationParticipant> botParticipant = participantRepository
-                .findByConversation_IdAndUserType(conversationId, ParticipantType.BOT)
-                .filter(participant -> participant.getStatus() == ParticipantStatus.ACTIVE);
-
-        if (botParticipant.isEmpty()) {
-            log.info("No active bot participant found for conversation: {}", conversationId);
-            return;
-        }
-
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElse(null);
         if (conversation == null) {
             return;
         }
 
+        Optional<ConversationParticipant> botParticipant = participantRepository
+                .findByConversation_IdAndUserType(conversationId, ParticipantType.BOT);
+
+        if (botParticipant.isPresent()
+                && botParticipant.get().getStatus() != ParticipantStatus.ACTIVE
+                && conversation.getStatus() == ConversationStatus.BOT_CONSULTING) {
+            ConversationParticipant bot = botParticipant.get();
+            bot.setStatus(ParticipantStatus.ACTIVE);
+            bot.setLeftAt(null);
+            botParticipant = Optional.of(participantRepository.save(bot));
+        }
+
+        if (botParticipant.isEmpty() || botParticipant.get().getStatus() != ParticipantStatus.ACTIVE) {
+            log.info("No active bot participant found for conversation: {}", conversationId);
+            return;
+        }
+        UUID botParticipantId = botParticipant.get().getId();
+
         if (customerContent == null && attachments.isEmpty()) {
             log.warn("Customer message has no readable content for conversation: {}", conversationId);
             if (hasAttachments) {
                 transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                         conversation.getId(),
-                        botParticipant.get().getId(),
+                        botParticipantId,
                         UNSUPPORTED_ATTACHMENT_REPLY
                 ));
             }
@@ -113,7 +123,7 @@ public class ChatBotService {
         if (hasAttachments && attachments.isEmpty()) {
             transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                     conversation.getId(),
-                    botParticipant.get().getId(),
+                    botParticipantId,
                     UNSUPPORTED_ATTACHMENT_REPLY
             ));
             return;
@@ -137,7 +147,7 @@ public class ChatBotService {
             log.error("Failed to get stream response, falling back for conversation: {}", conversationId);
             transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                     conversation.getId(),
-                    botParticipant.get().getId(),
+                    botParticipantId,
                     FALLBACK_REPLY
             ));
             return;
@@ -160,7 +170,7 @@ public class ChatBotService {
                         String chunk = data.path("content").asText("");
                         if (!chunk.isEmpty()) {
                             accumulatedContent.append(chunk);
-                            broadcastChunk(conversationId, botParticipant.get().getId(), chunk);
+                            broadcastChunk(conversationId, botParticipantId, chunk);
                         }
                     } else if ("complete".equals(event)) {
                         handoffRecommended = data.path("handoffRecommended").asBoolean(false);
@@ -174,7 +184,7 @@ public class ChatBotService {
                 } else if (!line.isBlank() && event == null) {
                     // Compatibility with older AI deployments that stream plain text.
                     accumulatedContent.append(line);
-                    broadcastChunk(conversationId, botParticipant.get().getId(), line);
+                    broadcastChunk(conversationId, botParticipantId, line);
                 }
             }
         } catch (Exception ex) {
@@ -189,7 +199,7 @@ public class ChatBotService {
         final String replyToSave = finalReply;
         transactionTemplate.execute(status -> saveAndBroadcastBotMessage(
                 conversation.getId(),
-                botParticipant.get().getId(),
+                botParticipantId,
                 replyToSave,
                 recommendations
         ));

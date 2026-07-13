@@ -262,7 +262,17 @@ public class ChatConversationService {
                 .stream()
                 .anyMatch(this::isStaffParticipant);
 
-        conversation.setStatus(hasActiveStaff ? ConversationStatus.AGENT_HANDLING : ConversationStatus.WAITING_FOR_AGENT);
+        if (hasActiveStaff) {
+            conversation.setStatus(ConversationStatus.AGENT_HANDLING);
+        } else {
+            conversation.setStatus(ConversationStatus.BOT_CONSULTING);
+            chatParticipantService.addOrUpdateParticipant(
+                    conversation,
+                    ParticipantType.BOT,
+                    ChatParticipantService.BOT_REFERENCE_ID,
+                    ParticipantStatus.ACTIVE
+            );
+        }
         conversation.setUpdatedAt(Instant.now());
         Conversation savedConversation = conversationRepository.save(conversation);
 
