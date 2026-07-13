@@ -21,6 +21,5 @@ public class CheckInRequest {
 
     private String faceImage;
 
-    @NotNull(message = "Attendance action must not be null")
     private AttendanceEventType requestedAction;
 }

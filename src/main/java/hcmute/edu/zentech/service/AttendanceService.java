@@ -66,9 +66,7 @@ public class AttendanceService {
         if (accountId == null) {
             throw new RuntimeException("Không tìm thấy thông tin đăng nhập.");
         }
-        if (request.getRequestedAction() != AttendanceEventType.CHECK_IN && request.getRequestedAction() != AttendanceEventType.CHECK_OUT) {
-            throw new RuntimeException("Hành động chấm công không hợp lệ.");
-        }
+
 
         // Kiểm tra kỳ công có bị khóa không
         Optional<PayPeriod> periodOpt = payPeriodRepository.findPeriodActiveAt(LocalDate.now());
@@ -302,12 +300,10 @@ public class AttendanceService {
             }
             expected = expected == AttendanceEventType.CHECK_IN ? AttendanceEventType.CHECK_OUT : AttendanceEventType.CHECK_IN;
         }
-        if (requestedAction != expected) {
-            throw new RuntimeException(expected == AttendanceEventType.CHECK_IN
-                    ? "Ca này đang chờ check-in, không thể check-out."
-                    : "Bạn đã check-in cho ca này; vui lòng check-out khi rời ca.");
-        }
-        return new AttendanceAction(requestedAction, currentShift);
+
+        // Tự động xác định hành động tiếp theo là CHECK_IN hay CHECK_OUT dựa trên lịch sử ca
+        AttendanceEventType actualAction = expected;
+        return new AttendanceAction(actualAction, currentShift);
     }
 
     private boolean isInCaptureRange(LocalTime time, Shift shift) {

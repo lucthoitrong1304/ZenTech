@@ -29,7 +29,7 @@ public class AttendanceController {
         return ResponseEntity.ok(ApiResponse.<EmployeeProfileResponse>builder()
                 .success(true)
                 .data(employee)
-                .message("Check-in thành công. Xin chào " + employee.getFullName())
+                .message("Chấm công thành công. Xin chào " + employee.getFullName())
                 .build());
     }
 
