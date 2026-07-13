@@ -430,7 +430,11 @@ public class AttendanceService {
                     totalRecords++;
                     totalWorkingHours += rec.getWorkingHours();
                     
-                    switch (rec.getStatus()) {
+                    String statusKey = rec.getStatus();
+                    if (statusKey != null && statusKey.startsWith("WFH_")) {
+                        statusKey = statusKey.substring(4);
+                    }
+                    switch (statusKey) {
                         case "ON_TIME":
                             totalOnTime++;
                             break;
@@ -442,6 +446,9 @@ public class AttendanceService {
                             break;
                         case "LATE_AND_EARLY":
                             totalLate++;
+                            totalEarly++;
+                            break;
+                        case "EARLY_AND_EARLY":
                             totalEarly++;
                             break;
                         case "MISSING_CHECK_IN":

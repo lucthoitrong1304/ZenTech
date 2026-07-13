@@ -360,10 +360,10 @@ public class AttendanceCalculator {
             }
         }
 
-        if (activeCheckIn != null) {
-            if (date.equals(LocalDate.now())) {
+        if (date.equals(LocalDate.now()) && !hasShiftEnded(shift, LocalTime.now())) {
+            provisional = true;
+            if (activeCheckIn != null) {
                 workingHours += Math.max(0.0, Duration.between(activeCheckIn, LocalDateTime.now()).toMinutes() / 60.0);
-                provisional = true;
             }
         }
 
@@ -405,7 +405,7 @@ public class AttendanceCalculator {
 
             if (missingCheckOut) {
                 status = effectiveShift.isWfh() ? "WFH_MISSING_CHECK_OUT" : "MISSING_CHECK_OUT";
-            } else if (activeCheckIn != null && date.equals(LocalDate.now()) && !hasShiftEnded(shift, LocalTime.now())) {
+            } else if (provisional) {
                 status = inStatus;
                 if (effectiveShift.isWfh()) {
                     status = "WFH_" + status;
@@ -601,8 +601,12 @@ public class AttendanceCalculator {
     private String combineShiftStatus(String inStatus, String outStatus) {
         boolean late = "LATE".equals(inStatus);
         boolean early = "EARLY_CHECKOUT".equals(outStatus);
+        boolean earlyIn = "EARLY_CHECKIN".equals(inStatus);
         if (late && early) {
             return "LATE_AND_EARLY";
+        }
+        if (earlyIn && early) {
+            return "EARLY_AND_EARLY";
         }
         if (late) {
             return "LATE";
@@ -610,7 +614,7 @@ public class AttendanceCalculator {
         if (early) {
             return "EARLY_CHECKOUT";
         }
-        if ("EARLY_CHECKIN".equals(inStatus)) {
+        if (earlyIn) {
             return "EARLY_CHECKIN";
         }
         if ("LATE_CHECKOUT".equals(outStatus)) {
@@ -620,46 +624,60 @@ public class AttendanceCalculator {
     }
 
     private String combineDayStatus(List<String> statuses) {
-        if (statuses.contains("MISSING_CHECK_OUT")) {
-            return "MISSING_CHECK_OUT";
+        boolean hasWfh = statuses.stream().anyMatch(s -> s != null && s.startsWith("WFH_"));
+        List<String> cleanStatuses = statuses.stream()
+                .map(s -> s != null && s.startsWith("WFH_") ? s.substring(4) : s)
+                .toList();
+
+        if (cleanStatuses.contains("MISSING_CHECK_OUT")) {
+            return hasWfh ? "WFH_MISSING_CHECK_OUT" : "MISSING_CHECK_OUT";
         }
-        if (statuses.stream().allMatch("NOT_STARTED"::equals)) {
+        if (cleanStatuses.contains("MISSING_CHECK_IN")) {
+            return hasWfh ? "WFH_MISSING_CHECK_IN" : "MISSING_CHECK_IN";
+        }
+        if (cleanStatuses.stream().allMatch("NOT_STARTED"::equals)) {
             return "NOT_STARTED";
         }
 
-        List<String> workedStatuses = statuses.stream()
+        List<String> workedStatuses = cleanStatuses.stream()
                 .filter(status -> !"NOT_STARTED".equals(status))
                 .filter(status -> !"ABSENT_EXCUSED".equals(status))
                 .filter(status -> !"ABSENT_UNEXCUSED".equals(status))
                 .toList();
 
         if (workedStatuses.isEmpty()) {
-            if (statuses.contains("ABSENT_UNEXCUSED")) {
+            if (cleanStatuses.contains("ABSENT_UNEXCUSED")) {
                 return "ABSENT_UNEXCUSED";
             }
-            if (statuses.contains("ABSENT_EXCUSED")) {
+            if (cleanStatuses.contains("ABSENT_EXCUSED")) {
                 return "ABSENT_EXCUSED";
             }
             return "NOT_STARTED";
         }
 
+        String result;
         if (workedStatuses.contains("LATE_AND_EARLY")
                 || (workedStatuses.contains("LATE") && workedStatuses.contains("EARLY_CHECKOUT"))) {
-            return "LATE_AND_EARLY";
+            result = "LATE_AND_EARLY";
+        } else if (workedStatuses.contains("EARLY_AND_EARLY")
+                || (workedStatuses.contains("EARLY_CHECKIN") && workedStatuses.contains("EARLY_CHECKOUT"))) {
+            result = "EARLY_AND_EARLY";
+        } else if (workedStatuses.contains("LATE")) {
+            result = "LATE";
+        } else if (workedStatuses.contains("EARLY_CHECKOUT")) {
+            result = "EARLY_CHECKOUT";
+        } else if (workedStatuses.contains("EARLY_CHECKIN")) {
+            result = "EARLY_CHECKIN";
+        } else if (workedStatuses.contains("LATE_CHECKOUT")) {
+            result = "LATE_CHECKOUT";
+        } else {
+            result = "ON_TIME";
         }
-        if (workedStatuses.contains("LATE")) {
-            return "LATE";
+
+        if (hasWfh) {
+            return "WFH_" + result;
         }
-        if (workedStatuses.contains("EARLY_CHECKOUT")) {
-            return "EARLY_CHECKOUT";
-        }
-        if (workedStatuses.contains("EARLY_CHECKIN")) {
-            return "EARLY_CHECKIN";
-        }
-        if (workedStatuses.contains("LATE_CHECKOUT")) {
-            return "LATE_CHECKOUT";
-        }
-        return "ON_TIME";
+        return result;
     }
 
     private int defaultInt(Integer value, int fallback) {
