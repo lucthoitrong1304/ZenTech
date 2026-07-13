@@ -42,6 +42,7 @@ public class AttendanceService {
     private final AdminActivityLogService adminActivityLogService;
     private final AttendanceLocationPolicyService attendanceLocationPolicyService;
     private final LeaveRequestRepository leaveRequestRepository;
+    private final AttendanceReportPreferenceRepository attendanceReportPreferenceRepository;
 
 
     @Value("${zentech.attendance.face-match-threshold:0.5}")
@@ -65,6 +66,7 @@ public class AttendanceService {
         if (accountId == null) {
             throw new RuntimeException("Không tìm thấy thông tin đăng nhập.");
         }
+
 
         // Kiểm tra kỳ công có bị khóa không
         Optional<PayPeriod> periodOpt = payPeriodRepository.findPeriodActiveAt(LocalDate.now());
@@ -93,7 +95,7 @@ public class AttendanceService {
         List<AttendanceEvent> todayEvents = attendanceEventRepository
                 .findByEmployeeIdAndTimestampBetweenOrderByTimestampAsc(employee.getId(), startOfDay, endOfDay);
         
-        AttendanceAction attendanceAction = resolveAttendanceAction(employee, now, todayEvents);
+        AttendanceAction attendanceAction = resolveAttendanceAction(employee, now, todayEvents, request.getRequestedAction());
         AttendanceEventType type = attendanceAction.type();
         AttendanceCalculator.EffectiveShift selectedShift = attendanceAction.shift();
 
@@ -250,7 +252,8 @@ public class AttendanceService {
     private AttendanceAction resolveAttendanceAction(
             Employee employee,
             LocalDateTime timestamp,
-            List<AttendanceEvent> todayEvents
+            List<AttendanceEvent> todayEvents,
+            AttendanceEventType requestedAction
     ) {
         if (!todayEvents.isEmpty()) {
             AttendanceEvent lastEvent = todayEvents.stream().max(java.util.Comparator.comparing(AttendanceEvent::getTimestamp)).orElse(null);
@@ -290,22 +293,17 @@ public class AttendanceService {
                 .sorted(java.util.Comparator.comparing(AttendanceEvent::getTimestamp))
                 .toList();
 
-        long eventCount = 0;
-        AttendanceEvent lastAdded = null;
-        for (AttendanceEvent e : shiftEvents) {
-            if (lastAdded == null) {
-                lastAdded = e;
-                eventCount++;
-            } else {
-                if (java.time.Duration.between(lastAdded.getTimestamp(), e.getTimestamp()).abs().toSeconds() > 10) {
-                    lastAdded = e;
-                    eventCount++;
-                }
+        AttendanceEventType expected = AttendanceEventType.CHECK_IN;
+        for (AttendanceEvent event : shiftEvents) {
+            if (event.getEventType() != expected) {
+                throw new RuntimeException("Dữ liệu chấm công của ca đang sai thứ tự. Vui lòng liên hệ quản lý để điều chỉnh.");
             }
+            expected = expected == AttendanceEventType.CHECK_IN ? AttendanceEventType.CHECK_OUT : AttendanceEventType.CHECK_IN;
         }
 
-        AttendanceEventType type = (eventCount % 2 == 0) ? AttendanceEventType.CHECK_IN : AttendanceEventType.CHECK_OUT;
-        return new AttendanceAction(type, currentShift);
+        // Tự động xác định hành động tiếp theo là CHECK_IN hay CHECK_OUT dựa trên lịch sử ca
+        AttendanceEventType actualAction = expected;
+        return new AttendanceAction(actualAction, currentShift);
     }
 
     private boolean isInCaptureRange(LocalTime time, Shift shift) {
@@ -470,35 +468,86 @@ public class AttendanceService {
             return r1.getEmployeeName().compareTo(r2.getEmployeeName());
         });
 
-        int totalElements = allCalculatedRecords.size();
-        int fromIndex = page * size;
+        NavigableMap<LocalDate, List<AttendanceRecordResponse>> recordsByDate = allCalculatedRecords.stream()
+                .collect(Collectors.groupingBy(AttendanceRecordResponse::getWorkDate, TreeMap::new, Collectors.toList()));
+        List<AttendanceDayGroupResponse> allDays = recordsByDate.descendingMap().entrySet().stream()
+                .map(entry -> AttendanceDayGroupResponse.builder()
+                        .workDate(entry.getKey()).records(entry.getValue())
+                        .summary(buildDaySummary(entry.getValue())).build())
+                .toList();
+        int totalElements = allDays.size();
+        int fromIndex = Math.min(page * size, totalElements);
         int toIndex = Math.min(fromIndex + size, totalElements);
+        List<AttendanceDayGroupResponse> paginatedList = allDays.subList(fromIndex, toIndex);
+        Page<AttendanceDayGroupResponse> pageResult = new PageImpl<>(paginatedList, PageRequest.of(page, size), totalElements);
+        PageResponse<AttendanceDayGroupResponse> pageResponse = PageResponse.from(pageResult, paginatedList);
 
-        List<AttendanceRecordResponse> paginatedList = new ArrayList<>();
-        if (fromIndex < totalElements) {
-            paginatedList = allCalculatedRecords.subList(fromIndex, toIndex);
-        }
-
-        Page<AttendanceRecordResponse> pageResult = 
-                new PageImpl<>(paginatedList, PageRequest.of(page, size), totalElements);
-
-        PageResponse<AttendanceRecordResponse> pageResponse = PageResponse.from(pageResult, paginatedList);
-
+        List<AttendanceShiftBreakdownResponse> allShifts = allCalculatedRecords.stream()
+                .flatMap(record -> record.getShiftBreakdowns().stream()).toList();
         AttendanceStatisticsResponse statisticsResponse = AttendanceStatisticsResponse.builder()
-                .totalRecords(totalRecords)
-                .totalOnTime(totalOnTime)
-                .totalLate(totalLate)
-                .totalEarly(totalEarly)
-                .totalWorkingHours(totalWorkingHours)
-                .totalMissingCheckIn(totalMissingCheckIn)
-                .totalMissingCheckOut(totalMissingCheckOut)
-                .totalAbsent(totalAbsent)
-                .totalLeave(totalLeave)
+                .totalRecords(allShifts.size()).totalEmployees(allCalculatedRecords.stream().map(AttendanceRecordResponse::getEmployeeId).distinct().count())
+                .totalShifts(allShifts.size())
+                .totalOnTime(allShifts.stream().filter(AttendanceShiftBreakdownResponse::isOnTime).count())
+                .earlyArrival(allShifts.stream().filter(AttendanceShiftBreakdownResponse::isEarlyArrival).count())
+                .totalLate(allShifts.stream().filter(AttendanceShiftBreakdownResponse::isLate).count())
+                .totalEarly(allShifts.stream().filter(AttendanceShiftBreakdownResponse::isEarlyCheckout).count())
+                .earlyCheckout(allShifts.stream().filter(AttendanceShiftBreakdownResponse::isEarlyCheckout).count())
+                .workFromHome(allShifts.stream().filter(AttendanceShiftBreakdownResponse::isWfh).count())
+                .notStarted(allShifts.stream().filter(s -> "NOT_STARTED".equals(s.getStatus())).count())
+                .provisional(allShifts.stream().filter(AttendanceShiftBreakdownResponse::isProvisional).count())
+                .totalWorkingHours(allShifts.stream().mapToDouble(AttendanceShiftBreakdownResponse::getWorkingHours).sum())
+                .totalMissingCheckIn(allShifts.stream().filter(s -> "MISSING_CHECK_IN".equals(s.getStatus())).count())
+                .totalMissingCheckOut(allShifts.stream().filter(s -> s.getStatus().endsWith("MISSING_CHECK_OUT")).count())
+                .totalAbsent(allShifts.stream().filter(s -> "ABSENT_UNEXCUSED".equals(s.getStatus())).count())
+                .totalLeave(allShifts.stream().filter(AttendanceShiftBreakdownResponse::isLeave).count())
                 .build();
 
         return AttendanceReportResponse.builder()
                 .statistics(statisticsResponse)
-                .records(pageResponse)
+                .days(pageResponse)
                 .build();
+    }
+
+    private static final List<String> DEFAULT_REPORT_METRICS = List.of("onTime", "earlyArrival", "late", "earlyCheckout", "leave", "workFromHome", "absent", "missingCheckIn", "missingCheckOut", "notStarted");
+
+    @Transactional(readOnly = true)
+    public AttendanceReportPreferenceResponse getReportPreference() {
+        UUID accountId = SecurityContextUtils.getCurrentUserId();
+        if (accountId == null) throw new RuntimeException("Không tìm thấy thông tin đăng nhập.");
+        return attendanceReportPreferenceRepository.findById(accountId)
+                .map(p -> AttendanceReportPreferenceResponse.builder().visibleMetrics(Arrays.asList(p.getVisibleMetrics().split(","))).updatedAt(p.getUpdatedAt()).build())
+                .orElseGet(() -> AttendanceReportPreferenceResponse.builder().visibleMetrics(DEFAULT_REPORT_METRICS).build());
+    }
+
+    @Transactional
+    public AttendanceReportPreferenceResponse saveReportPreference(List<String> metrics) {
+        UUID accountId = SecurityContextUtils.getCurrentUserId();
+        if (accountId == null) throw new RuntimeException("Không tìm thấy thông tin đăng nhập.");
+        List<String> normalized = metrics == null ? List.of() : metrics.stream().filter(DEFAULT_REPORT_METRICS::contains).distinct().toList();
+        if (normalized.isEmpty()) throw new RuntimeException("Cần hiển thị tối thiểu một chỉ số.");
+        AttendanceReportPreference preference = new AttendanceReportPreference(accountId, String.join(",", normalized), LocalDateTime.now());
+        attendanceReportPreferenceRepository.save(preference);
+        return AttendanceReportPreferenceResponse.builder().visibleMetrics(normalized).updatedAt(preference.getUpdatedAt()).build();
+    }
+
+    private AttendanceDaySummaryResponse buildDaySummary(List<AttendanceRecordResponse> records) {
+        Set<String> scheduledShiftKeys = new HashSet<>();
+        long onTime = 0, earlyArrival = 0, late = 0, earlyCheckout = 0, leave = 0, wfh = 0, absent = 0, missingIn = 0, missingOut = 0, notStarted = 0, provisional = 0;
+        double hours = 0;
+        for (AttendanceRecordResponse record : records) for (AttendanceShiftBreakdownResponse shift : record.getShiftBreakdowns()) {
+            scheduledShiftKeys.add(shift.getShiftId() != null ? shift.getShiftId().toString() : shift.getShiftName());
+            hours += shift.getWorkingHours();
+            if (shift.isOnTime()) onTime++; if (shift.isEarlyArrival()) earlyArrival++; if (shift.isLate()) late++; if (shift.isEarlyCheckout()) earlyCheckout++;
+            if (shift.isLeave()) leave++; if (shift.isWfh()) wfh++; if (shift.isProvisional()) provisional++;
+            String status = shift.getStatus();
+            if ("ABSENT_UNEXCUSED".equals(status)) absent++;
+            if ("MISSING_CHECK_IN".equals(status)) missingIn++;
+            if (status.endsWith("MISSING_CHECK_OUT")) missingOut++;
+            if ("NOT_STARTED".equals(status)) notStarted++;
+        }
+        return AttendanceDaySummaryResponse.builder().totalEmployees(records.size()).totalShifts(scheduledShiftKeys.size()).onTime(onTime)
+                .earlyArrival(earlyArrival).late(late).earlyCheckout(earlyCheckout).leave(leave).workFromHome(wfh)
+                .absent(absent).missingCheckIn(missingIn).missingCheckOut(missingOut).notStarted(notStarted)
+                .provisional(provisional).totalWorkingHours(hours).build();
     }
 }

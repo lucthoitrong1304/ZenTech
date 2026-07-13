@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.util.List;
+import hcmute.edu.zentech.model.AttendanceEventType;
 
 @Data
 public class CheckInRequest {
@@ -19,4 +20,6 @@ public class CheckInRequest {
     private Double accuracyMeters;
 
     private String faceImage;
+
+    private AttendanceEventType requestedAction;
 }

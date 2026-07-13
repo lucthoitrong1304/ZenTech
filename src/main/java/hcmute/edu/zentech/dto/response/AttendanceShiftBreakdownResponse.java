@@ -27,6 +27,11 @@ public class AttendanceShiftBreakdownResponse {
     private long lateMinutes;
     private long earlyMinutes;
     private String status;
+    private boolean earlyArrival;
+    private boolean onTime;
+    private boolean late;
+    private boolean earlyCheckout;
+    private boolean inProgress;
     @JsonProperty("isProvisional")
     private boolean isProvisional;
     @JsonProperty("isLeave")

@@ -11,5 +11,5 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class AttendanceReportResponse {
     private AttendanceStatisticsResponse statistics;
-    private PageResponse<AttendanceRecordResponse> records;
+    private PageResponse<AttendanceDayGroupResponse> days;
 }
