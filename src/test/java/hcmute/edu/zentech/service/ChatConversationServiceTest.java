@@ -362,7 +362,7 @@ class ChatConversationServiceTest {
         verify(chatMessageAttachmentRepository).deleteByConversationId(conversationId);
         verify(chatMessageRecommendationRepository).deleteByConversationId(conversationId);
         verify(chatMessageRepository).deleteByConversationId(conversationId);
-        verify(participantRepository).deleteByConversationId(conversationId);
+        verify(participantRepository).deleteAll(any());
         verify(conversationRepository).delete(conversation);
     }
 

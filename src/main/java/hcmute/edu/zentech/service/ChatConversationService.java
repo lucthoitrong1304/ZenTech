@@ -440,7 +440,8 @@ public class ChatConversationService {
         Conversation conversation = getConversation(conversationId);
         chatParticipantService.ensureCustomerOwnsConversation(conversation, customer.getId());
 
-        List<UUID> notifiedAccountIds = participantRepository.findByConversation_Id(conversationId).stream()
+        List<ConversationParticipant> participants = participantRepository.findByConversation_Id(conversationId);
+        List<UUID> notifiedAccountIds = participants.stream()
                 .filter(this::isStaffParticipant)
                 .map(participant -> chatParticipantService.resolveAccountId(participant.getUserType(), participant.getReferenceId()))
                 .flatMap(Optional::stream)
@@ -461,7 +462,7 @@ public class ChatConversationService {
         chatMessageRecommendationRepository.deleteByConversationId(conversationId);
         chatMessageRepository.deleteByConversationId(conversationId);
         conversationReadStateService.deleteByConversationId(conversationId);
-        participantRepository.deleteByConversationId(conversationId);
+        participantRepository.deleteAll(participants);
         conversationRepository.delete(conversation);
         sendAfterCommit(() -> {
             messagingTemplate.convertAndSend("/topic/conversations." + conversationId, deletedEvent);
