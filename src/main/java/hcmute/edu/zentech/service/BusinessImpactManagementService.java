@@ -20,8 +20,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -135,8 +137,9 @@ public class BusinessImpactManagementService {
             }
 
             if (daysWithData > 0 && hasDirectBusinessEvidence) {
-                expectedOrders = totalHistoricalOrders / daysWithData;
-                expectedRevenue = totalHistoricalRevenue / daysWithData;
+                double wDow = getDayOfWeekWeight(start);
+                expectedOrders = (int) Math.round((totalHistoricalOrders / (double) daysWithData) * wDow);
+                expectedRevenue = ((totalHistoricalRevenue / daysWithData) * wDow);
             } else if (affectedUsers > 0) {
                 // Fallback nếu chưa có dữ liệu lịch sử (active users * conversion rate * AOV)
                 double conversionRate = 0.05; // 5% conversion rate
@@ -531,5 +534,13 @@ public class BusinessImpactManagementService {
             return imageUrl;
         }
         return r2StorageService.getPresignedGetUrl(imageUrl);
+    }
+
+    private double getDayOfWeekWeight(Instant timestamp) {
+        if (timestamp == null) {
+            return 1.0;
+        }
+        DayOfWeek dow = timestamp.atZone(ZoneId.of("Asia/Ho_Chi_Minh")).getDayOfWeek();
+        return (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) ? 1.35 : 1.0;
     }
 }
